@@ -13,6 +13,18 @@ const PRESETS = [
   ["gemini-pro-latest", "최신 Pro"],
   ["gemini-flash-latest", "최신 Flash"],
 ];
+// API가 주는 막힘 사유를 사람 말로. 끌 수 있는 것과 없는 것을 갈라서 보여 준다.
+const REASONS = {
+  SAFETY: "안전 필터가 막음 (설정 → 고급 → 안전 필터가 OFF인지 확인)",
+  PROHIBITED_CONTENT: "Google이 끌 수 없게 막는 내용",
+  BLOCKLIST: "Google 금지어 목록에 걸림 (끌 수 없음)",
+  SPII: "민감한 개인정보로 보여 막힘 (끌 수 없음)",
+  IMAGE_SAFETY: "이미지 안전 문제로 막힘",
+  RECITATION: "남의 글을 그대로 옮긴 것으로 보여 멈춤",
+  OTHER: "Google이 이유를 알려 주지 않음",
+  LANGUAGE: "지원하지 않는 언어",
+};
+const why = (code) => (REASONS[code] ? `${code} — ${REASONS[code]}` : code);
 let loadedModels = []; // 설정에서 ‘전체 목록 불러오기’ 한 뒤 채워짐
 
 function modelOptions(cur) {
@@ -180,7 +192,8 @@ async function ask() {
         let j;
         try { j = JSON.parse(line.slice(5)); } catch { continue; }
         if (j.usageMetadata) usage = j.usageMetadata;
-        if (j.promptFeedback?.blockReason) blocked = `질문이 막힘: ${j.promptFeedback.blockReason}`;
+        if (j.promptFeedback?.blockReason)
+          blocked = `질문이 막힘: ${why(j.promptFeedback.blockReason)}${j.promptFeedback.blockReasonMessage ? " · " + j.promptFeedback.blockReasonMessage : ""}`;
         const c = j.candidates?.[0];
         const t = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
         if (t) {
@@ -189,7 +202,7 @@ async function ask() {
           follow();
         }
         if (c?.finishReason && !["STOP", "MAX_TOKENS", "FINISH_REASON_UNSPECIFIED"].includes(c.finishReason))
-          blocked = `답이 멈춤: ${c.finishReason}`;
+          blocked = `답이 멈춤: ${why(c.finishReason)}`;
         if (c?.finishReason === "MAX_TOKENS") reply.cut = true;
       }
     }
