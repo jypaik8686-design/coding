@@ -56,7 +56,7 @@ main {
 /* 하단 탭 — 손가락 닿는 높이 44px 이상 */
 .tabs {
   position: fixed; inset: auto 0 0 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(2, 1fr);
+  display: grid; grid-template-columns: repeat(3, 1fr);
   padding-bottom: env(safe-area-inset-bottom);
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: blur(12px);
@@ -136,3 +136,14 @@ a { color: var(--accent); }
 .toast { position: fixed; left: 16px; right: 16px; z-index: 20; bottom: calc(var(--tabs) + env(safe-area-inset-bottom) + 76px);
   background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: 12px; font-size: 14px; text-align: center; }
 .toast[hidden] { display: none; }
+
+input[type="number"] { width: 100%; padding: 13px 14px; font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+.sfgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sf { display: grid; gap: 4px; font-size: 13px; color: var(--dim); }
+.meter { height: 12px; border-radius: 6px; background: var(--card); border: 1px solid var(--line); overflow: hidden; }
+.meter > div { height: 100%; background: var(--accent); }
+.tablewrap { overflow-x: auto; }
+table.ledger { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.ledger th { text-align: left; font-weight: 500; color: var(--dim); border-bottom: 1px solid var(--line); padding: 4px 6px; white-space: nowrap; }
+.ledger td { border-bottom: 1px dashed var(--line); padding: 6px; white-space: nowrap; }
+.ledger td.md { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
