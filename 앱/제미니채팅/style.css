@@ -147,3 +147,7 @@ table.ledger { width: 100%; border-collapse: collapse; font-size: 12.5px; font-v
 .ledger th { text-align: left; font-weight: 500; color: var(--dim); border-bottom: 1px solid var(--line); padding: 4px 6px; white-space: nowrap; }
 .ledger td { border-bottom: 1px dashed var(--line); padding: 6px; white-space: nowrap; }
 .ledger td.md { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+
+details.adv { margin: 16px 0 4px; border: 1px solid var(--line); border-radius: var(--radius); padding: 0 14px 14px; background: var(--card); }
+details.adv > summary { min-height: 46px; display: flex; align-items: center; cursor: pointer; font-weight: 600; font-size: 15px; }
+details.adv input[type="text"], details.adv input[type="number"] { background: var(--bg); }

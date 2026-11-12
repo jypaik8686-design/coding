@@ -279,11 +279,6 @@ const SCREENS = {
                value="${esc(s.apiKey)}" placeholder="AIza…">
         <p class="hint">이 기기 브라우저에만 저장됨. 내보내기 파일에는 안 들어감. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio</a>에서 받기.</p>
 
-        <h2>모델</h2>
-        <input id="model" type="text" list="models" autocomplete="off" spellcheck="false" value="${esc(s.model)}">
-        <datalist id="models"></datalist>
-        <button class="ghost" id="loadModels" type="button">모델 목록 불러오기</button>
-
         <h2>고정 시스템 프롬프트 <span class="hint" id="sysLen">${n(s.system.length)}자</span></h2>
         <textarea id="system" rows="6" placeholder="역할, 말투, 규칙… 길이 제한 없음">${esc(s.system)}</textarea>
         <p class="hint">맨 위에 고정. 대화 도중 고치면 앞부분이 달라져 캐시가 새로 쌓임.</p>
@@ -292,15 +287,27 @@ const SCREENS = {
         <textarea id="lexicon" rows="8" placeholder="인물·세계관·말투 사전. 요약 말고 사전으로">${esc(s.lexicon)}</textarea>
         <p class="hint">시스템 프롬프트 바로 뒤에 통째로 같이 감.</p>
 
-        <h2>한 번 출력 한도 (토큰)</h2>
-        <input id="maxTok" type="number" inputmode="numeric" min="1" step="1" value="${esc(s.maxTok)}">
+        <details class="adv">
+          <summary>고급 설정 — 안 건드려도 됨</summary>
 
-        <h2>온도 <span id="tempVal" class="hint">${s.temperature}</span></h2>
-        <input id="temperature" type="range" min="0" max="2" step="0.1" value="${s.temperature}">
+          <h2>모델</h2>
+          <input id="model" type="text" list="models" autocomplete="off" spellcheck="false" value="${esc(s.model)}">
+          <datalist id="models"></datalist>
+          <button class="ghost" id="loadModels" type="button">모델 목록 불러오기</button>
+          <p class="hint">기본값 gemini-flash-latest는 늘 최신 Flash로 이어짐. 바꾸고 싶을 때만.</p>
 
-        <h2>안전 필터</h2>
-        <div class="sfgrid">${CATS.map(sel).join("")}</div>
-        <p class="hint">OFF를 서버가 거부하면 자동으로 NONE → HIGH 순으로 내려 다시 보냄. 아동 안전 등 핵심 보호는 Google이 늘 막고 끌 수 없음.</p>
+          <h2>온도 <span id="tempVal" class="hint">${s.temperature}</span></h2>
+          <input id="temperature" type="range" min="0" max="2" step="0.1" value="${s.temperature}">
+          <p class="hint">답이 얼마나 제멋대로인지. 낮을수록(0~0.5) 늘 비슷하고 정확한 답, 높을수록(1.2~2) 매번 달라지고 엉뚱해짐. 모르겠으면 1 그대로.</p>
+
+          <h2>한 번 출력 한도 (토큰)</h2>
+          <input id="maxTok" type="number" inputmode="numeric" min="1" step="1" value="${esc(s.maxTok)}">
+          <p class="hint">한 번에 쓸 수 있는 답의 최대 길이. 한글은 대략 한 글자에 1~2토큰. 답이 중간에 잘리면 올리기.</p>
+
+          <h2>안전 필터</h2>
+          <div class="sfgrid">${CATS.map(sel).join("")}</div>
+          <p class="hint">OFF를 서버가 거부하면 자동으로 NONE → HIGH 순으로 내려 다시 보냄. 아동 안전 등 핵심 보호는 Google이 늘 막고 끌 수 없음.</p>
+        </details>
 
         <h2 style="margin-top:12px">대화</h2>
         <p class="hint">${store.data.messages.length}개 말이 이 기기에만 저장돼 있음.</p>
