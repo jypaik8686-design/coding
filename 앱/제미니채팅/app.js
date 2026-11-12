@@ -5,6 +5,26 @@ const KEY = "제미니채팅/v1";
 const API = "https://generativelanguage.googleapis.com/v1beta";
 const LEDGER_MAX = 100;
 
+// 고르기만 하면 되는 모델들. 이름은 models API 목록에서 확인한 것(2026-11-12).
+const PRESETS = [
+  ["gemini-4-argon", "Gemini 4 Argon (아르곤)"],
+  ["gemini-4-carbon", "Gemini 4 Carbon (카본)"],
+  ["gemini-3.8-flash", "Gemini 3.8 Flash"],
+  ["gemini-pro-latest", "최신 Pro"],
+  ["gemini-flash-latest", "최신 Flash"],
+];
+let loadedModels = []; // 설정에서 ‘전체 목록 불러오기’ 한 뒤 채워짐
+
+function modelOptions(cur) {
+  const known = new Set(PRESETS.map(([v]) => v));
+  const rest = loadedModels.filter((m) => !known.has(m));
+  const opt = (v, label) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(label)}</option>`;
+  let h = PRESETS.map(([v, l]) => opt(v, l)).join("");
+  if (cur && !known.has(cur) && !rest.includes(cur)) h += opt(cur, `직접 입력: ${cur}`);
+  if (rest.length) h += `<optgroup label="전체 목록">${rest.map((m) => opt(m, m)).join("")}</optgroup>`;
+  return h;
+}
+
 // 안전 필터 4칸 + 시민 무결성(늘 설정값 중 가장 느슨한 쪽이 아니라 OFF로 시작해 같은 단계로 내림).
 // 아동 안전 같은 핵심 보호는 API가 늘 막고 끌 수 없다.
 // https://ai.google.dev/gemini-api/docs/safety-settings (2026-11-12 확인)
@@ -27,7 +47,7 @@ const SHAPE = () => ({
   ledger: [],
   settings: {
     apiKey: "",
-    model: "gemini-flash-latest",
+    model: "gemini-4-argon",
     system: "",
     lexicon: "",
     temperature: 1,
@@ -279,6 +299,10 @@ const SCREENS = {
                value="${esc(s.apiKey)}" placeholder="AIza…">
         <p class="hint">이 기기 브라우저에만 저장됨. 내보내기 파일에는 안 들어감. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio</a>에서 받기.</p>
 
+        <h2>모델</h2>
+        <select id="modelPick">${modelOptions(s.model)}</select>
+        <p class="hint">아르곤·카본은 새로 나온 모델. 열쇠와 같은 계정에서 쓸 수 있어야 함. 안 되면 대화 칸에 오류가 뜸.</p>
+
         <h2>고정 시스템 프롬프트 <span class="hint" id="sysLen">${n(s.system.length)}자</span></h2>
         <textarea id="system" rows="6" placeholder="역할, 말투, 규칙… 길이 제한 없음">${esc(s.system)}</textarea>
         <p class="hint">맨 위에 고정. 대화 도중 고치면 앞부분이 달라져 캐시가 새로 쌓임.</p>
@@ -290,11 +314,11 @@ const SCREENS = {
         <details class="adv">
           <summary>고급 설정 — 안 건드려도 됨</summary>
 
-          <h2>모델</h2>
+          <h2>모델 이름 직접 입력</h2>
           <input id="model" type="text" list="models" autocomplete="off" spellcheck="false" value="${esc(s.model)}">
           <datalist id="models"></datalist>
-          <button class="ghost" id="loadModels" type="button">모델 목록 불러오기</button>
-          <p class="hint">기본값 gemini-flash-latest는 늘 최신 Flash로 이어짐. 바꾸고 싶을 때만.</p>
+          <button class="ghost" id="loadModels" type="button">전체 모델 목록 불러오기</button>
+          <p class="hint">위 모델 칸에 없는 모델을 쓰고 싶을 때만. 불러오면 위 칸에도 전부 들어감.</p>
 
           <h2>온도 <span id="tempVal" class="hint">${s.temperature}</span></h2>
           <input id="temperature" type="range" min="0" max="2" step="0.1" value="${s.temperature}">
@@ -403,7 +427,10 @@ function wireSettings() {
     store.saveQuiet();
   });
   bind("apiKey", "apiKey");
-  bind("model", "model");
+  const pick = document.getElementById("modelPick");
+  const text = document.getElementById("model");
+  pick.addEventListener("change", () => { s.model = pick.value; text.value = s.model; store.saveQuiet(); });
+  text.addEventListener("input", () => { s.model = text.value; pick.innerHTML = modelOptions(s.model.trim()); store.saveQuiet(); });
   bind("system", "system", { after: (v) => (document.getElementById("sysLen").textContent = n(v.length) + "자") });
   bind("lexicon", "lexicon", { after: (v) => (document.getElementById("lexLen").textContent = n(v.length) + "자") });
   bind("temperature", "temperature", { num: true, after: (v) => (document.getElementById("tempVal").textContent = v) });
@@ -427,10 +454,12 @@ function wireSettings() {
       const names = (j.models || [])
         .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
         .map((m) => m.name.replace(/^models\//, ""));
+      loadedModels = names;
       document.getElementById("models").innerHTML = names.map((x) => `<option value="${esc(x)}">`).join("");
-      toast(`${names.length}개 — 모델 칸을 누르면 고를 수 있음`);
+      pick.innerHTML = modelOptions(s.model.trim());
+      toast(`${names.length}개 — 위 모델 칸에서 고를 수 있음`);
     } catch (err) { toast("못 불러옴: " + err.message); }
-    btn.disabled = false; btn.textContent = "모델 목록 불러오기";
+    btn.disabled = false; btn.textContent = "전체 모델 목록 불러오기";
   });
 
   document.getElementById("export").addEventListener("click", () => {
