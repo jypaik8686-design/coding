@@ -21,10 +21,15 @@ description: 길고 단순한 일을 제미니 API에 넘겨 싸게 처리할 �
 ## 준비
 
 ```bash
-export GEMINI_API_KEY=...   # https://aistudio.google.com/apikey
+python3 tools/ready.py     # '제미니' 줄이 ✓ 인지 본다
 ```
 
-키가 없으면 도구가 어디서 받는지 알려 주고 멈춘다. 키를 저장소에 적지 않는다.
+✗이면 열쇠가 없는 것이다. 열쇠는 저장소 밖에 둔다. 둘 중 하나:
+
+1. **클라우드 환경의 네트워크 비밀** — 호스트 `generativelanguage.googleapis.com`, 헤더 `x-goog-api-key`. 한 번 넣으면 그 환경의 모든 세션에서 요청에 자동으로 끼워진다. 도구도 세션도 열쇠 값을 보지 못한다.
+2. **환경변수 `GEMINI_API_KEY`** — 자기 컴퓨터에서 돌릴 때.
+
+열쇠를 대화창에 붙여 달라고 하지 않는다. 저장소에 적지 않는다.
 
 ## 쓰기
 

@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """길고 단순한 일을 제미니에 넘긴다. 결과만 받아 온다. 설치할 것 없음(표준 라이브러리).
 
-  export GEMINI_API_KEY=...            # https://aistudio.google.com/apikey
+열쇠는 둘 중 하나로 준다. 저장소에는 적지 않는다.
+  1) 클라우드 환경의 네트워크 비밀: 호스트 generativelanguage.googleapis.com, 헤더 x-goog-api-key
+     → 그 환경의 모든 세션에서 요청에 자동으로 끼워진다. 이 도구는 열쇠를 몰라도 된다.
+  2) 환경변수: export GEMINI_API_KEY=...   (https://aistudio.google.com/apikey)
+
   python3 tools/gemini.py "이 문구 영어로"
   cat 긴글.md | python3 tools/gemini.py --시스템 "한 줄 요약만"
   python3 tools/gemini.py --파일 명세.md "여기서 빠진 화면 찾아"
@@ -25,15 +29,47 @@ HOST = "https://generativelanguage.googleapis.com/v1beta"
 CA = ["SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"]
 
 
-def 열쇠() -> str:
+열쇠안내 = (
+    "제미니 열쇠가 없거나 틀림. 둘 중 하나로 넣는다 (저장소에는 적지 않는다):\n"
+    "  1) 클라우드 환경 설정 → 네트워크 비밀: 호스트 generativelanguage.googleapis.com, 헤더 x-goog-api-key\n"
+    "  2) 환경변수 GEMINI_API_KEY  (열쇠는 https://aistudio.google.com/apikey 에서 받는다)"
+)
+
+
+def 열쇠() -> str | None:
+    """환경변수에 있으면 그것. 없으면 None — 환경의 네트워크 비밀이 요청에 끼워 주는지는 불러 봐야 안다."""
     for n in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
         if os.environ.get(n):
             return os.environ[n]
-    sys.exit(
-        "GEMINI_API_KEY 없음.\n"
-        "  https://aistudio.google.com/apikey 에서 받아서\n"
-        "  export GEMINI_API_KEY=...  하고 다시."
-    )
+    return None
+
+
+def 머리(키: str | None) -> dict:
+    h = {"Content-Type": "application/json"}
+    if 키:
+        h["x-goog-api-key"] = 키
+    return h
+
+
+def 열쇠문제(code: int, 몸: str) -> bool:
+    return code in (401, 403) or (code == 400 and "API key" in 몸)
+
+
+def 점검() -> tuple[bool, str, str]:
+    """돈 안 드는 호출(모델 목록 1개)로 열쇠와 연결을 확인한다. (되는가, 상태, 고치는 법)"""
+    어디서 = "환경변수" if 열쇠() else "환경의 네트워크 비밀"
+    req = urllib.request.Request(f"{HOST}/models?pageSize=1", headers=머리(열쇠()))
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=ssl맥락()) as r:
+            이름 = (json.loads(r.read().decode("utf-8")).get("models") or [{}])[0].get("name", "?")
+            return True, f"열쇠 통함 ({어디서}) · 목록 첫 모델 {이름}", ""
+    except urllib.error.HTTPError as e:
+        몸 = e.read().decode("utf-8", "replace")
+        if 열쇠문제(e.code, 몸):
+            return False, f"호스트에는 닿음, 열쇠 없거나 틀림 (HTTP {e.code})", 열쇠안내
+        return False, f"HTTP {e.code} {몸[:120]}", ""
+    except urllib.error.URLError as e:
+        return False, f"호스트에 못 닿음: {e.reason}", "환경의 네트워크 설정에서 generativelanguage.googleapis.com 이 허용돼 있는지 본다"
 
 
 def ssl맥락() -> ssl.SSLContext:
@@ -48,7 +84,7 @@ def ssl맥락() -> ssl.SSLContext:
     return ssl.create_default_context()
 
 
-def 부르기(모델: str, 프롬프트: str, 시스템: str | None, 온도: float, 키: str) -> dict:
+def 부르기(모델: str, 프롬프트: str, 시스템: str | None, 온도: float, 키: str | None) -> dict:
     몸통: dict = {
         "contents": [{"role": "user", "parts": [{"text": 프롬프트}]}],
         "generationConfig": {"temperature": 온도},
@@ -59,7 +95,7 @@ def 부르기(모델: str, 프롬프트: str, 시스템: str | None, 온도: flo
     req = urllib.request.Request(
         f"{HOST}/models/{모델}:generateContent",
         data=json.dumps(몸통).encode("utf-8"),
-        headers={"Content-Type": "application/json", "x-goog-api-key": 키},
+        headers=머리(키),
         method="POST",
     )
     맥락 = ssl맥락()
@@ -71,6 +107,11 @@ def 부르기(모델: str, 프롬프트: str, 시스템: str | None, 온도: flo
         except urllib.error.HTTPError as e:
             몸 = e.read().decode("utf-8", "replace")[:400]
             마지막 = f"HTTP {e.code} {몸}"
+            if 열쇠문제(e.code, 몸):
+                sys.exit(f"{열쇠안내}\n(받은 답: HTTP {e.code})")
+            if e.code == 404:
+                sys.exit(f"모델 이름이 내려갔음: {모델}\n"
+                         "https://ai.google.dev/gemini-api/docs/models 에서 지금 이름을 보고 --모델 로 준다")
             if e.code in (429, 500, 502, 503, 504) and 번 < 3:
                 time.sleep(2 ** 번)
                 continue

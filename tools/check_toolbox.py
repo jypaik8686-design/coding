@@ -116,6 +116,19 @@ def 검사(root: Path) -> list[str]:
                for f in d.rglob("*") if f.is_file() and f.suffix in {".html", ".js", ".css", ".md", ".webmanifest", ".svg"}):
             문제.append(f"틀 자리표시자 {{{{앱이름}}}}가 그대로 남아 있음: 앱/{d.name}")
 
+    # 이 저장소 하나만으로 돌아야 한다. 다른 저장소나 이 기계만의 경로에 기대면 잡는다
+    밖 = re.compile(r"/home/[A-Za-z0-9_.-]+/|/Users/[A-Za-z0-9_.-]+/|idea-bin")
+    글꼴 = {".md", ".py", ".mjs", ".js", ".html", ".css", ".json", ".webmanifest"}
+    for f in sorted(root.rglob("*")):
+        rel = f.relative_to(root)
+        if not f.is_file() or f.suffix not in 글꼴 or rel.parts[0] in {".git", "화면", "node_modules"}:
+            continue
+        if rel.as_posix() == "tools/check_toolbox.py":
+            continue
+        m = 밖.search(f.read_text(encoding="utf-8", errors="ignore"))
+        if m:
+            문제.append(f"저장소 밖에 기댐 ('{m.group(0)}'): {정규(rel.as_posix())}")
+
     # 실행물이 실제로 돌아가는 모양인지
     for f in sorted((root / "tools").glob("*.py")):
         r = subprocess.run([sys.executable, "-m", "py_compile", str(f)], capture_output=True)
