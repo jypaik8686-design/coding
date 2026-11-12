@@ -1,19 +1,39 @@
-// 제미니채팅 — 제미니 API와 1대1 대화. 화면 둘(대화·설정), 데이터 한 덩어리.
+// 제미니채팅 — 제미니 API와 1대1 대화. 화면 셋(대화·장부·설정), 데이터 한 덩어리.
 // 열쇠는 이 기기 localStorage에만 있다. 저장소에는 적지 않는다.
 
 const KEY = "제미니채팅/v1";
 const API = "https://generativelanguage.googleapis.com/v1beta";
+const LEDGER_MAX = 100;
 
-// 조절 가능한 안전 필터 전부 끔. 아동 안전 같은 핵심 보호는 API가 늘 막고 끌 수 없다.
+// 안전 필터 4칸 + 시민 무결성(늘 설정값 중 가장 느슨한 쪽이 아니라 OFF로 시작해 같은 단계로 내림).
+// 아동 안전 같은 핵심 보호는 API가 늘 막고 끌 수 없다.
 // https://ai.google.dev/gemini-api/docs/safety-settings (2026-11-12 확인)
-const SAFETY = ["HARASSMENT", "HATE_SPEECH", "SEXUALLY_EXPLICIT", "DANGEROUS_CONTENT", "CIVIC_INTEGRITY"]
-  .map((c) => ({ category: `HARM_CATEGORY_${c}`, threshold: "OFF" }));
+const CATS = [
+  ["harassment", "HARM_CATEGORY_HARASSMENT", "괴롭힘"],
+  ["hate", "HARM_CATEGORY_HATE_SPEECH", "혐오"],
+  ["explicit", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "성적 표현"],
+  ["danger", "HARM_CATEGORY_DANGEROUS_CONTENT", "위험 내용"],
+];
+const LEVELS = ["OFF", "BLOCK_NONE", "BLOCK_ONLY_HIGH", "BLOCK_MEDIUM_AND_ABOVE"];
+const LEVEL_LABEL = { OFF: "OFF", BLOCK_NONE: "NONE", BLOCK_ONLY_HIGH: "HIGH", BLOCK_MEDIUM_AND_ABOVE: "MED+" };
+// OFF를 서버가 거부하면 이 순서로 한 단계씩 내려서 다시 보낸다. 빈 칸 = 설정값 그대로.
+const FALLBACK = ["", "BLOCK_NONE", "BLOCK_ONLY_HIGH"];
 
 // ── 데이터 모양 ──────────────────────────────────────────────
-// 말 하나: { id, role: "user"|"model", text, at, err? }
+// 말 하나:   { id, role: "user"|"model", text, at, err?, note?, cut? }
+// 장부 한 줄: { at, md, inTok, ca, out, s }   (ca = 캐시에서 읽은 입력 토큰, out = 출력+생각 토큰)
 const SHAPE = () => ({
   messages: [],
-  settings: { apiKey: "", model: "gemini-flash-latest", system: "", temperature: 1 },
+  ledger: [],
+  settings: {
+    apiKey: "",
+    model: "gemini-flash-latest",
+    system: "",
+    lexicon: "",
+    temperature: 1,
+    maxTok: 8192,
+    safety: { harassment: "OFF", hate: "OFF", explicit: "OFF", danger: "OFF" },
+  },
 });
 
 const store = {
@@ -28,8 +48,22 @@ const store = {
     this.data.messages.push(m);
     return m;
   },
+  lend(row) {
+    this.data.ledger.unshift(row);
+    if (this.data.ledger.length > LEDGER_MAX) this.data.ledger.length = LEDGER_MAX;
+  },
   reset() { this.data.messages = []; this.save(); },
 };
+
+function validMsg(m) { return m && typeof m.text === "string" && (m.role === "user" || m.role === "model"); }
+function fixMsg(m) { return { ...m, id: m.id || crypto.randomUUID(), at: m.at || Date.now() }; }
+
+function mergeSettings(base, saved) {
+  const s = { ...base, ...(saved && typeof saved === "object" ? saved : {}) };
+  s.safety = { ...base.safety, ...(saved && saved.safety && typeof saved.safety === "object" ? saved.safety : {}) };
+  for (const [k] of CATS) if (!LEVELS.includes(s.safety[k])) s.safety[k] = "OFF";
+  return s;
+}
 
 function load() {
   try {
@@ -38,8 +72,9 @@ function load() {
     const d = JSON.parse(raw);
     const base = SHAPE();
     return {
-      messages: Array.isArray(d.messages) ? d.messages.filter((m) => m && typeof m.text === "string") : [],
-      settings: { ...base.settings, ...(d.settings || {}) },
+      messages: Array.isArray(d.messages) ? d.messages.filter(validMsg).map(fixMsg) : [],
+      ledger: Array.isArray(d.ledger) ? d.ledger.filter((r) => r && typeof r === "object").slice(0, LEDGER_MAX) : [],
+      settings: mergeSettings(base.settings, d.settings),
     };
   } catch { return SHAPE(); }
 }
@@ -59,6 +94,32 @@ function history() {
   return out;
 }
 
+// cap보다 느슨한 단계는 cap으로 올린다. cap이 빈 칸이면 설정값 그대로.
+function safetyList(want, cap) {
+  const lim = (v) => (cap && LEVELS.indexOf(v) < LEVELS.indexOf(cap) ? cap : v);
+  const list = CATS.map(([k, cat]) => ({ category: cat, threshold: lim(want[k]) }));
+  list.push({ category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: lim("OFF") });
+  return list;
+}
+
+// 안전 필터 값을 서버가 거부하면(400 + 필터 관련 문구) 한 단계씩 내려서 다시 보낸다.
+async function open(body, s, signal) {
+  const url = `${API}/models/${encodeURIComponent(s.model.trim())}:streamGenerateContent?alt=sse`;
+  const headers = { "content-type": "application/json", "x-goog-api-key": s.apiKey.trim() };
+  for (let i = 0; i < FALLBACK.length; i++) {
+    body.safetySettings = safetyList(s.safety, FALLBACK[i]);
+    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+    if (res.ok) {
+      if (i) toast(`안전 필터 OFF가 거부돼 ${LEVEL_LABEL[FALLBACK[i]]}으로 내려 보냄`);
+      return res;
+    }
+    let msg = `HTTP ${res.status}`;
+    try { msg = (await res.json()).error?.message || msg; } catch {}
+    const filterIssue = res.status === 400 && /[Ss]afety|[Tt]hreshold|HARM_|\bOFF\b/.test(msg);
+    if (!filterIssue || i === FALLBACK.length - 1) throw new Error(msg);
+  }
+}
+
 async function ask() {
   const s = store.data.settings;
   const reply = store.push("model", "");
@@ -68,25 +129,21 @@ async function ask() {
 
   busy = new AbortController();
   setBusy(true);
+  const t0 = Date.now();
+  let usage = null;
   try {
+    // 앞부분은 늘 같은 순서: 고정 시스템 프롬프트 → 사전설정집 → 대화(덧붙이기만)
+    const sys = [s.system.trim(), s.lexicon.trim() && `[설정집]\n${s.lexicon.trim()}`].filter(Boolean).join("\n\n");
     const body = {
       contents: history(),
-      safetySettings: SAFETY,
-      generationConfig: { temperature: Number(s.temperature) },
+      generationConfig: {
+        temperature: Number(s.temperature),
+        maxOutputTokens: parseInt(s.maxTok, 10) || 8192,
+      },
     };
-    if (s.system.trim()) body.systemInstruction = { parts: [{ text: s.system }] };
+    if (sys) body.systemInstruction = { parts: [{ text: sys }] };
 
-    const res = await fetch(`${API}/models/${encodeURIComponent(s.model.trim())}:streamGenerateContent?alt=sse`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": s.apiKey.trim() },
-      body: JSON.stringify(body),
-      signal: busy.signal,
-    });
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`;
-      try { msg = (await res.json()).error?.message || msg; } catch {}
-      throw new Error(msg);
-    }
+    const res = await open(body, s, busy.signal);
 
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -102,6 +159,7 @@ async function ask() {
         if (!line.startsWith("data:")) continue;
         let j;
         try { j = JSON.parse(line.slice(5)); } catch { continue; }
+        if (j.usageMetadata) usage = j.usageMetadata;
         if (j.promptFeedback?.blockReason) blocked = `질문이 막힘: ${j.promptFeedback.blockReason}`;
         const c = j.candidates?.[0];
         const t = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
@@ -126,8 +184,17 @@ async function ask() {
       reply.err = navigator.onLine === false ? "오프라인 — 망이 돌아오면 ‘다시’를 누르기" : e.message;
     }
   } finally {
+    if (usage) {
+      store.lend({
+        at: Date.now(),
+        md: s.model.trim(),
+        inTok: usage.promptTokenCount || 0,
+        ca: usage.cachedContentTokenCount || 0,
+        out: (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0),
+        s: Math.round((Date.now() - t0) / 100) / 10,
+      });
+    }
     busy = null;
-    setBusy(false);
     store.save();
   }
 }
@@ -150,6 +217,14 @@ function retry() {
 }
 
 // ── 화면 ────────────────────────────────────────────────────
+const n = (x) => Number(x || 0).toLocaleString("ko-KR");
+const hhmm = (ts) => new Date(ts).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+function cachePct() {
+  const r = store.data.ledger[0];
+  return r && r.inTok ? Math.round((r.ca / r.inTok) * 100) : null;
+}
+
 const SCREENS = {
   chat() {
     const ms = store.data.messages;
@@ -158,7 +233,7 @@ const SCREENS = {
       ? `<ul class="chat">${ms.map(bubbleHTML).join("")}</ul>`
       : `<p class="empty">${noKey ? "설정에서 제미니 API 열쇠를 먼저 넣기." : "아무 말이나 적어 보내기."}</p>`;
     const last = ms[ms.length - 1];
-    const again = !busy && last && last.role === "model" ? `<button class="ghost small" id="retry">↻ 다시</button>` : "";
+    const again = !busy && last && last.role === "model" ? `<button class="ghost small" id="retry">↻ 다시 뽑기</button>` : "";
     return `${list}
       <div class="again">${again}</div>
       <form id="composer" class="composer">
@@ -168,32 +243,72 @@ const SCREENS = {
       </form>`;
   },
 
+  ledger() {
+    const L = store.data.ledger;
+    if (!L.length) return `<p class="empty">아직 요청이 없음.<br>대화를 한 번 하면 기록이 쌓임.</p>`;
+    const sum = L.reduce((a, r) => ({ i: a.i + (r.inTok || 0), c: a.c + (r.ca || 0), o: a.o + (r.out || 0) }), { i: 0, c: 0, o: 0 });
+    const last = L[0];
+    const pct = cachePct() ?? 0;
+    const rows = L.map((r) => `
+      <tr><td>${hhmm(r.at)}</td><td class="md">${esc(String(r.md || "").replace(/^models\//, ""))}</td>
+          <td>${n(r.inTok)}</td><td>${n(r.ca)}</td><td>${n(r.out)}</td><td>${r.s ?? ""}</td></tr>`).join("");
+    return `
+      <h2>캐시 상태</h2>
+      <div class="meter" role="img" aria-label="마지막 요청 캐시 ${pct}%"><div style="width:${pct}%"></div></div>
+      <p class="hint">마지막 요청: 입력 ${n(last.inTok)} 토큰 중 캐시 ${n(last.ca)} (${pct}%). API가 알려 준 값 그대로임. 이 값이 갑자기 줄면 앞부분(시스템 프롬프트·설정집·옛 대화)이 바뀐 것.</p>
+      <h2 style="margin-top:16px">합계 <span class="hint">최근 ${L.length}번</span></h2>
+      <p class="hint">입력 ${n(sum.i)} · 캐시 ${n(sum.c)} · 출력 ${n(sum.o)} 토큰 (출력엔 생각 토큰 포함)</p>
+      <h2 style="margin-top:16px">장부</h2>
+      <div class="tablewrap"><table class="ledger">
+        <thead><tr><th>시각</th><th>모델</th><th>입력</th><th>캐시</th><th>출력</th><th>초</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+      <button class="ghost" id="clearLedger" style="margin-top:12px">장부 지우기</button>`;
+  },
+
   settings() {
     const s = store.data.settings;
+    const sel = ([k, , label]) => `
+      <label class="sf">${label}
+        <select data-sf="${k}">${LEVELS.map((v) =>
+          `<option value="${v}" ${s.safety[k] === v ? "selected" : ""}>${LEVEL_LABEL[v]}</option>`).join("")}</select>
+      </label>`;
     return `
       <form id="setForm" onsubmit="return false">
         <h2>API 열쇠</h2>
         <input id="apiKey" type="password" autocomplete="off" spellcheck="false"
                value="${esc(s.apiKey)}" placeholder="AIza…">
-        <p class="hint">이 기기 브라우저에만 저장됨. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio</a>에서 받기.</p>
+        <p class="hint">이 기기 브라우저에만 저장됨. 내보내기 파일에는 안 들어감. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio</a>에서 받기.</p>
 
         <h2>모델</h2>
         <input id="model" type="text" list="models" autocomplete="off" spellcheck="false" value="${esc(s.model)}">
         <datalist id="models"></datalist>
         <button class="ghost" id="loadModels" type="button">모델 목록 불러오기</button>
 
-        <h2>시스템 프롬프트</h2>
+        <h2>고정 시스템 프롬프트 <span class="hint" id="sysLen">${n(s.system.length)}자</span></h2>
         <textarea id="system" rows="6" placeholder="역할, 말투, 규칙… 길이 제한 없음">${esc(s.system)}</textarea>
+        <p class="hint">맨 위에 고정. 대화 도중 고치면 앞부분이 달라져 캐시가 새로 쌓임.</p>
+
+        <h2>사전설정집 <span class="hint" id="lexLen">${n(s.lexicon.length)}자</span></h2>
+        <textarea id="lexicon" rows="8" placeholder="인물·세계관·말투 사전. 요약 말고 사전으로">${esc(s.lexicon)}</textarea>
+        <p class="hint">시스템 프롬프트 바로 뒤에 통째로 같이 감.</p>
+
+        <h2>한 번 출력 한도 (토큰)</h2>
+        <input id="maxTok" type="number" inputmode="numeric" min="1" step="1" value="${esc(s.maxTok)}">
 
         <h2>온도 <span id="tempVal" class="hint">${s.temperature}</span></h2>
         <input id="temperature" type="range" min="0" max="2" step="0.1" value="${s.temperature}">
 
-        <p class="hint">안전 필터: 조절 가능한 다섯 가지 전부 끔(OFF). 아동 안전 등 핵심 보호는 Google이 늘 막음.</p>
+        <h2>안전 필터</h2>
+        <div class="sfgrid">${CATS.map(sel).join("")}</div>
+        <p class="hint">OFF를 서버가 거부하면 자동으로 NONE → HIGH 순으로 내려 다시 보냄. 아동 안전 등 핵심 보호는 Google이 늘 막고 끌 수 없음.</p>
 
         <h2 style="margin-top:12px">대화</h2>
         <p class="hint">${store.data.messages.length}개 말이 이 기기에만 저장돼 있음.</p>
-        <button class="ghost" id="export" type="button">대화 내보내기 (JSON)</button>
+        <button class="ghost" id="export" type="button">내보내기 (JSON)</button>
+        <button class="ghost" id="import" type="button">가져오기 (JSON)</button>
+        <input id="importFile" type="file" accept="application/json,.json" hidden>
         <button class="danger" id="reset" type="button">대화 전부 지우기</button>
+        <button class="danger" id="wipe" type="button">처음으로 (열쇠·설정까지 전부)</button>
       </form>`;
   },
 };
@@ -223,11 +338,12 @@ function follow() {
 function setBusy(on) {
   const b = document.getElementById("sendBtn");
   if (b) { b.textContent = on ? "■" : "↑"; b.setAttribute("aria-label", on ? "멈추기" : "보내기"); }
-  document.getElementById("count").textContent = on ? "답하는 중…" : "";
+  const p = cachePct();
+  document.getElementById("count").textContent = on ? "답하는 중…" : p === null ? "" : `캐시 ${p}%`;
 }
 
 // ── 라우터 ──────────────────────────────────────────────────
-const TITLES = { chat: "제미니채팅", settings: "설정" };
+const TITLES = { chat: "제미니채팅", ledger: "장부", settings: "설정" };
 const route = () => (location.hash.replace(/^#\/?/, "") || "chat").split("/")[0];
 
 function render() {
@@ -264,42 +380,93 @@ function wire(name, draft) {
     document.getElementById("retry")?.addEventListener("click", retry);
     scrollTo(0, document.documentElement.scrollHeight);
   }
-  if (name === "settings") {
-    const s = store.data.settings;
-    const bind = (id, key, num) => document.getElementById(id).addEventListener("input", (e) => {
-      s[key] = num ? Number(e.target.value) : e.target.value;
-      if (id === "temperature") document.getElementById("tempVal").textContent = e.target.value;
-      store.saveQuiet();
-    });
-    bind("apiKey", "apiKey"); bind("model", "model"); bind("system", "system"); bind("temperature", "temperature", true);
-
-    document.getElementById("loadModels").addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      if (!s.apiKey.trim()) return toast("열쇠를 먼저 넣기");
-      btn.disabled = true; btn.textContent = "불러오는 중…";
-      try {
-        const res = await fetch(`${API}/models?pageSize=200`, { headers: { "x-goog-api-key": s.apiKey.trim() } });
-        const j = await res.json();
-        if (!res.ok) throw new Error(j.error?.message || `HTTP ${res.status}`);
-        const names = (j.models || [])
-          .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
-          .map((m) => m.name.replace(/^models\//, ""));
-        document.getElementById("models").innerHTML = names.map((n) => `<option value="${esc(n)}">`).join("");
-        toast(`${names.length}개 — 모델 칸을 누르면 고를 수 있음`);
-      } catch (err) { toast("못 불러옴: " + err.message); }
-      btn.disabled = false; btn.textContent = "모델 목록 불러오기";
-    });
-    document.getElementById("export").addEventListener("click", () => {
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([JSON.stringify(store.data.messages, null, 2)], { type: "application/json" }));
-      a.download = "제미니채팅.json";
-      a.click();
-      URL.revokeObjectURL(a.href);
-    });
-    document.getElementById("reset").addEventListener("click", () => {
-      if (confirm("대화를 전부 지움. 되돌릴 수 없음. (열쇠·설정은 남음)")) store.reset();
+  if (name === "ledger") {
+    document.getElementById("clearLedger")?.addEventListener("click", () => {
+      if (confirm("장부를 지움.")) { store.data.ledger = []; store.save(); }
     });
   }
+  if (name === "settings") wireSettings();
+}
+
+function wireSettings() {
+  const s = store.data.settings;
+  const bind = (id, key, { num, after } = {}) => document.getElementById(id).addEventListener("input", (e) => {
+    s[key] = num ? Number(e.target.value) : e.target.value;
+    after?.(e.target.value);
+    store.saveQuiet();
+  });
+  bind("apiKey", "apiKey");
+  bind("model", "model");
+  bind("system", "system", { after: (v) => (document.getElementById("sysLen").textContent = n(v.length) + "자") });
+  bind("lexicon", "lexicon", { after: (v) => (document.getElementById("lexLen").textContent = n(v.length) + "자") });
+  bind("temperature", "temperature", { num: true, after: (v) => (document.getElementById("tempVal").textContent = v) });
+  document.getElementById("maxTok").addEventListener("input", (e) => {
+    s.maxTok = e.target.value === "" ? "" : Number(e.target.value);
+    store.saveQuiet();
+  });
+  document.querySelectorAll("[data-sf]").forEach((el) => el.addEventListener("change", (e) => {
+    s.safety[e.target.dataset.sf] = e.target.value;
+    store.saveQuiet();
+  }));
+
+  document.getElementById("loadModels").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    if (!s.apiKey.trim()) return toast("열쇠를 먼저 넣기");
+    btn.disabled = true; btn.textContent = "불러오는 중…";
+    try {
+      const res = await fetch(`${API}/models?pageSize=200`, { headers: { "x-goog-api-key": s.apiKey.trim() } });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error?.message || `HTTP ${res.status}`);
+      const names = (j.models || [])
+        .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+        .map((m) => m.name.replace(/^models\//, ""));
+      document.getElementById("models").innerHTML = names.map((x) => `<option value="${esc(x)}">`).join("");
+      toast(`${names.length}개 — 모델 칸을 누르면 고를 수 있음`);
+    } catch (err) { toast("못 불러옴: " + err.message); }
+    btn.disabled = false; btn.textContent = "모델 목록 불러오기";
+  });
+
+  document.getElementById("export").addEventListener("click", () => {
+    const { apiKey, ...settings } = s; // 열쇠는 백업 파일에 넣지 않는다
+    const out = { messages: store.data.messages, settings, ledger: store.data.ledger };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: "application/json" }));
+    a.download = "제미니채팅.json";
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000); // 바로 치우면 일부 브라우저에서 다운로드가 끊김
+  });
+
+  const file = document.getElementById("importFile");
+  document.getElementById("import").addEventListener("click", () => file.click());
+  file.addEventListener("change", async () => {
+    const f = file.files[0];
+    if (!f) return;
+    try {
+      const j = JSON.parse(await f.text());
+      const msgs = Array.isArray(j) ? j : j.messages;
+      if (!Array.isArray(msgs)) throw new Error("대화(messages)가 없는 파일");
+      const ok = msgs.filter(validMsg).map(fixMsg);
+      if (!confirm(`대화 ${ok.length}개로 바꿈. 지금 대화는 사라짐. (열쇠는 그대로)`)) return;
+      store.data.messages = ok;
+      if (!Array.isArray(j) && j.settings && typeof j.settings === "object") {
+        const { apiKey, ...rest } = j.settings;
+        store.data.settings = mergeSettings(store.data.settings, rest);
+      }
+      if (!Array.isArray(j) && Array.isArray(j.ledger)) store.data.ledger = j.ledger.slice(0, LEDGER_MAX);
+      store.save();
+      toast("가져왔음");
+    } catch (err) { toast("가져오기 실패: " + err.message); }
+    file.value = "";
+  });
+
+  document.getElementById("reset").addEventListener("click", () => {
+    if (confirm("대화를 전부 지움. 되돌릴 수 없음. (열쇠·설정은 남음)")) store.reset();
+  });
+  document.getElementById("wipe").addEventListener("click", () => {
+    if (confirm("대화·열쇠·설정·장부를 전부 지움. 되돌릴 수 없음.")) { store.data = SHAPE(); store.save(); }
+  });
 }
 
 document.getElementById("screen").addEventListener("click", (e) => {
