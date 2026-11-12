@@ -5,6 +5,38 @@ const KEY = "제미니채팅/v1";
 const API = "https://generativelanguage.googleapis.com/v1beta";
 const LEDGER_MAX = 100;
 
+// 고르기만 하면 되는 모델들. 이름은 models API 목록에서 확인한 것(2026-11-12).
+const PRESETS = [
+  ["gemini-4-argon", "Gemini 4 Argon (아르곤)"],
+  ["gemini-4-carbon", "Gemini 4 Carbon (카본)"],
+  ["gemini-3.8-flash", "Gemini 3.8 Flash"],
+  ["gemini-pro-latest", "최신 Pro"],
+  ["gemini-flash-latest", "최신 Flash"],
+];
+// API가 주는 막힘 사유를 사람 말로. 끌 수 있는 것과 없는 것을 갈라서 보여 준다.
+const REASONS = {
+  SAFETY: "안전 필터가 막음 (설정 → 고급 → 안전 필터가 OFF인지 확인)",
+  PROHIBITED_CONTENT: "Google이 끌 수 없게 막는 내용",
+  BLOCKLIST: "Google 금지어 목록에 걸림 (끌 수 없음)",
+  SPII: "민감한 개인정보로 보여 막힘 (끌 수 없음)",
+  IMAGE_SAFETY: "이미지 안전 문제로 막힘",
+  RECITATION: "남의 글을 그대로 옮긴 것으로 보여 멈춤",
+  OTHER: "Google이 이유를 알려 주지 않음",
+  LANGUAGE: "지원하지 않는 언어",
+};
+const why = (code) => (REASONS[code] ? `${code} — ${REASONS[code]}` : code);
+let loadedModels = []; // 설정에서 ‘전체 목록 불러오기’ 한 뒤 채워짐
+
+function modelOptions(cur) {
+  const known = new Set(PRESETS.map(([v]) => v));
+  const rest = loadedModels.filter((m) => !known.has(m));
+  const opt = (v, label) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(label)}</option>`;
+  let h = PRESETS.map(([v, l]) => opt(v, l)).join("");
+  if (cur && !known.has(cur) && !rest.includes(cur)) h += opt(cur, `직접 입력: ${cur}`);
+  if (rest.length) h += `<optgroup label="전체 목록">${rest.map((m) => opt(m, m)).join("")}</optgroup>`;
+  return h;
+}
+
 // 안전 필터 4칸 + 시민 무결성(늘 설정값 중 가장 느슨한 쪽이 아니라 OFF로 시작해 같은 단계로 내림).
 // 아동 안전 같은 핵심 보호는 API가 늘 막고 끌 수 없다.
 // https://ai.google.dev/gemini-api/docs/safety-settings (2026-11-12 확인)
@@ -27,7 +59,7 @@ const SHAPE = () => ({
   ledger: [],
   settings: {
     apiKey: "",
-    model: "gemini-flash-latest",
+    model: "gemini-4-argon",
     system: "",
     lexicon: "",
     temperature: 1,
@@ -160,7 +192,8 @@ async function ask() {
         let j;
         try { j = JSON.parse(line.slice(5)); } catch { continue; }
         if (j.usageMetadata) usage = j.usageMetadata;
-        if (j.promptFeedback?.blockReason) blocked = `질문이 막힘: ${j.promptFeedback.blockReason}`;
+        if (j.promptFeedback?.blockReason)
+          blocked = `질문이 막힘: ${why(j.promptFeedback.blockReason)}${j.promptFeedback.blockReasonMessage ? " · " + j.promptFeedback.blockReasonMessage : ""}`;
         const c = j.candidates?.[0];
         const t = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
         if (t) {
@@ -169,7 +202,7 @@ async function ask() {
           follow();
         }
         if (c?.finishReason && !["STOP", "MAX_TOKENS", "FINISH_REASON_UNSPECIFIED"].includes(c.finishReason))
-          blocked = `답이 멈춤: ${c.finishReason}`;
+          blocked = `답이 멈춤: ${why(c.finishReason)}`;
         if (c?.finishReason === "MAX_TOKENS") reply.cut = true;
       }
     }
@@ -280,9 +313,8 @@ const SCREENS = {
         <p class="hint">이 기기 브라우저에만 저장됨. 내보내기 파일에는 안 들어감. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio</a>에서 받기.</p>
 
         <h2>모델</h2>
-        <input id="model" type="text" list="models" autocomplete="off" spellcheck="false" value="${esc(s.model)}">
-        <datalist id="models"></datalist>
-        <button class="ghost" id="loadModels" type="button">모델 목록 불러오기</button>
+        <select id="modelPick">${modelOptions(s.model)}</select>
+        <p class="hint">아르곤·카본은 새로 나온 모델. 열쇠와 같은 계정에서 쓸 수 있어야 함. 안 되면 대화 칸에 오류가 뜸.</p>
 
         <h2>고정 시스템 프롬프트 <span class="hint" id="sysLen">${n(s.system.length)}자</span></h2>
         <textarea id="system" rows="6" placeholder="역할, 말투, 규칙… 길이 제한 없음">${esc(s.system)}</textarea>
@@ -292,15 +324,27 @@ const SCREENS = {
         <textarea id="lexicon" rows="8" placeholder="인물·세계관·말투 사전. 요약 말고 사전으로">${esc(s.lexicon)}</textarea>
         <p class="hint">시스템 프롬프트 바로 뒤에 통째로 같이 감.</p>
 
-        <h2>한 번 출력 한도 (토큰)</h2>
-        <input id="maxTok" type="number" inputmode="numeric" min="1" step="1" value="${esc(s.maxTok)}">
+        <details class="adv">
+          <summary>고급 설정 — 안 건드려도 됨</summary>
 
-        <h2>온도 <span id="tempVal" class="hint">${s.temperature}</span></h2>
-        <input id="temperature" type="range" min="0" max="2" step="0.1" value="${s.temperature}">
+          <h2>모델 이름 직접 입력</h2>
+          <input id="model" type="text" list="models" autocomplete="off" spellcheck="false" value="${esc(s.model)}">
+          <datalist id="models"></datalist>
+          <button class="ghost" id="loadModels" type="button">전체 모델 목록 불러오기</button>
+          <p class="hint">위 모델 칸에 없는 모델을 쓰고 싶을 때만. 불러오면 위 칸에도 전부 들어감.</p>
 
-        <h2>안전 필터</h2>
-        <div class="sfgrid">${CATS.map(sel).join("")}</div>
-        <p class="hint">OFF를 서버가 거부하면 자동으로 NONE → HIGH 순으로 내려 다시 보냄. 아동 안전 등 핵심 보호는 Google이 늘 막고 끌 수 없음.</p>
+          <h2>온도 <span id="tempVal" class="hint">${s.temperature}</span></h2>
+          <input id="temperature" type="range" min="0" max="2" step="0.1" value="${s.temperature}">
+          <p class="hint">답이 얼마나 제멋대로인지. 낮을수록(0~0.5) 늘 비슷하고 정확한 답, 높을수록(1.2~2) 매번 달라지고 엉뚱해짐. 모르겠으면 1 그대로.</p>
+
+          <h2>한 번 출력 한도 (토큰)</h2>
+          <input id="maxTok" type="number" inputmode="numeric" min="1" step="1" value="${esc(s.maxTok)}">
+          <p class="hint">한 번에 쓸 수 있는 답의 최대 길이. 한글은 대략 한 글자에 1~2토큰. 답이 중간에 잘리면 올리기.</p>
+
+          <h2>안전 필터</h2>
+          <div class="sfgrid">${CATS.map(sel).join("")}</div>
+          <p class="hint">OFF를 서버가 거부하면 자동으로 NONE → HIGH 순으로 내려 다시 보냄. 아동 안전 등 핵심 보호는 Google이 늘 막고 끌 수 없음.</p>
+        </details>
 
         <h2 style="margin-top:12px">대화</h2>
         <p class="hint">${store.data.messages.length}개 말이 이 기기에만 저장돼 있음.</p>
@@ -396,7 +440,10 @@ function wireSettings() {
     store.saveQuiet();
   });
   bind("apiKey", "apiKey");
-  bind("model", "model");
+  const pick = document.getElementById("modelPick");
+  const text = document.getElementById("model");
+  pick.addEventListener("change", () => { s.model = pick.value; text.value = s.model; store.saveQuiet(); });
+  text.addEventListener("input", () => { s.model = text.value; pick.innerHTML = modelOptions(s.model.trim()); store.saveQuiet(); });
   bind("system", "system", { after: (v) => (document.getElementById("sysLen").textContent = n(v.length) + "자") });
   bind("lexicon", "lexicon", { after: (v) => (document.getElementById("lexLen").textContent = n(v.length) + "자") });
   bind("temperature", "temperature", { num: true, after: (v) => (document.getElementById("tempVal").textContent = v) });
@@ -420,10 +467,12 @@ function wireSettings() {
       const names = (j.models || [])
         .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
         .map((m) => m.name.replace(/^models\//, ""));
+      loadedModels = names;
       document.getElementById("models").innerHTML = names.map((x) => `<option value="${esc(x)}">`).join("");
-      toast(`${names.length}개 — 모델 칸을 누르면 고를 수 있음`);
+      pick.innerHTML = modelOptions(s.model.trim());
+      toast(`${names.length}개 — 위 모델 칸에서 고를 수 있음`);
     } catch (err) { toast("못 불러옴: " + err.message); }
-    btn.disabled = false; btn.textContent = "모델 목록 불러오기";
+    btn.disabled = false; btn.textContent = "전체 모델 목록 불러오기";
   });
 
   document.getElementById("export").addEventListener("click", () => {
