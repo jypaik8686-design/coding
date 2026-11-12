@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="할일">
+  <rect width="512" height="512" rx="112" fill="#2f6df6"/>
+  <g fill="none" stroke="#fff" stroke-width="34" stroke-linecap="round">
+    <path d="M152 196h208M152 266h208M152 336h130"/>
+  </g>
+</svg>

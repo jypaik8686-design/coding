@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101214" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>{{앱이름}}</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <h1 id="title">{{앱이름}}</h1>
+  <span id="count" class="count"></span>
+</header>
+
+<main id="screen" tabindex="-1"></main>
+
+<nav class="tabs" aria-label="화면 이동">
+  <a href="#/list" data-tab="list"><span aria-hidden="true">▤</span>목록</a>
+  <a href="#/add" data-tab="add"><span aria-hidden="true">＋</span>추가</a>
+  <a href="#/settings" data-tab="settings"><span aria-hidden="true">⚙</span>설정</a>
+</nav>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

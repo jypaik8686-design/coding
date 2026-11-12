@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+화면/*.png
+.DS_Store
+node_modules/
