@@ -116,6 +116,21 @@ def 검사(root: Path) -> list[str]:
                for f in d.rglob("*") if f.is_file() and f.suffix in {".html", ".js", ".css", ".md", ".webmanifest", ".svg"}):
             문제.append(f"틀 자리표시자 {{{{앱이름}}}}가 그대로 남아 있음: 앱/{d.name}")
 
+    # 서랍(맨 위 index.html)은 앱 주소의 첫 화면이다. 앱 목록과 어긋나면 사용자가 새 앱을 못 찾는다
+    try:
+        sys.path.insert(0, str(root / "tools"))
+        import drawer
+        서랍 = root / "index.html"
+        if not 서랍.is_file() or 서랍.read_text(encoding="utf-8") != drawer.만들기():
+            문제.append("서랍(index.html)이 낡았음 — python3 tools/drawer.py")
+        if not (root / ".nojekyll").is_file():
+            문제.append(".nojekyll 없음 — python3 tools/drawer.py")
+        for d in 앱들:
+            if not drawer.한줄(d):
+                문제.append(f"명세의 '한 줄'이 비어 있음 (서랍에 그대로 나온다): 앱/{d.name}")
+    except Exception as e:
+        문제.append(f"서랍을 확인하지 못함: {e}")
+
     # 이 저장소 하나만으로 돌아야 한다. 다른 저장소나 이 기계만의 경로에 기대면 잡는다
     밖 = re.compile(r"/home/[A-Za-z0-9_.-]+/|/Users/[A-Za-z0-9_.-]+/|idea-bin")
     글꼴 = {".md", ".py", ".mjs", ".js", ".html", ".css", ".json", ".webmanifest"}
@@ -145,6 +160,9 @@ def 검사(root: Path) -> list[str]:
 
 
 def main() -> int:
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(__doc__)
+        return 0
     root = Path(__file__).resolve().parent.parent
     문제 = 검사(root)
     if 문제:

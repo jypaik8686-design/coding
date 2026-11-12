@@ -51,6 +51,12 @@ function 인자(argv) {
     else if (v === "--기다려" || v === "--wait") a.기다려 = Number(argv[++i]);
     else if (v === "--기기" || v === "--device") a.기기 = argv[++i];
     else if (v === "--심기" || v === "--seed") a.심기 = argv[++i];
+    else if (v === "--help" || v === "-h") {
+      // 이 파일 맨 위의 설명을 그대로 보여 준다
+      const 줄 = readFileSync(new URL(import.meta.url), "utf8").split("\n").slice(1);
+      console.log(줄.slice(0, 줄.findIndex((l) => !l.startsWith("//"))).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+      process.exit(0);
+    }
     else if (v === "--점검" || v === "--check") a.점검 = true;
     else if (v === "--전체" || v === "--full") a.전체 = true;
     else if (v === "--엄격" || v === "--strict") a.엄격 = true;
