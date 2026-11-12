@@ -5,7 +5,12 @@
 //   node tools/shot.mjs 앱/할일/index.html --out 화면/파일.png --전체
 //   node tools/shot.mjs http://127.0.0.1:8000/ --out 화면/넣고.png \
 //        --누르기 ".tabs a[data-tab=add]" --적기 "#text=우유 사기" --누르기 "button[type=submit]"
+//   node tools/shot.mjs http://127.0.0.1:8000/ --out 화면/옛데이터.png --심기 화면/옛데이터.json
 //   node tools/shot.mjs --비교 화면/전.png 화면/후.png --out 화면/비교.png
+//
+// 매번 새 브라우저로 연다. 저장된 데이터가 없는 상태에서 시작한다는 뜻이다.
+// 이미 데이터가 있는 폰을 흉내 내려면 --심기 로 localStorage를 채우고 연다.
+// 심는 파일 꼴: { "<localStorage 키>": <값>, ... }  (값이 글자가 아니면 JSON으로 바꿔 넣는다)
 
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -30,7 +35,7 @@ try {
 const 기본기기 = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
 
 function 인자(argv) {
-  const a = { 동작: [], 기다려: 250, 전체: false, out: null, 비교: null, 기기: null, target: null, 엄격: false };
+  const a = { 동작: [], 기다려: 250, 전체: false, out: null, 비교: null, 기기: null, target: null, 엄격: false, 심기: null };
   for (let i = 2; i < argv.length; i++) {
     const v = argv[i];
     if (v === "--out" || v === "-o") a.out = argv[++i];
@@ -44,6 +49,7 @@ function 인자(argv) {
     }
     else if (v === "--기다려" || v === "--wait") a.기다려 = Number(argv[++i]);
     else if (v === "--기기" || v === "--device") a.기기 = argv[++i];
+    else if (v === "--심기" || v === "--seed") a.심기 = argv[++i];
     else if (v === "--전체" || v === "--full") a.전체 = true;
     else if (v === "--엄격" || v === "--strict") a.엄격 = true;
     else if (v.startsWith("-")) { console.error(`모르는 옵션: ${v}`); process.exit(2); }
@@ -74,6 +80,17 @@ async function 찍기(a) {
     process.exit(2);
   }
   const ctx = await browser.newContext({ ...설정, locale: "ko-KR", timezoneId: "Asia/Seoul" });
+  if (a.심기) {
+    let 씨;
+    try { 씨 = JSON.parse(readFileSync(resolve(a.심기), "utf8")); }
+    catch (e) { console.error(`심을 파일을 못 읽음: ${a.심기} — ${e.message}`); await browser.close(); process.exit(2); }
+    // 페이지 스크립트보다 먼저 돈다. 이미 있는 키는 덮지 않는다.
+    await ctx.addInitScript((씨) => {
+      for (const [k, v] of Object.entries(씨)) {
+        if (localStorage.getItem(k) === null) localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v));
+      }
+    }, 씨);
+  }
   const page = await ctx.newPage();
 
   const 오류 = [];

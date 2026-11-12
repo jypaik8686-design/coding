@@ -92,9 +92,13 @@ def 검사(root: Path) -> list[str]:
     if not 규칙.is_file():
         문제.append("CLAUDE.md 없음 — 세션이 규칙을 못 읽는다")
     else:
-        for 이름 in 표의스킬.findall(규칙.read_text(encoding="utf-8")):
+        규칙글 = 규칙.read_text(encoding="utf-8")
+        for 이름 in 표의스킬.findall(규칙글):
             if 정규(이름) not in 있는스킬:
                 문제.append(f"CLAUDE.md가 가리키는 스킬이 없음: {이름}")
+        for 칸 in ("## 대답", "## 교정기록"):
+            if not re.search(rf"^{re.escape(칸)}\s*$", 규칙글, re.M):
+                문제.append(f"CLAUDE.md에 '{칸}' 칸이 없음 — 다음 세션이 말하는 법과 교정받은 것을 잊는다")
 
     # 틀은 바로 열려야 한다
     틀들 = sorted(p for p in (root / "틀").iterdir() if p.is_dir()) if (root / "틀").is_dir() else []

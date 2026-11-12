@@ -101,7 +101,7 @@ button[disabled] { opacity: .45; }
   width: 26px; height: 26px; flex: none; padding: 0; min-height: 0;
   border-radius: 50%; background: var(--card); border: 1.5px solid var(--line); color: transparent;
 }
-li.row.done .check { background: var(--accent); border-color: var(--accent); color: #fff; }
+li.row.done .check[data-act="toggle"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 form { display: grid; gap: 12px; }
 .empty { color: var(--dim); text-align: center; padding: 48px 0; }
 .hint { color: var(--dim); font-size: 13px; margin: 0; }

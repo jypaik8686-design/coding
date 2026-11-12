@@ -19,7 +19,9 @@ import urllib.request
 from pathlib import Path
 
 HOST = "https://generativelanguage.googleapis.com/v1beta"
-기본모델 = "gemini-2.5-flash"
+# 2026-11-12 공식 모델 목록(ai.google.dev/gemini-api/docs/models)에서 대량·저가용으로 적힌 것.
+# 모델 이름은 내려간다. HTTP 404가 나오면 목록을 다시 보고 --모델 로 바꾼다.
+기본모델 = "gemini-3.5-flash-lite"
 CA = ["SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"]
 
 

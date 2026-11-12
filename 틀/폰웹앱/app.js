@@ -88,7 +88,9 @@ function when(ts) {
   if (m < 1) return "방금";
   if (m < 60) return `${m}분 전`;
   if (m < 1440) return `${Math.floor(m / 60)}시간 전`;
-  return new Date(ts).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
+  const d = new Date(ts);
+  const 올해 = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString("ko-KR", { ...(올해 ? {} : { year: "2-digit" }), month: "numeric", day: "numeric" });
 }
 
 // ── 라우터 ──────────────────────────────────────────────────

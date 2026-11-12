@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
-화면/*.png
+화면/*
+!화면/.gitkeep
 .DS_Store
 node_modules/
