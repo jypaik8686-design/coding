@@ -151,3 +151,14 @@ table.ledger { width: 100%; border-collapse: collapse; font-size: 12.5px; font-v
 details.adv { margin: 16px 0 4px; border: 1px solid var(--line); border-radius: var(--radius); padding: 0 14px 14px; background: var(--card); }
 details.adv > summary { min-height: 46px; display: flex; align-items: center; cursor: pointer; font-weight: 600; font-size: 15px; }
 details.adv input[type="text"], details.adv input[type="number"] { background: var(--bg); }
+
+/* 읽기 편하게 — 글자 크기는 설정의 --fs, 한글은 단어 단위로 줄바꿈 */
+.msg { max-width: 92%; }
+.msg .text { white-space: normal; font-size: var(--fs, 17px); line-height: 1.75; word-break: keep-all; overflow-wrap: break-word; }
+.msg .text p { margin: 0 0 .8em; }
+.msg .text p:last-child { margin-bottom: 0; }
+.msg .text .act { color: var(--dim); font-style: italic; }
+.msg.user .text .act { color: rgba(255,255,255,.82); }
+.msg .text strong { font-weight: 700; }
+.msg.err .text .act { color: inherit; }
+.msg-sample { line-height: 1.7; word-break: keep-all; }

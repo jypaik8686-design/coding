@@ -1,6 +1,6 @@
 // 망 먼저, 끊기면 저장해 둔 것. 온라인이면 고친 파일이 바로 보이고, 오프라인이면 마지막으로 받은 것이 뜬다.
 // 대가: 망이 아주 느리면 첫 화면도 그만큼 느리다. 그게 문제가 되면 그때 캐시 먼저로 바꾸고 VERSION을 올려 가며 쓴다.
-const VERSION = "제미니채팅-v6";
+const VERSION = "제미니채팅-v7";
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icon.svg"];
 
 self.addEventListener("install", (e) => {

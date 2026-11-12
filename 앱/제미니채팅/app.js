@@ -64,6 +64,7 @@ const SHAPE = () => ({
     lexicon: "",
     temperature: 1,
     maxTok: 8192,
+    fontSize: 17,
     safety: { harassment: "OFF", hate: "OFF", explicit: "OFF", danger: "OFF" },
   },
 });
@@ -198,7 +199,7 @@ async function ask() {
         const t = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
         if (t) {
           reply.text += t;
-          const b = bubble(); if (b) b.textContent = reply.text;
+          const b = bubble(); if (b) b.innerHTML = fmt(reply.text);
           follow();
         }
         if (c?.finishReason && !["STOP", "MAX_TOKENS", "FINISH_REASON_UNSPECIFIED"].includes(c.finishReason))
@@ -312,6 +313,10 @@ const SCREENS = {
                value="${esc(s.apiKey)}" placeholder="AIza…">
         <p class="hint">이 기기 브라우저에만 저장됨. 내보내기 파일에는 안 들어감. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio</a>에서 받기.</p>
 
+        <h2>글자 크기 <span id="fsVal" class="hint">${s.fontSize}</span></h2>
+        <input id="fontSize" type="range" min="14" max="24" step="1" value="${s.fontSize}">
+        <p class="hint msg-sample" style="font-size:${s.fontSize}px" id="fsSample">이 크기로 대화가 보임. 가나다라마바사 ABC 123</p>
+
         <h2>모델</h2>
         <select id="modelPick">${modelOptions(s.model)}</select>
         <p class="hint">아르곤·카본은 새로 나온 모델. 열쇠와 같은 계정에서 쓸 수 있어야 함. 안 되면 대화 칸에 오류가 뜸.</p>
@@ -357,9 +362,19 @@ const SCREENS = {
   },
 };
 
+// 읽기 쉽게: 빈 줄은 문단으로, **굵게**, *행동*, (행동)은 흐리고 기울인 글씨로. 먼저 esc로 막아서 HTML이 끼어들 수 없다.
+function fmt(s) {
+  const inline = (x) => esc(x)
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, '<span class="act">$1</span>')
+    .replace(/(\([^()\n]+\)|（[^（）\n]+）)/g, '<span class="act">$1</span>');
+  return String(s).split(/\n{2,}/).filter((q) => q.trim())
+    .map((q) => `<p>${inline(q.trim()).replace(/\n/g, "<br>")}</p>`).join("");
+}
+
 const bubbleHTML = (m) => `
   <li class="msg ${m.role} ${m.err ? "err" : ""}" data-id="${m.id}">
-    <div class="text">${m.err ? "⚠ " + esc(m.err) : esc(m.text)}</div>
+    <div class="text">${m.err ? "⚠ " + esc(m.err) : fmt(m.text)}</div>
     ${m.note || m.cut ? `<div class="note">${esc(m.note || "길이 한도에서 잘림")}</div>` : ""}
     ${m.text && !m.err ? `<button class="copy" data-act="copy" aria-label="복사">⧉</button>` : ""}
   </li>`;
@@ -397,6 +412,7 @@ function render() {
   document.getElementById("title").textContent =
     name === "chat" ? store.data.settings.model.replace(/^models\//, "") : TITLES[name];
   document.body.dataset.screen = name;
+  document.documentElement.style.setProperty("--fs", `${Number(store.data.settings.fontSize) || 17}px`);
   document.querySelectorAll(".tabs a").forEach((a) => {
     if (a.dataset.tab === name) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
@@ -440,6 +456,13 @@ function wireSettings() {
     store.saveQuiet();
   });
   bind("apiKey", "apiKey");
+  document.getElementById("fontSize").addEventListener("input", (e) => {
+    s.fontSize = Number(e.target.value);
+    document.documentElement.style.setProperty("--fs", `${s.fontSize}px`);
+    document.getElementById("fsVal").textContent = s.fontSize;
+    document.getElementById("fsSample").style.fontSize = `${s.fontSize}px`;
+    store.saveQuiet();
+  });
   const pick = document.getElementById("modelPick");
   const text = document.getElementById("model");
   pick.addEventListener("change", () => { s.model = pick.value; text.value = s.model; store.saveQuiet(); });
