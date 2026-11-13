@@ -166,9 +166,18 @@ const SHAPE = () => ({
 
 const store = {
   data: load(),
+  saveOk: true, // 마지막 저장이 됐는지. 안 됐으면 화면에 계속 경고를 띄운다
   saveQuiet() {
-    try { localStorage.setItem(KEY, JSON.stringify(this.data)); return true; }
-    catch (e) { console.warn("저장 실패", e); toast("저장 실패 — 기기 저장 공간이 찼을 수 있음. 설정에서 대화를 내보내고 지우기"); return false; }
+    let ok = true;
+    try { localStorage.setItem(KEY, JSON.stringify(this.data)); }
+    catch (e) {
+      ok = false;
+      console.warn("저장 실패", e);
+      toast("저장 안 됨 — 이 기기 저장 공간이 가득 참. 설정집·대화를 줄이거나 내보낸 뒤 지우기");
+    }
+    this.saveOk = ok;
+    showSaveState();
+    return ok;
   },
   save() { this.saveQuiet(); render(); },
   push(role, text, extra = {}) {
@@ -621,6 +630,7 @@ const SCREENS = {
         <h2>사전설정집 <span class="hint" id="lexLen">${n(s.lexicon.length)}자</span></h2>
         <textarea id="lexicon" rows="8" placeholder="인물·세계관·말투 사전. 요약 말고 사전으로">${esc(s.lexicon)}</textarea>
         <p class="hint">시스템 프롬프트 바로 뒤에 통째로 같이 감.</p>
+        <p class="hint ${store.saveOk ? "" : "warn"}" id="saveState">${esc(saveText())}</p>
 
         <h2>설정 프리셋 <span class="hint">${store.data.presets.length}개</span></h2>
         <p class="hint">시스템 프롬프트·설정집·모델·온도·출력 한도·안전 필터를 이름 붙여 저장해 두고 한 번에 불러옴. 열쇠는 저장하지 않음. 불러와도 앞 대화는 그대로 남음.</p>
@@ -734,11 +744,32 @@ function toast(t) {
   clearTimeout(toast.t); toast.t = setTimeout(() => (el.hidden = true), 3500);
 }
 
+// 이 기기 저장소(localStorage) 사용량. 글자는 UTF-16이라 한 글자 2바이트로 센다.
+function storageBytes() {
+  try { let n = 0; for (const k of Object.keys(localStorage)) n += (k.length + (localStorage.getItem(k) || "").length) * 2; return n; }
+  catch { return 0; }
+}
+function saveText() {
+  const used = `이 기기 저장 사용량 ${fmtSize(storageBytes())}`;
+  return store.saveOk ? `저장됨 · ${used}` : `⚠ 저장 안 됨 — 이 기기 저장 공간이 가득 참 (${used}). 설정집·대화를 줄이거나 내보낸 뒤 지우기`;
+}
+let saveStateT = 0;
+function showSaveState() { // 입력할 때마다 계산하면 느려서 잠깐 모아서
+  clearTimeout(saveStateT);
+  saveStateT = setTimeout(() => {
+    const el = document.getElementById("saveState");
+    if (el) { el.textContent = saveText(); el.classList.toggle("warn", !store.saveOk); }
+    if (typeof setBusy === "function") setBusy(!!busy);
+  }, 300);
+}
+
 function setBusy(on) {
   const b = document.getElementById("sendBtn");
   if (b) { b.textContent = on ? "■" : "↑"; b.setAttribute("aria-label", on ? "멈추기" : "보내기"); }
   const p = cachePct();
-  document.getElementById("count").textContent = on ? "답하는 중…" : p === null ? "" : `캐시 ${p}%`;
+  const c = document.getElementById("count");
+  c.textContent = on ? "답하는 중…" : !store.saveOk ? "⚠ 저장 안 됨" : p === null ? "" : `캐시 ${p}%`;
+  c.classList.toggle("warn", !on && !store.saveOk);
 }
 
 // ── 라우터 ──────────────────────────────────────────────────
