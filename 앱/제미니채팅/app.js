@@ -648,6 +648,22 @@ const SCREENS = {
         <button class="ghost" id="presetImport" type="button">프리셋 파일 가져오기</button>
         <input id="presetFile" type="file" accept="application/json,.json" hidden>
 
+        <h2>설정 프리셋 <span class="hint">${store.data.presets.length}개</span></h2>
+        <p class="hint">시스템 프롬프트·설정집·모델·온도·출력 한도·안전 필터를 이름 붙여 저장해 두고 한 번에 불러옴. 열쇠는 저장하지 않음. 불러와도 앞 대화는 그대로 남음.</p>
+        <div class="presetsave">
+          <input id="presetName" type="text" maxlength="40" autocomplete="off" placeholder="이름 (예: 세라피나 여왕)">
+          <button type="button" id="presetSave">지금 설정 저장</button>
+        </div>
+        ${store.data.presets.length ? `<ul class="presets">${store.data.presets.map((p) => `
+          <li class="preset" data-pid="${esc(p.id)}">
+            <span class="pname">${esc(p.name)}<small>${p.settings.system ? n(p.settings.system.length) + "자" : "프롬프트 없음"} · ${esc(String(p.settings.model || "").replace(/^models\//, ""))}</small></span>
+            <button type="button" class="small" data-pact="load">불러오기</button>
+            <button type="button" class="ghost small" data-pact="del">삭제</button>
+          </li>`).join("")}</ul>` : ""}
+        <button class="ghost" id="presetExport" type="button">프리셋 파일로 내보내기</button>
+        <button class="ghost" id="presetImport" type="button">프리셋 파일 가져오기</button>
+        <input id="presetFile" type="file" accept="application/json,.json" hidden>
+
         <details class="adv">
           <summary>고급 설정 — 안 건드려도 됨</summary>
 
