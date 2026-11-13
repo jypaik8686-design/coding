@@ -151,3 +151,24 @@ table.ledger { width: 100%; border-collapse: collapse; font-size: 12.5px; font-v
 details.adv { margin: 16px 0 4px; border: 1px solid var(--line); border-radius: var(--radius); padding: 0 14px 14px; background: var(--card); }
 details.adv > summary { min-height: 46px; display: flex; align-items: center; cursor: pointer; font-weight: 600; font-size: 15px; }
 details.adv input[type="text"], details.adv input[type="number"] { background: var(--bg); }
+
+/* 읽기 편하게 — 글자 크기는 설정의 --fs, 한글은 단어 단위로 줄바꿈 */
+.msg { max-width: 92%; }
+.msg .text { white-space: normal; font-size: var(--fs, 17px); line-height: 1.75; word-break: keep-all; overflow-wrap: break-word; }
+.msg .text p { margin: 0 0 .8em; }
+.msg .text p:last-child { margin-bottom: 0; }
+.msg .text .act { color: var(--dim); font-style: italic; }
+.msg.user .text .act { color: rgba(255,255,255,.82); }
+.msg .text strong { font-weight: 700; }
+.msg.err .text .act { color: inherit; }
+.msg-sample { line-height: 1.7; word-break: keep-all; }
+
+/* 선택지 버튼 */
+.after { margin-top: -56px; margin-bottom: 72px; }
+.after .again { margin: 8px 0 0; }
+.choices { display: grid; gap: 8px; margin-top: 8px; }
+button.choice { width: 100%; min-height: 46px; padding: 10px 14px; text-align: left; font-weight: 500; line-height: 1.5;
+  white-space: normal; word-break: keep-all; overflow-wrap: break-word; color: var(--ink); background: var(--bg); border: 1.5px solid var(--accent); }
+button.choice:active { background: var(--card); }
+.chk { display: flex; gap: 10px; align-items: center; margin-top: 12px; font-size: 14px; line-height: 1.4; }
+.chk input { width: 22px; height: 22px; flex: none; }

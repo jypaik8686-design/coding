@@ -64,6 +64,8 @@ const SHAPE = () => ({
     lexicon: "",
     temperature: 1,
     maxTok: 8192,
+    fontSize: 17,
+    choices: true,
     safety: { harassment: "OFF", hate: "OFF", explicit: "OFF", danger: "OFF" },
   },
 });
@@ -198,8 +200,7 @@ async function ask() {
         const t = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
         if (t) {
           reply.text += t;
-          const b = bubble(); if (b) b.textContent = reply.text;
-          follow();
+          const b = bubble(); if (b) b.innerHTML = fmt(reply.text);
         }
         if (c?.finishReason && !["STOP", "MAX_TOKENS", "FINISH_REASON_UNSPECIFIED"].includes(c.finishReason))
           blocked = `답이 멈춤: ${why(c.finishReason)}`;
@@ -237,6 +238,7 @@ function send(text) {
   if (!store.data.settings.apiKey.trim()) { location.hash = "#/settings"; toast("API 열쇠를 먼저 넣기"); return; }
   store.push("user", text);
   store.saveQuiet();
+  jumpToBottom = true;
   ask();
 }
 
@@ -246,6 +248,7 @@ function retry() {
   while (ms.length && ms[ms.length - 1].role === "model") ms.pop();
   if (!ms.length) return store.save();
   store.saveQuiet();
+  jumpToBottom = true;
   ask();
 }
 
@@ -267,8 +270,12 @@ const SCREENS = {
       : `<p class="empty">${noKey ? "설정에서 제미니 API 열쇠를 먼저 넣기." : "아무 말이나 적어 보내기."}</p>`;
     const last = ms[ms.length - 1];
     const again = !busy && last && last.role === "model" ? `<button class="ghost small" id="retry">↻ 다시 뽑기</button>` : "";
+    const opts = !busy && store.data.settings.choices && last && last.role === "model" && !last.err ? choices(last.text) : [];
+    const btns = opts.length
+      ? `<div class="choices" role="group" aria-label="선택지">${opts.map((o, i) =>
+          `<button type="button" class="choice" data-choice="${i}">${esc(o)}</button>`).join("")}</div>` : "";
     return `${list}
-      <div class="again">${again}</div>
+      <div class="after">${btns}<div class="again">${again}</div></div>
       <form id="composer" class="composer">
         <textarea id="msg" name="msg" rows="1" placeholder="메시지" enterkeyhint="send"
                   autocomplete="off" ${noKey ? "disabled" : ""}></textarea>
@@ -311,6 +318,13 @@ const SCREENS = {
         <input id="apiKey" type="password" autocomplete="off" spellcheck="false"
                value="${esc(s.apiKey)}" placeholder="AIza…">
         <p class="hint">이 기기 브라우저에만 저장됨. 내보내기 파일에는 안 들어감. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio</a>에서 받기.</p>
+
+        <h2>글자 크기 <span id="fsVal" class="hint">${s.fontSize}</span></h2>
+        <input id="fontSize" type="range" min="14" max="24" step="1" value="${s.fontSize}">
+        <p class="hint msg-sample" style="font-size:${s.fontSize}px" id="fsSample">이 크기로 대화가 보임. 가나다라마바사 ABC 123</p>
+
+        <label class="chk"><input type="checkbox" id="choicesOn" ${s.choices ? "checked" : ""}>
+          답 끝에 선택지(1. 2. / ① ② / A) B) …)가 있으면 버튼으로 보기</label>
 
         <h2>모델</h2>
         <select id="modelPick">${modelOptions(s.model)}</select>
@@ -357,9 +371,54 @@ const SCREENS = {
   },
 };
 
+// 답 끝에 붙은 선택지를 뽑는다: 1. 2. / 1) 2) / ① ② / A. B. / [1] [2] / (1) (2) / 질문 뒤의 불릿(-, *, •).
+// 2~8개, 한 개당 120자 이하, 답의 맨 끝(뒤에 짧은 질문 한 줄까지 허용)일 때만. 못 찾으면 [].
+// 불릿은 오탐이 많아서 바로 위 줄이 ?·:로 끝나거나 ‘선택’·‘고르’가 있을 때만 인정한다.
+function choices(text) {
+  const MARK = [
+    /^[①-⑩]\s*(.+)$/,
+    /^[\[(]\s*(?:\d{1,2}|[A-Da-d])\s*[\])]\s*(.+)$/,
+    /^(?:\d{1,2}|[A-Da-d])[.)]\s+(.+)$/,
+  ];
+  const strip = (x) => x.replace(/[*_`]/g, "").trim();
+  const num = (l) => { const b = l.replace(/^[-*•]\s+/, ""); for (const r of MARK) { const m = r.exec(b); if (m) return strip(m[1]); } return null; };
+  const bul = (l) => { const m = /^[-*•]\s+(.+)$/.exec(l); return m ? strip(m[1]) : null; };
+  const lines = String(text).replace(/\r/g, "").split("\n").map((l) => l.replace(/\*\*/g, "").trim());
+
+  let end = lines.length;
+  while (end > 0 && !lines[end - 1]) end--;
+  let tail = false; // 선택지 뒤에 짧은 질문 한 줄이 붙은 경우
+  if (end > 0 && num(lines[end - 1]) === null && bul(lines[end - 1]) === null && lines[end - 1].length <= 80) {
+    tail = true; end--;
+  }
+  const items = []; let kind = null; let i = end - 1;
+  for (; i >= 0; i--) {
+    const l = lines[i];
+    if (!l) continue; // 항목 사이 빈 줄은 건너뜀
+    const a = num(l), b = a === null ? bul(l) : null;
+    const k = a !== null ? "num" : b !== null ? "bul" : null;
+    if (k === null || (kind && k !== kind)) break;
+    kind = k; items.unshift(a ?? b);
+  }
+  if (items.length < 2 || items.length > 8) return [];
+  if (items.some((x) => !x || x.length > 120)) return [];
+  if (kind === "bul" && !tail && !/[?？:：]$|선택|고르/.test(i >= 0 ? lines[i] : "")) return [];
+  return items;
+}
+
+// 읽기 쉽게: 빈 줄은 문단으로, **굵게**, *행동*, (행동)은 흐리고 기울인 글씨로. 먼저 esc로 막아서 HTML이 끼어들 수 없다.
+function fmt(s) {
+  const inline = (x) => esc(x)
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, '<span class="act">$1</span>')
+    .replace(/(\([^()\n]+\)|（[^（）\n]+）)/g, '<span class="act">$1</span>');
+  return String(s).split(/\n{2,}/).filter((q) => q.trim())
+    .map((q) => `<p>${inline(q.trim()).replace(/\n/g, "<br>")}</p>`).join("");
+}
+
 const bubbleHTML = (m) => `
   <li class="msg ${m.role} ${m.err ? "err" : ""}" data-id="${m.id}">
-    <div class="text">${m.err ? "⚠ " + esc(m.err) : esc(m.text)}</div>
+    <div class="text">${m.err ? "⚠ " + esc(m.err) : fmt(m.text)}</div>
     ${m.note || m.cut ? `<div class="note">${esc(m.note || "길이 한도에서 잘림")}</div>` : ""}
     ${m.text && !m.err ? `<button class="copy" data-act="copy" aria-label="복사">⧉</button>` : ""}
   </li>`;
@@ -374,11 +433,6 @@ function toast(t) {
   clearTimeout(toast.t); toast.t = setTimeout(() => (el.hidden = true), 3500);
 }
 
-function follow() {
-  const nearBottom = innerHeight + scrollY > document.documentElement.scrollHeight - 160;
-  if (nearBottom || busy) scrollTo(0, document.documentElement.scrollHeight);
-}
-
 function setBusy(on) {
   const b = document.getElementById("sendBtn");
   if (b) { b.textContent = on ? "■" : "↑"; b.setAttribute("aria-label", on ? "멈추기" : "보내기"); }
@@ -390,19 +444,30 @@ function setBusy(on) {
 const TITLES = { chat: "제미니채팅", ledger: "장부", settings: "설정" };
 const route = () => (location.hash.replace(/^#\/?/, "") || "chat").split("/")[0];
 
+// 화면 위치는 사용자만 정한다. 맨 아래로 가는 것은 (1) 내가 말을 보냈을 때 (2) 대화 화면에 들어왔을 때뿐.
+// 답이 오는 중이거나 다시 그려질 때는 보던 자리를 그대로 둔다.
+let jumpToBottom = false;
+
 function render() {
   const name = SCREENS[route()] ? route() : "chat";
   const draft = document.getElementById("msg")?.value || "";
+  const before = document.body.dataset.screen, y = scrollY;
   document.getElementById("screen").innerHTML = SCREENS[name]();
   document.getElementById("title").textContent =
     name === "chat" ? store.data.settings.model.replace(/^models\//, "") : TITLES[name];
   document.body.dataset.screen = name;
+  document.documentElement.style.setProperty("--fs", `${Number(store.data.settings.fontSize) || 17}px`);
   document.querySelectorAll(".tabs a").forEach((a) => {
     if (a.dataset.tab === name) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   });
   wire(name, draft);
   setBusy(!!busy);
+  const bottom = document.documentElement.scrollHeight;
+  if (name !== before) scrollTo(0, name === "chat" ? bottom : 0);
+  else if (jumpToBottom) scrollTo(0, bottom);
+  else scrollTo(0, y);
+  jumpToBottom = false;
 }
 
 function grow(t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
@@ -422,7 +487,6 @@ function wire(name, draft) {
       send(v);
     });
     document.getElementById("retry")?.addEventListener("click", retry);
-    scrollTo(0, document.documentElement.scrollHeight);
   }
   if (name === "ledger") {
     document.getElementById("clearLedger")?.addEventListener("click", () => {
@@ -440,6 +504,14 @@ function wireSettings() {
     store.saveQuiet();
   });
   bind("apiKey", "apiKey");
+  document.getElementById("choicesOn").addEventListener("change", (e) => { s.choices = e.target.checked; store.saveQuiet(); });
+  document.getElementById("fontSize").addEventListener("input", (e) => {
+    s.fontSize = Number(e.target.value);
+    document.documentElement.style.setProperty("--fs", `${s.fontSize}px`);
+    document.getElementById("fsVal").textContent = s.fontSize;
+    document.getElementById("fsSample").style.fontSize = `${s.fontSize}px`;
+    store.saveQuiet();
+  });
   const pick = document.getElementById("modelPick");
   const text = document.getElementById("model");
   pick.addEventListener("change", () => { s.model = pick.value; text.value = s.model; store.saveQuiet(); });
@@ -519,11 +591,25 @@ function wireSettings() {
 }
 
 document.getElementById("screen").addEventListener("click", (e) => {
+  const ch = e.target.closest("[data-choice]");
+  if (ch) {
+    const ms = store.data.messages, last = ms[ms.length - 1];
+    const o = last && last.role === "model" ? choices(last.text)[Number(ch.dataset.choice)] : null;
+    if (o) send(o);
+    return;
+  }
   const btn = e.target.closest("[data-act=copy]");
   if (!btn) return;
   const m = store.data.messages.find((x) => x.id === btn.closest("[data-id]").dataset.id);
   if (m) navigator.clipboard?.writeText(m.text).then(() => toast("복사함"), () => toast("복사 못 함"));
 });
+
+// 처음 열 때 브라우저가 load 직후 스크롤을 0으로 되돌리는 일이 있다. 사용자가 아직 화면을 건드리지 않았을 때만 한 번 더 맨 아래로.
+let touched = false;
+for (const ev of ["touchstart", "wheel", "keydown", "mousedown"]) addEventListener(ev, () => { touched = true; }, { passive: true, once: true });
+addEventListener("load", () => setTimeout(() => {
+  if (!touched && document.body.dataset.screen === "chat") scrollTo(0, document.documentElement.scrollHeight);
+}, 50));
 
 addEventListener("hashchange", render);
 render();
