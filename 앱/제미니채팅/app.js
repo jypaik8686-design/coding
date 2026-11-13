@@ -55,6 +55,94 @@ const FALLBACK = ["", "BLOCK_NONE", "BLOCK_ONLY_HIGH"];
 const PRESET_KEYS = ["system", "lexicon", "model", "temperature", "maxTok", "safety", "choices"];
 const PRESET_MAX = 30;
 
+// ── 첨부 파일 ──
+// 파일 내용은 localStorage가 아니라 IndexedDB에 둔다(5MB 안팎 한도를 금방 넘기 때문). 말에는 이름·크기만 남긴다.
+const FILE_MAX_COUNT = 10;               // 한 번에 붙일 수 있는 개수
+const INLINE_MAX = 14 * 1024 * 1024;     // 요청 하나에 실을 파일 합계(바이트). 요청 전체 20MB(글 포함, base64로 4/3배)에 들게
+const TEXT_MAX = 2 * 1024 * 1024;        // 글 파일 하나의 최대 크기
+const TEXT_EXT = new Set(["txt", "md", "markdown", "csv", "tsv", "json", "html", "htm", "xml", "log", "srt", "vtt", "yaml", "yml", "ini", "js", "ts", "py", "css", "java", "c", "cpp", "h", "sh", "sql"]);
+const OOXML = "application/vnd.openxmlformats-officedocument.";
+// 확장자로 MIME을 정한다(브라우저가 비워 두거나 다르게 줄 때가 많아서). 형식은 공식 문서에 나온 것만.
+const MIME_BY_EXT = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", heic: "image/heic", heif: "image/heif",
+  pdf: "application/pdf",
+  docx: OOXML + "wordprocessingml.document", pptx: OOXML + "presentationml.presentation", xlsx: OOXML + "spreadsheetml.sheet",
+  wav: "audio/wav", mp3: "audio/mp3", m4a: "audio/m4a", aac: "audio/aac", ogg: "audio/ogg", flac: "audio/flac",
+  aiff: "audio/aiff", aif: "audio/aiff", opus: "audio/opus",
+};
+
+const idb = (() => {
+  const mem = new Map(); // IndexedDB를 못 쓰는 브라우저용 임시 보관(이 창이 열려 있는 동안만)
+  let dbp = null, memOnly = false;
+  const open = () => dbp || (dbp = new Promise((ok, no) => {
+    try {
+      const r = indexedDB.open("제미니채팅-파일", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("f");
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => no(r.error);
+      r.onblocked = () => no(new Error("blocked"));
+    } catch (e) { no(e); }
+  }));
+  const run = async (mode, fn) => {
+    const db = await open();
+    return new Promise((ok, no) => {
+      const tx = db.transaction("f", mode);
+      const req = fn(tx.objectStore("f"));
+      tx.oncomplete = () => ok(req ? req.result : undefined);
+      tx.onerror = tx.onabort = () => no(tx.error || new Error("tx"));
+    });
+  };
+  return {
+    async put(id, blob) { // 이 기기에 남겼으면 true, 임시 보관뿐이면 false
+      if (!memOnly) { try { await run("readwrite", (s) => s.put(blob, id)); return true; } catch { memOnly = true; } }
+      mem.set(id, blob);
+      return false;
+    },
+    async get(id) {
+      if (mem.has(id)) return mem.get(id);
+      if (memOnly) return null;
+      try { return (await run("readonly", (s) => s.get(id))) || null; } catch { return null; }
+    },
+    async del(ids) {
+      for (const id of ids) mem.delete(id);
+      if (memOnly || !ids.length) return;
+      try { await run("readwrite", (s) => { for (const id of ids) s.delete(id); }); } catch {}
+    },
+    async clear() { mem.clear(); if (memOnly) return; try { await run("readwrite", (s) => s.clear()); } catch {} },
+  };
+})();
+
+function dropFiles(msgs, keep = new Set()) { // 지워지는 말에 붙은 파일 내용도 치운다
+  idb.del(msgs.flatMap((m) => (m.files || []).map((f) => f.id)).filter((id) => !keep.has(id)));
+}
+const b64 = (blob) => new Promise((ok, no) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).split(",")[1] || "");
+  r.onerror = () => no(r.error);
+  r.readAsDataURL(blob);
+});
+function fmtSize(n) { return n < 1024 ? `${n}B` : n < 1048576 ? `${(n / 1024).toFixed(n < 10240 ? 1 : 0)}KB` : `${(n / 1048576).toFixed(1)}MB`; }
+function fileIcon(f) {
+  return f.kind === "text" ? "📝" : /^image\//.test(f.mime) ? "🖼" : f.mime === "application/pdf" ? "📄" : /^audio\//.test(f.mime) ? "🎵" : "📎";
+}
+function classify(f) {
+  const ext = (f.name.split(".").pop() || "").toLowerCase();
+  if (TEXT_EXT.has(ext)) return { kind: "text", mime: "text/plain" };
+  if (MIME_BY_EXT[ext]) return { kind: "bin", mime: MIME_BY_EXT[ext] };
+  if (/^text\//.test(f.type)) return { kind: "text", mime: "text/plain" };
+  if (/^image\/(png|jpeg|webp|heic|heif)$/.test(f.type) || f.type === "application/pdf") return { kind: "bin", mime: f.type };
+  const hint = ext === "hwp" || ext === "hwpx" ? " — 한글 파일은 PDF나 txt로 저장해서 올리기" : ext === "gif" ? " — png나 jpg로 바꿔서 올리기" : "";
+  return { error: `‘${f.name}’은(는) 못 읽는 형식임${hint}. 가능: txt·md·PDF·docx·이미지·소리` };
+}
+// 글 파일을 읽는다. 한국어 .txt는 UTF-8이 아니라 EUC-KR(CP949)인 경우가 많아서, UTF-8로 안 읽히면 EUC-KR로 읽는다.
+async function readText(f) {
+  const u = new Uint8Array(await f.arrayBuffer());
+  if (u[0] === 0xff && u[1] === 0xfe) return new TextDecoder("utf-16le").decode(u).replace(/^\uFEFF/, "");
+  if (u[0] === 0xfe && u[1] === 0xff) return new TextDecoder("utf-16be").decode(u).replace(/^\uFEFF/, "");
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(u).replace(/^\uFEFF/, ""); }
+  catch { try { return new TextDecoder("euc-kr").decode(u); } catch { return new TextDecoder("utf-8").decode(u); } }
+}
+
 // ── 데이터 모양 ──────────────────────────────────────────────
 // 말 하나:   { id, role: "user"|"model", text, at, err?, note?, cut? }
 // 장부 한 줄: { at, md, inTok, ca, out, s }   (ca = 캐시에서 읽은 입력 토큰, out = 출력+생각 토큰)
@@ -92,12 +180,17 @@ const store = {
     this.data.ledger.unshift(row);
     if (this.data.ledger.length > LEDGER_MAX) this.data.ledger.length = LEDGER_MAX;
   },
-  reset() { this.data.messages = []; this.save(); },
+  reset() { dropFiles(this.data.messages); this.data.messages = []; this.save(); },
 };
 
 function validMsg(m) { return m && typeof m.text === "string" && (m.role === "user" || m.role === "model"); }
 function fixMsg(m) {
   const o = { ...m, id: m.id || crypto.randomUUID(), at: m.at || Date.now() };
+  if (Array.isArray(o.files)) {
+    o.files = o.files.filter((f) => f && typeof f.id === "string" && typeof f.name === "string")
+      .map((f) => ({ id: f.id, name: f.name.slice(0, 120), mime: String(f.mime || ""), size: Number(f.size) || 0, kind: f.kind === "text" ? "text" : "bin" }));
+  }
+  if (!o.files || !o.files.length) delete o.files;
   if (o.pending) { // 답이 오던 중에 앱이 꺼진 것: 받은 글은 지키고 끊긴 답으로 표시한다
     delete o.pending;
     if (o.role === "model") {
@@ -182,14 +275,31 @@ function load() {
 // ── 제미니 호출 ─────────────────────────────────────────────
 let busy = null; // 진행 중인 AbortController
 
-function history() {
-  // 오류 난 답과 빈 답은 보내지 않는다. 연달아 같은 역할이 오면 API가 싫어하므로 합친다.
+async function history() {
+  const msgs = store.data.messages;
+  // 용량: 새 첨부부터 세어 INLINE_MAX를 넘으면 오래된 첨부는 안내 글만 보낸다
+  const keep = new Set();
+  let budget = INLINE_MAX;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    for (const f of [...(msgs[i].files || [])].reverse()) if (f.size <= budget) { keep.add(f.id); budget -= f.size; }
+  }
+  // 오류 난 답과 빈 말은 보내지 않는다. 연달아 같은 역할이 오면 API가 싫어하므로 합친다.
   const out = [];
-  for (const m of store.data.messages) {
-    if (m.err || !m.text.trim()) continue;
+  for (const m of msgs) {
+    const files = m.files || [];
+    if (m.err || (!m.text.trim() && !files.length)) continue;
+    const parts = [];
+    for (const f of files) {
+      const blob = keep.has(f.id) ? await idb.get(f.id) : null;
+      if (!keep.has(f.id)) parts.push({ text: `[이전 첨부 파일 ‘${f.name}’은(는) 용량 때문에 이번 요청에서 빠짐]` });
+      else if (!blob) parts.push({ text: `[첨부 파일 ‘${f.name}’은(는) 이 기기에 없어서 빠짐]` });
+      else if (f.kind === "text") parts.push({ text: `[첨부 파일: ${f.name}]\n${await blob.text()}\n[첨부 파일 끝]` });
+      else parts.push({ text: `[첨부 파일: ${f.name}]` }, { inline_data: { mime_type: f.mime, data: await b64(blob) } });
+    }
+    if (m.text.trim()) parts.push({ text: m.text });
     const last = out[out.length - 1];
-    if (last && last.role === m.role) last.parts[0].text += "\n\n" + m.text;
-    else out.push({ role: m.role, parts: [{ text: m.text }] });
+    if (last && last.role === m.role) last.parts.push({ text: "\n\n" }, ...parts);
+    else out.push({ role: m.role, parts });
   }
   return out;
 }
@@ -264,7 +374,7 @@ async function ask(cont) {
   try {
     // 앞부분은 늘 같은 순서: 고정 시스템 프롬프트 → 사전설정집 → 대화(덧붙이기만)
     const sys = [s.system.trim(), s.lexicon.trim() && `[설정집]\n${s.lexicon.trim()}`].filter(Boolean).join("\n\n");
-    const contents = history();
+    const contents = await history();
     if (resuming) contents.push({ role: "user", parts: [{ text: CONTINUE_ASK }] }); // 저장하지 않는 한 줄
     const body = {
       contents,
@@ -366,13 +476,47 @@ function continueLast() {
   ask(last);
 }
 
-function send(text) {
-  if (busy) return;
+let pending = [];   // 아직 안 보낸 첨부 파일 { id, name, mime, size, kind, blob }
+let sending = false;
+async function send(text) {
+  if (busy || sending) return;
   if (!store.data.settings.apiKey.trim()) { location.hash = "#/settings"; toast("API 열쇠를 먼저 넣기"); return; }
-  store.push("user", text);
-  store.saveQuiet();
-  jumpToBottom = true;
+  sending = true;
+  try {
+    const files = pending;
+    let kept = true;
+    for (const f of files) kept = (await idb.put(f.id, f.blob)) && kept;
+    store.push("user", text, files.length ? { files: files.map(({ id, name, mime, size, kind }) => ({ id, name, mime, size, kind })) } : {});
+    pending = [];
+    if (!kept) toast("이 브라우저는 파일을 저장하지 못함 — 이 창을 닫으면 첨부 파일이 사라짐");
+    store.saveQuiet();
+    jumpToBottom = true;
+  } finally { sending = false; }
   ask();
+}
+
+async function attachFiles(list) {
+  const errs = [];
+  let total = pending.reduce((a, f) => a + f.size, 0);
+  for (const f of list) {
+    if (pending.length >= FILE_MAX_COUNT) { errs.push(`한 번에 ${FILE_MAX_COUNT}개까지`); break; }
+    const c = classify(f);
+    if (c.error) { errs.push(c.error); continue; }
+    try {
+      let blob = f, size = f.size;
+      if (c.kind === "text") {
+        if (f.size > TEXT_MAX) { errs.push(`‘${f.name}’은(는) 글 파일이 너무 큼 (${fmtSize(TEXT_MAX)}까지)`); continue; }
+        blob = new Blob([await readText(f)], { type: "text/plain" });
+        size = blob.size;
+      }
+      if (!size) { errs.push(`‘${f.name}’은(는) 비어 있음`); continue; }
+      if (total + size > INLINE_MAX) { errs.push(`‘${f.name}’은(는) 용량이 커서 못 넣음 (한 번에 ${fmtSize(INLINE_MAX)}까지)`); continue; }
+      total += size;
+      pending.push({ id: crypto.randomUUID(), name: f.name, mime: c.mime, size, kind: c.kind, blob });
+    } catch { errs.push(`‘${f.name}’을(를) 못 읽음`); }
+  }
+  render();
+  if (errs.length) toast(errs.slice(0, 2).join(" / ") + (errs.length > 2 ? ` 외 ${errs.length - 2}건` : ""));
 }
 
 function retry() {
@@ -412,6 +556,9 @@ const SCREENS = {
     return `${list}
       <div class="after">${btns}<div class="again">${again}</div></div>
       <form id="composer" class="composer">
+        ${pending.length ? `<div class="pchips">${pending.map((f, i) => `<span class="fchip">${fileIcon(f)} ${esc(f.name)} · ${fmtSize(f.size)}<button type="button" data-fx="${i}" aria-label="${esc(f.name)} 빼기">✕</button></span>`).join("")}</div>` : ""}
+        <button type="button" id="attach" class="clip" aria-label="파일 넣기" ${noKey ? "disabled" : ""}>📎</button>
+        <input id="fileIn" type="file" multiple hidden>
         <textarea id="msg" name="msg" rows="1" placeholder="메시지" enterkeyhint="send"
                   autocomplete="off" ${noKey ? "disabled" : ""}></textarea>
         <button type="submit" id="sendBtn" aria-label="보내기">${busy ? "■" : "↑"}</button>
@@ -571,7 +718,8 @@ function fmt(s) {
 
 const bubbleHTML = (m) => `
   <li class="msg ${m.role} ${m.err ? "err" : ""}" data-id="${m.id}">
-    <div class="text">${m.err ? "⚠ " + esc(m.err) : fmt(m.text)}</div>
+    ${m.files && !m.text.trim() && !m.err ? "" : `<div class="text">${m.err ? "⚠ " + esc(m.err) : fmt(m.text)}</div>`}
+    ${m.files ? `<div class="mfiles">${m.files.map((f) => `<span class="mf">${fileIcon(f)} ${esc(f.name)} · ${fmtSize(f.size)}</span>`).join("")}</div>` : ""}
     ${m.note || m.cut ? `<div class="note">${esc(m.note || "길이 한도에서 잘림")}</div>` : ""}
     ${m.text && !m.err ? `<button class="copy" data-act="copy" aria-label="복사">⧉</button>` : ""}
   </li>`;
@@ -648,10 +796,17 @@ function wire(name, draft) {
       e.preventDefault();
       if (busy) { busy.abort(); return; }
       const v = t.value.trim();
-      if (!v) return;
+      if (!v && !pending.length) return;
       t.value = "";
       send(v);
     });
+    document.getElementById("attach").addEventListener("click", () => document.getElementById("fileIn").click());
+    document.getElementById("fileIn").addEventListener("change", (e) => {
+      const fs = [...e.target.files]; // 값을 비우면 목록도 비므로 먼저 복사
+      e.target.value = "";
+      if (fs.length) attachFiles(fs);
+    });
+    document.querySelectorAll("[data-fx]").forEach((b) => b.addEventListener("click", () => { pending.splice(Number(b.dataset.fx), 1); render(); }));
     document.getElementById("retry")?.addEventListener("click", retry);
     document.getElementById("cont")?.addEventListener("click", continueLast);
   }
@@ -776,6 +931,7 @@ function wireSettings() {
       if (!Array.isArray(msgs)) throw new Error("대화(messages)가 없는 파일");
       const ok = msgs.filter(validMsg).map(fixMsg);
       if (!confirm(`대화 ${ok.length}개로 바꿈. 지금 대화는 사라짐. (열쇠는 그대로)`)) return;
+      dropFiles(store.data.messages, new Set(ok.flatMap((m) => (m.files || []).map((f) => f.id))));
       store.data.messages = ok;
       if (!Array.isArray(j) && j.settings && typeof j.settings === "object") {
         const { apiKey, ...rest } = j.settings;
@@ -793,7 +949,7 @@ function wireSettings() {
     if (confirm("대화를 전부 지움. 되돌릴 수 없음. (열쇠·설정은 남음)")) store.reset();
   });
   document.getElementById("wipe").addEventListener("click", () => {
-    if (confirm("대화·열쇠·설정·장부를 전부 지움. 되돌릴 수 없음.")) { store.data = SHAPE(); store.save(); }
+    if (confirm("대화·열쇠·설정·장부를 전부 지움. 되돌릴 수 없음.")) { idb.clear(); pending = []; store.data = SHAPE(); store.save(); }
   });
 }
 

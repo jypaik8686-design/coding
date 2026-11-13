@@ -189,3 +189,17 @@ li.preset .pname small { color: var(--dim); font-weight: 400; font-size: 12px; }
 li.preset button { flex: none; }
 
 .again { gap: 8px; }
+
+/* 파일 넣기 */
+.composer { flex-wrap: wrap; }
+.composer .clip { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+.composer .clip[disabled] { opacity: .45; }
+.pchips { flex: 1 0 100%; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.fchip { flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 70vw; padding: 4px 4px 4px 10px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px; font-size: 13px; white-space: nowrap; }
+.fchip button { width: 26px; min-height: 26px; height: 26px; padding: 0; border-radius: 50%; font-size: 13px; line-height: 1;
+  background: transparent; color: var(--dim); }
+.mfiles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.msg.user .mfiles:first-child { margin-top: 0; }
+.mf { font-size: 12.5px; padding: 3px 9px; border-radius: 12px; background: rgba(255,255,255,.2); overflow-wrap: anywhere; }
+.msg.model .mf { background: var(--bg); }
