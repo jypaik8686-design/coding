@@ -187,3 +187,5 @@ li.preset { display: flex; align-items: center; gap: 8px; padding: 10px 12px; ba
 li.preset .pname { flex: 1; min-width: 0; display: grid; gap: 2px; overflow-wrap: anywhere; font-weight: 600; font-size: 15px; }
 li.preset .pname small { color: var(--dim); font-weight: 400; font-size: 12px; }
 li.preset button { flex: none; }
+
+.again { gap: 8px; }

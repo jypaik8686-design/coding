@@ -71,6 +71,7 @@ const SHAPE = () => ({
     maxTok: 8192,
     fontSize: 17,
     choices: true,
+    autoResume: true,
     safety: { harassment: "OFF", hate: "OFF", explicit: "OFF", danger: "OFF" },
   },
 });
@@ -95,7 +96,17 @@ const store = {
 };
 
 function validMsg(m) { return m && typeof m.text === "string" && (m.role === "user" || m.role === "model"); }
-function fixMsg(m) { return { ...m, id: m.id || crypto.randomUUID(), at: m.at || Date.now() }; }
+function fixMsg(m) {
+  const o = { ...m, id: m.id || crypto.randomUUID(), at: m.at || Date.now() };
+  if (o.pending) { // 답이 오던 중에 앱이 꺼진 것: 받은 글은 지키고 끊긴 답으로 표시한다
+    delete o.pending;
+    if (o.role === "model") {
+      if (o.text.trim()) { o.broken = true; o.note = o.note || "연결이 끊김"; }
+      else o.err = o.err || "답이 오기 전에 끊김 — ‘다시 뽑기’를 누르기";
+    }
+  }
+  return o;
+}
 
 function mergeSettings(base, saved) {
   const s = { ...base, ...(saved && typeof saved === "object" ? saved : {}) };
@@ -209,22 +220,54 @@ async function open(body, s, signal) {
   }
 }
 
-async function ask() {
+// 다른 창으로 나가면 브라우저가 페이지를 얼리거나 네트워크를 끊을 수 있다(웹앱이 막을 수 없음).
+// 그래서 받은 글을 계속 저장해 두고, 끊기면 그 글 뒤부터 이어 받는다.
+const STALL_MS = 25000;   // 화면에 돌아온 뒤 이 시간 동안 새 글이 없으면 끊긴 것으로 본다
+const RESUME_MAX = 2;     // 자동으로 이어 받는 횟수. 넘으면 ‘이어 쓰기’ 버튼으로
+const CONTINUE_ASK = "끊겼어. 방금 쓰던 글 바로 다음부터 이어서 끝까지 써줘. 앞부분은 다시 쓰지 마.";
+let lastChunk = 0;
+let persistT = 0;
+
+const whenVisible = () => document.visibilityState === "visible" ? Promise.resolve()
+  : new Promise((ok) => document.addEventListener("visibilitychange", function h() {
+      if (document.visibilityState === "visible") { document.removeEventListener("visibilitychange", h); ok(); }
+    }));
+
+// 끊긴 글에서 마지막으로 문장이 끝난 자리(문장부호·닫는 따옴표 뒤, 또는 줄바꿈 뒤)의 위치. 끝난 문장이 없으면 0.
+function lastSentenceEnd(text) {
+  const re = /[.!?…。]+["'”’)」』]*(?=\s|$)|\n+/g;
+  let m, end = 0;
+  while ((m = re.exec(text))) end = m.index + m[0].length;
+  return end;
+}
+
+// cont가 있으면 그 답의 뒤를 이어 받는다(받은 글이 없으면 처음부터).
+async function ask(cont) {
   const s = store.data.settings;
-  const reply = store.push("model", "");
+  const reply = cont || store.push("model", "");
+  const resuming = !!(cont && cont.text.trim());
+  if (cont) { delete cont.err; delete cont.note; cont.broken = false; cont.stopped = false; cont.cut = false; }
+  if (resuming) { // 문장 중간에서 끊긴 조각은 버리고, 마지막으로 끝난 문장 뒤부터 이어 받는다
+    const cut = lastSentenceEnd(reply.text);
+    if (cut) reply.text = reply.text.slice(0, cut);
+  }
+  reply.pending = true;
   store.saveQuiet();
   render();
   const bubble = () => document.querySelector(`[data-id="${reply.id}"] .text`);
 
-  busy = new AbortController();
+  const ctl = busy = new AbortController();
   setBusy(true);
   const t0 = Date.now();
-  let usage = null;
+  lastChunk = t0;
+  let usage = null, streaming = false, resume = false, got = 0;
   try {
     // 앞부분은 늘 같은 순서: 고정 시스템 프롬프트 → 사전설정집 → 대화(덧붙이기만)
     const sys = [s.system.trim(), s.lexicon.trim() && `[설정집]\n${s.lexicon.trim()}`].filter(Boolean).join("\n\n");
+    const contents = history();
+    if (resuming) contents.push({ role: "user", parts: [{ text: CONTINUE_ASK }] }); // 저장하지 않는 한 줄
     const body = {
-      contents: history(),
+      contents,
       generationConfig: {
         temperature: Number(s.temperature),
         maxOutputTokens: parseInt(s.maxTok, 10) || 8192,
@@ -232,13 +275,15 @@ async function ask() {
     };
     if (sys) body.systemInstruction = { parts: [{ text: sys }] };
 
-    const res = await open(body, s, busy.signal);
+    const res = await open(body, s, ctl.signal);
 
     const reader = res.body.getReader();
     const dec = new TextDecoder();
-    let buf = "", blocked = "";
+    let buf = "", blocked = "", first = resuming;
+    streaming = true;
     for (;;) {
       const { value, done } = await reader.read();
+      lastChunk = Date.now();
       if (done) break;
       buf += dec.decode(value, { stream: true });
       let nl;
@@ -252,24 +297,34 @@ async function ask() {
         if (j.promptFeedback?.blockReason)
           blocked = `질문이 막힘: ${why(j.promptFeedback.blockReason)}${j.promptFeedback.blockReasonMessage ? " · " + j.promptFeedback.blockReasonMessage : ""}`;
         const c = j.candidates?.[0];
-        const t = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
+        let t = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
         if (t) {
-          reply.text += t;
+          // 이어 받는 첫 글이 문장부호 뒤에서 붙으면 띄어 준다
+          if (first) { first = false; if (/[.,!?…)"'”’」』]$/.test(reply.text) && !/^\s/.test(t)) t = " " + t; }
+          reply.text += t; got += t.length;
           const b = bubble(); if (b) b.innerHTML = fmt(reply.text);
           updateJump();
+          if (Date.now() - persistT > 800) { persistT = Date.now(); store.saveQuiet(); } // 앱이 꺼져도 받은 글이 남게
         }
         if (c?.finishReason && !["STOP", "MAX_TOKENS", "FINISH_REASON_UNSPECIFIED"].includes(c.finishReason))
           blocked = `답이 멈춤: ${why(c.finishReason)}`;
         if (c?.finishReason === "MAX_TOKENS") reply.cut = true;
       }
     }
+    streaming = false;
     if (!reply.text && blocked) throw new Error(blocked);
     if (!reply.text) throw new Error("빈 답이 옴");
     if (blocked) reply.note = blocked;
+    else if (resuming && !got) reply.note = "이어 쓸 글이 더 없음";
   } catch (e) {
-    if (e.name === "AbortError") {
+    if (e.name === "AbortError" && !ctl.stalled) { // 사용자가 ■를 누름
       if (!reply.text) reply.err = "멈춤";
-      else reply.note = "중간에 멈춤";
+      else { reply.note = "중간에 멈춤"; reply.stopped = true; }
+    } else if (streaming || ctl.stalled) { // 글이 오던 중에 끊김(다른 창으로 나감, 망 끊김 등)
+      if (reply.text.trim()) { reply.broken = true; reply.note = "연결이 끊김"; }
+      else reply.err = "답이 오기 전에 끊김 — ‘다시 뽑기’를 누르기";
+      resume = (reply.tries || 0) < RESUME_MAX && s.autoResume && navigator.onLine !== false && !!s.apiKey.trim();
+      if (resume) { reply.tries = (reply.tries || 0) + 1; reply.note = "연결이 끊김 — 곧 이어 받음"; delete reply.err; }
     } else {
       reply.err = navigator.onLine === false ? "오프라인 — 망이 돌아오면 ‘다시’를 누르기" : e.message;
     }
@@ -284,9 +339,31 @@ async function ask() {
         s: Math.round((Date.now() - t0) / 100) / 10,
       });
     }
+    delete reply.pending;
     busy = null;
     store.save();
   }
+  if (resume) return resumeLater(reply);
+}
+
+// 화면이 보일 때까지 기다렸다가 이어 받는다. 대기는 한 번에 하나만, 그 사이 대화가 바뀌었으면 하지 않는다.
+let waiting = false;
+async function resumeLater(reply) {
+  if (waiting) return;
+  waiting = true;
+  try { await whenVisible(); } finally { waiting = false; }
+  const ms = store.data.messages;
+  if (!busy && ms[ms.length - 1] === reply) return ask(reply);
+}
+
+// 이어 쓰기 버튼: 끊기거나, 길이 한도에서 잘렸거나, 내가 멈춘 답의 뒤를 이어 받는다.
+function continueLast() {
+  if (busy) return;
+  const ms = store.data.messages, last = ms[ms.length - 1];
+  if (!last || last.role !== "model") return;
+  last.tries = 0;
+  jumpToBottom = true;
+  ask(last);
 }
 
 function send(text) {
@@ -325,8 +402,10 @@ const SCREENS = {
       ? `<ul class="chat">${ms.map(bubbleHTML).join("")}</ul>`
       : `<p class="empty">${noKey ? "설정에서 제미니 API 열쇠를 먼저 넣기." : "아무 말이나 적어 보내기."}</p>`;
     const last = ms[ms.length - 1];
-    const again = !busy && last && last.role === "model" ? `<button class="ghost small" id="retry">↻ 다시 뽑기</button>` : "";
-    const opts = !busy && store.data.settings.choices && last && last.role === "model" && !last.err ? choices(last.text) : [];
+    const canCont = !busy && last && last.role === "model" && !last.err && last.text.trim() && (last.broken || last.cut || last.stopped);
+    const again = !busy && last && last.role === "model"
+      ? `${canCont ? `<button class="small" id="cont">▶ 이어 쓰기</button>` : ""}<button class="ghost small" id="retry">↻ 다시 뽑기</button>` : "";
+    const opts = !busy && store.data.settings.choices && last && last.role === "model" && !last.err && !last.broken ? choices(last.text) : [];
     const btns = opts.length
       ? `<div class="choices" role="group" aria-label="선택지">${opts.map((o, i) =>
           `<button type="button" class="choice" data-choice="${i}">${esc(o)}</button>`).join("")}</div>` : "";
@@ -379,6 +458,8 @@ const SCREENS = {
         <input id="fontSize" type="range" min="14" max="24" step="1" value="${s.fontSize}">
         <p class="hint msg-sample" style="font-size:${s.fontSize}px" id="fsSample">이 크기로 대화가 보임. 가나다라마바사 ABC 123</p>
 
+        <label class="chk"><input type="checkbox" id="autoResumeOn" ${s.autoResume ? "checked" : ""}>
+          다른 창을 보다 와서 답이 끊겼으면 자동으로 이어 받기 (최대 ${RESUME_MAX}번)</label>
         <label class="chk"><input type="checkbox" id="choicesOn" ${s.choices ? "checked" : ""}>
           답 끝에 선택지(1. 2. / ① ② / A) B) …)가 있으면 버튼으로 보기</label>
 
@@ -572,6 +653,7 @@ function wire(name, draft) {
       send(v);
     });
     document.getElementById("retry")?.addEventListener("click", retry);
+    document.getElementById("cont")?.addEventListener("click", continueLast);
   }
   if (name === "ledger") {
     document.getElementById("clearLedger")?.addEventListener("click", () => {
@@ -589,6 +671,7 @@ function wireSettings() {
     store.saveQuiet();
   });
   bind("apiKey", "apiKey");
+  document.getElementById("autoResumeOn").addEventListener("change", (e) => { s.autoResume = e.target.checked; store.saveQuiet(); });
   document.getElementById("choicesOn").addEventListener("change", (e) => { s.choices = e.target.checked; store.saveQuiet(); });
   document.getElementById("fontSize").addEventListener("input", (e) => {
     s.fontSize = Number(e.target.value);
@@ -739,8 +822,26 @@ document.getElementById("jump").addEventListener("click", () => scrollTo({ top: 
 addEventListener("scroll", updateJump, { passive: true });
 addEventListener("resize", updateJump);
 
+// 화면으로 돌아왔는데 새 글이 STALL_MS 동안 없으면 끊긴 것으로 보고 이어 받는다.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !busy) return;
+  const ctl = busy, mark = Date.now();
+  setTimeout(() => { if (busy === ctl && lastChunk < mark) { ctl.stalled = true; ctl.abort(); } }, STALL_MS);
+});
+// 망이 돌아오면 끊긴 채 남은 마지막 답을 이어 받는다.
+function resumeIfBroken() {
+  const ms = store.data.messages, last = ms[ms.length - 1], s = store.data.settings;
+  if (!busy && !waiting && last && last.role === "model" && last.broken && !last.err && s.autoResume && s.apiKey.trim()
+      && (last.tries || 0) < RESUME_MAX && navigator.onLine !== false) {
+    last.tries = (last.tries || 0) + 1;
+    resumeLater(last);
+  }
+}
+addEventListener("online", resumeIfBroken);
+
 addEventListener("hashchange", render);
 render();
+setTimeout(resumeIfBroken, 300); // 답이 오던 중에 앱이 꺼졌다 다시 열린 경우
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
