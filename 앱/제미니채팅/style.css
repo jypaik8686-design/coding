@@ -162,3 +162,13 @@ details.adv input[type="text"], details.adv input[type="number"] { background: v
 .msg .text strong { font-weight: 700; }
 .msg.err .text .act { color: inherit; }
 .msg-sample { line-height: 1.7; word-break: keep-all; }
+
+/* 선택지 버튼 */
+.after { margin-top: -56px; margin-bottom: 72px; }
+.after .again { margin: 8px 0 0; }
+.choices { display: grid; gap: 8px; margin-top: 8px; }
+button.choice { width: 100%; min-height: 46px; padding: 10px 14px; text-align: left; font-weight: 500; line-height: 1.5;
+  white-space: normal; word-break: keep-all; overflow-wrap: break-word; color: var(--ink); background: var(--bg); border: 1.5px solid var(--accent); }
+button.choice:active { background: var(--card); }
+.chk { display: flex; gap: 10px; align-items: center; margin-top: 12px; font-size: 14px; line-height: 1.4; }
+.chk input { width: 22px; height: 22px; flex: none; }
