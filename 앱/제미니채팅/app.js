@@ -52,7 +52,7 @@ const LEVEL_LABEL = { OFF: "OFF", BLOCK_NONE: "NONE", BLOCK_ONLY_HIGH: "HIGH", B
 const FALLBACK = ["", "BLOCK_NONE", "BLOCK_ONLY_HIGH"];
 
 // 이름 붙여 저장해 두는 설정 묶음(프리셋). 열쇠와 글자 크기(기기 취향)는 넣지 않는다.
-const PRESET_KEYS = ["system", "lexicon", "model", "temperature", "maxTok", "safety", "choices", "helperSystem", "helperModel", "helperAmbition"];
+const PRESET_KEYS = ["system", "lexicon", "model", "temperature", "maxTok", "safety", "choices", "helperSystem", "helperModel", "helperAmbition", "noteGuide"];
 const PRESET_MAX = 30;
 
 // ── 노트·조수 AI ──
@@ -64,6 +64,9 @@ const SNAP_MAX = 10, SNAP_CHARS = 400000;
 const TOOL_STEPS = 6;           // 한 번의 대답에서 도구를 부를 수 있는 횟수
 const HELPER_LOG_MAX = 20;
 const HELPER_SYSTEM = "너는 ‘조수’다. 사용자나 다른 AI가 맡긴 일을 끝까지 해낸다. 노트가 필요하면 먼저 note_read로 읽는다. 일부만 고칠 때는 note_edit나 note_append를 쓰고, note_write는 노트를 통째로 새로 쓸 때만 쓴다. 일을 마치면 무엇을 했는지 두세 줄로 보고한다.";
+// 대화 AI가 중요한 내용을 노트에 적게 하는 지침. 역할 프롬프트(여왕 등)가 강하면 AI가 연기에만 집중해서 노트를 안 적기 때문에,
+// 설정에서 보이고 고칠 수 있는 문단으로 시스템 프롬프트 끝에 붙인다(몰래 붙이지 않음).
+const NOTE_GUIDE = "대화에서 사용자가 말한 사실(이름·설정·수치·날짜), 결정, 약속, 해야 할 일이 나오면, 역할을 유지한 채로 note_append 도구로 노트에 한 줄씩 짧게 기록한다. 이미 노트에 있는 내용은 다시 적지 않고, 노트를 통째로 바꾸지 않는다. 잡담은 기록하지 않는다.";
 const NOTE_TOOLS = [
   { name: "note_read", description: "노트의 현재 내용 전체를 읽는다. 기억이 필요할 때, 그리고 노트를 고치기 전에 쓴다.", parameters: { type: "object", properties: {} } },
   { name: "note_append", description: "노트 맨 뒤에 글을 덧붙인다. 새 메모나 기록을 남길 때 쓴다.",
@@ -212,6 +215,8 @@ const SHAPE = () => ({
     autoResume: true,
     notesOn: true,
     noteShow: true,
+    noteGuideOn: true,
+    noteGuide: NOTE_GUIDE,
     helperModel: "gemini-3.8-flash",
     helperSystem: HELPER_SYSTEM,
     webOn: true,
@@ -291,6 +296,7 @@ function cleanPreset(o) {
   if (o.maxTok !== "" && o.maxTok != null && Number.isFinite(mt) && mt >= 1 && mt <= 1000000) s.maxTok = Math.floor(mt);
   if (typeof o.choices === "boolean") s.choices = o.choices;
   if (typeof o.helperSystem === "string") s.helperSystem = o.helperSystem;
+  if (typeof o.noteGuide === "string") s.noteGuide = o.noteGuide;
   if (typeof o.helperModel === "string" && o.helperModel.trim()) s.helperModel = o.helperModel.trim();
   if ([0, 1, 2].includes(Number(o.helperAmbition)) && o.helperAmbition !== "" && o.helperAmbition != null) s.helperAmbition = Number(o.helperAmbition);
   if (o.safety && typeof o.safety === "object") {
@@ -811,7 +817,11 @@ async function ask(cont) {
   const addUsage = (u) => { tot.p += u.promptTokenCount || 0; tot.c += u.cachedContentTokenCount || 0; tot.o += (u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0); tot.n++; };
   try {
     // 앞부분은 늘 같은 순서: 고정 시스템 프롬프트 → 사전설정집 → 대화(덧붙이기만)
-    const sys = [s.system.trim(), s.lexicon.trim() && `[설정집]\n${s.lexicon.trim()}`].filter(Boolean).join("\n\n");
+    const sys = [
+      s.system.trim(),
+      s.lexicon.trim() && `[설정집]\n${s.lexicon.trim()}`,
+      s.notesOn && s.noteGuideOn && String(s.noteGuide || "").trim() && `[노트 기록 규칙]\n${s.noteGuide.trim()}`, // 노트 도구가 켜져 있을 때만
+    ].filter(Boolean).join("\n\n");
     let contents = await history();
     if (resuming) contents.push({ role: "user", parts: [{ text: CONTINUE_ASK }] }); // 저장하지 않는 한 줄
     if (s.noteShow && store.data.note.text.trim()) { // 노트를 마지막 사용자 말 앞에 얹는다(앞부분이 안 바뀌어 캐시가 덜 깨짐). 저장은 안 함
@@ -1133,7 +1143,11 @@ const SCREENS = {
           대화 AI가 노트를 읽고 쓰고, 조수 AI에게 일을 시킬 수 있게 하기</label>
         <label class="chk"><input type="checkbox" id="noteShow" ${s.noteShow ? "checked" : ""}>
           노트 내용을 매번 AI에게 보여 주기 (2만 자까지)</label>
-        <p class="hint">도구는 모델이 부르는 기능이라 모델이 도구를 못 쓰면 자동으로 꺼서 답함. 노트를 매번 보여 주면 입력 토큰이 늘어남.</p>
+        <label class="chk"><input type="checkbox" id="noteGuideOn" ${s.noteGuideOn ? "checked" : ""}>
+          중요한 내용을 노트에 적게 하는 지침을 시스템 프롬프트에 붙이기</label>
+        <textarea id="noteGuide" rows="4">${esc(s.noteGuide)}</textarea>
+        <button type="button" class="ghost small" id="noteGuideReset" style="margin:6px 0">지침 기본값</button>
+        <p class="hint">역할 프롬프트(여왕 등)가 강하면 AI가 연기만 하고 노트를 안 적는 일이 있어서, 위 지침을 시스템 프롬프트 끝에 붙여 보냄(노트 도구가 켜져 있을 때만). 도구는 모델이 부르는 기능이라 모델이 도구를 못 쓰면 자동으로 꺼서 답함. 노트를 매번 보여 주면 입력 토큰이 늘어남.</p>
         <label class="chk"><input type="checkbox" id="webOn" ${s.webOn ? "checked" : ""}>
           조수 AI가 인터넷을 검색하고 페이지를 읽게 하기 (Firecrawl)</label>
         <input id="firecrawlKey" type="password" autocomplete="off" spellcheck="false" value="${esc(s.firecrawlKey)}" placeholder="Firecrawl 열쇠 (fc-…, 비워도 됨)">
@@ -1459,6 +1473,11 @@ function wireSettings() {
   document.getElementById("noteShow").addEventListener("change", (e) => { s.noteShow = e.target.checked; store.saveQuiet(); });
   document.getElementById("helperPick").addEventListener("change", (e) => { s.helperModel = e.target.value; store.saveQuiet(); });
   bind("helperSystem", "helperSystem");
+  document.getElementById("noteGuideOn").addEventListener("change", (e) => { s.noteGuideOn = e.target.checked; store.saveQuiet(); });
+  bind("noteGuide", "noteGuide");
+  document.getElementById("noteGuideReset").addEventListener("click", () => {
+    s.noteGuide = NOTE_GUIDE; document.getElementById("noteGuide").value = NOTE_GUIDE; store.saveQuiet(); toast("노트 기록 지침을 기본값으로");
+  });
   document.getElementById("helperAmbition").addEventListener("change", (e) => { s.helperAmbition = Number(e.target.value); store.saveQuiet(); });
   document.getElementById("webOn").addEventListener("change", (e) => { s.webOn = e.target.checked; store.saveQuiet(); });
   bind("firecrawlKey", "firecrawlKey");
