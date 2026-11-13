@@ -56,7 +56,7 @@ main {
 /* 하단 탭 — 손가락 닿는 높이 44px 이상 */
 .tabs {
   position: fixed; inset: auto 0 0 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(3, 1fr);
   padding-bottom: env(safe-area-inset-bottom);
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: blur(12px);
@@ -129,7 +129,7 @@ button.small { min-height: 34px; padding: 0 14px; font-size: 14px; }
 }
 .composer textarea { flex: 1; resize: none; min-height: 46px; max-height: 160px; padding: 11px 14px; border-radius: 23px; line-height: 1.4; }
 .composer button { width: 46px; padding: 0; border-radius: 50%; font-size: 20px; flex: none; }
-body[data-screen="chat"] main, body[data-screen="room"] main { padding-bottom: calc(var(--tabs) + env(safe-area-inset-bottom) + 80px); }
+body[data-screen="chat"] main { padding-bottom: calc(var(--tabs) + env(safe-area-inset-bottom) + 80px); }
 input[type="password"] { width: 100%; padding: 13px 14px; font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
 input[type="range"] { width: 100%; accent-color: var(--accent); }
 a { color: var(--accent); }
@@ -206,44 +206,3 @@ li.preset button { flex: none; }
 
 /* 저장 상태 */
 .hint.warn, .count.warn { color: var(--danger); font-weight: 600; }
-
-/* 노트·조수 */
-#noteText { width: 100%; padding: 13px 14px; font: inherit; line-height: 1.6; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); resize: vertical; min-height: 180px; word-break: keep-all; overflow-wrap: break-word; }
-#helperTask { width: 100%; padding: 12px 14px; font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); resize: vertical; }
-.rowbtn { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
-.rowbtn button { flex: 0 0 auto; }
-.rowbtn button[hidden] { display: none; }
-ul.hlog { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
-li.hitem, li.hnone { padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
-li.hnone { color: var(--dim); text-align: center; font-size: 14px; }
-.hh { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--dim); }
-.hh time { margin-left: auto; }
-.hh .spin { color: var(--accent); }
-.ht { margin: 4px 0; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 15px; }
-.hr { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 15px; line-height: 1.7; word-break: keep-all; overflow-wrap: break-word; }
-.hr p { margin: 0 0 .6em; } .hr p:last-child { margin: 0; }
-.herr { color: var(--danger); font-size: 13px; margin-top: 4px; }
-.tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.tools:empty { display: none; }
-.tl { font-size: 12.5px; padding: 3px 9px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); color: var(--dim); overflow-wrap: anywhere; }
-.msg.model.hastools .text:empty { display: none; }
-.msg.model.hastools .text:empty::after { content: none; }
-
-/* AI 교류 */
-.rowinline { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; font-size: 14px; }
-ul.room { list-style: none; margin: 10px 0 0; padding: 0 0 72px; display: grid; gap: 10px; }
-li.rm.none { color: var(--dim); text-align: center; padding: 28px 0; font-size: 14px; }
-li.rm.say { padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--card); border-left-width: 4px; }
-li.rm.from-u { border-left-color: var(--accent); }
-li.rm.from-h { border-left-color: #8b5cf6; }
-li.rm.from-m { border-left-color: #9aa1ab; }
-li.rm.report { background: color-mix(in srgb, #8b5cf6 9%, var(--card)); }
-.rh { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--dim); }
-.rh time { margin-left: auto; }
-.rt { margin-top: 4px; font-size: 16px; line-height: 1.7; word-break: keep-all; overflow-wrap: break-word; }
-.rt p { margin: 0 0 .7em; } .rt p:last-child { margin: 0; }
-li.rm.tool { display: flex; } li.rm.tool .tl { font-size: 12.5px; }
-li.rm.tool.by-m { padding-left: 24px; }
-li.rm.sys { text-align: center; color: var(--danger); font-size: 13px; }
-.roomhint { text-align: center; color: var(--accent); min-height: 1.4em; margin: -56px 0 56px; position: relative; }
-.roomhint:empty { display: none; }
