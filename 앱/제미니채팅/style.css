@@ -172,3 +172,34 @@ button.choice { width: 100%; min-height: 46px; padding: 10px 14px; text-align: l
 button.choice:active { background: var(--card); }
 .chk { display: flex; gap: 10px; align-items: center; margin-top: 12px; font-size: 14px; line-height: 1.4; }
 .chk input { width: 22px; height: 22px; flex: none; }
+
+/* ↓ 맨 아래 */
+.jump { position: fixed; right: 14px; z-index: 11; min-height: 40px; padding: 0 16px; border-radius: 20px;
+  font-size: 14px; background: var(--ink); color: var(--bg); box-shadow: 0 2px 10px rgba(0,0,0,.28); }
+.jump[hidden] { display: none; }
+
+/* 설정 프리셋 */
+.presetsave { display: flex; gap: 8px; }
+.presetsave input { flex: 1; min-width: 0; }
+.presetsave button { flex: none; padding: 0 14px; font-size: 14px; }
+ul.presets { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
+li.preset { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+li.preset .pname { flex: 1; min-width: 0; display: grid; gap: 2px; overflow-wrap: anywhere; font-weight: 600; font-size: 15px; }
+li.preset .pname small { color: var(--dim); font-weight: 400; font-size: 12px; }
+li.preset button { flex: none; }
+
+.again { gap: 8px; }
+
+/* 파일 넣기 */
+.composer { flex-wrap: wrap; }
+.composer .clip { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+.composer .clip[disabled] { opacity: .45; }
+.pchips { flex: 1 0 100%; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.fchip { flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 70vw; padding: 4px 4px 4px 10px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px; font-size: 13px; white-space: nowrap; }
+.fchip button { width: 26px; min-height: 26px; height: 26px; padding: 0; border-radius: 50%; font-size: 13px; line-height: 1;
+  background: transparent; color: var(--dim); }
+.mfiles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.msg.user .mfiles:first-child { margin-top: 0; }
+.mf { font-size: 12.5px; padding: 3px 9px; border-radius: 12px; background: rgba(255,255,255,.2); overflow-wrap: anywhere; }
+.msg.model .mf { background: var(--bg); }
