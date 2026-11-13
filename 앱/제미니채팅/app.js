@@ -272,7 +272,9 @@ function load() {
     if (!raw) return SHAPE();
     const d = JSON.parse(raw);
     const base = SHAPE();
+    const { messages: _m, ledger: _l, presets: _p, settings: _s, ...extra } = d; // 이 버전이 모르는 칸(예: 롤백한 기능의 노트·기록)은 지우지 않고 보존
     return {
+      ...extra,
       messages: Array.isArray(d.messages) ? d.messages.filter(validMsg).map(fixMsg) : [],
       presets: Array.isArray(d.presets) ? d.presets.filter(validPreset).map(fixPreset).slice(0, PRESET_MAX) : [],
       ledger: Array.isArray(d.ledger) ? d.ledger.filter((r) => r && typeof r === "object").slice(0, LEDGER_MAX) : [],
@@ -648,22 +650,6 @@ const SCREENS = {
         <button class="ghost" id="presetImport" type="button">프리셋 파일 가져오기</button>
         <input id="presetFile" type="file" accept="application/json,.json" hidden>
 
-        <h2>설정 프리셋 <span class="hint">${store.data.presets.length}개</span></h2>
-        <p class="hint">시스템 프롬프트·설정집·모델·온도·출력 한도·안전 필터를 이름 붙여 저장해 두고 한 번에 불러옴. 열쇠는 저장하지 않음. 불러와도 앞 대화는 그대로 남음.</p>
-        <div class="presetsave">
-          <input id="presetName" type="text" maxlength="40" autocomplete="off" placeholder="이름 (예: 세라피나 여왕)">
-          <button type="button" id="presetSave">지금 설정 저장</button>
-        </div>
-        ${store.data.presets.length ? `<ul class="presets">${store.data.presets.map((p) => `
-          <li class="preset" data-pid="${esc(p.id)}">
-            <span class="pname">${esc(p.name)}<small>${p.settings.system ? n(p.settings.system.length) + "자" : "프롬프트 없음"} · ${esc(String(p.settings.model || "").replace(/^models\//, ""))}</small></span>
-            <button type="button" class="small" data-pact="load">불러오기</button>
-            <button type="button" class="ghost small" data-pact="del">삭제</button>
-          </li>`).join("")}</ul>` : ""}
-        <button class="ghost" id="presetExport" type="button">프리셋 파일로 내보내기</button>
-        <button class="ghost" id="presetImport" type="button">프리셋 파일 가져오기</button>
-        <input id="presetFile" type="file" accept="application/json,.json" hidden>
-
         <details class="adv">
           <summary>고급 설정 — 안 건드려도 됨</summary>
 
@@ -963,7 +949,7 @@ function wireSettings() {
   });
 
   document.getElementById("export").addEventListener("click", () => {
-    const { apiKey, ...settings } = s; // 열쇠는 백업 파일에 넣지 않는다
+    const { apiKey, firecrawlKey, ...settings } = s; // 열쇠는 백업 파일에 넣지 않는다
     download("제미니채팅.json", { messages: store.data.messages, settings, ledger: store.data.ledger, presets: store.data.presets });
   });
 
@@ -981,7 +967,7 @@ function wireSettings() {
       dropFiles(store.data.messages, new Set(ok.flatMap((m) => (m.files || []).map((f) => f.id))));
       store.data.messages = ok;
       if (!Array.isArray(j) && j.settings && typeof j.settings === "object") {
-        const { apiKey, ...rest } = j.settings;
+        const { apiKey, firecrawlKey, ...rest } = j.settings;
         store.data.settings = mergeSettings(store.data.settings, rest);
       }
       if (!Array.isArray(j) && Array.isArray(j.ledger)) store.data.ledger = j.ledger.slice(0, LEDGER_MAX);
