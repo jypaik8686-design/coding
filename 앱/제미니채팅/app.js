@@ -51,12 +51,17 @@ const LEVEL_LABEL = { OFF: "OFF", BLOCK_NONE: "NONE", BLOCK_ONLY_HIGH: "HIGH", B
 // OFF를 서버가 거부하면 이 순서로 한 단계씩 내려서 다시 보낸다. 빈 칸 = 설정값 그대로.
 const FALLBACK = ["", "BLOCK_NONE", "BLOCK_ONLY_HIGH"];
 
+// 이름 붙여 저장해 두는 설정 묶음(프리셋). 열쇠와 글자 크기(기기 취향)는 넣지 않는다.
+const PRESET_KEYS = ["system", "lexicon", "model", "temperature", "maxTok", "safety", "choices"];
+const PRESET_MAX = 30;
+
 // ── 데이터 모양 ──────────────────────────────────────────────
 // 말 하나:   { id, role: "user"|"model", text, at, err?, note?, cut? }
 // 장부 한 줄: { at, md, inTok, ca, out, s }   (ca = 캐시에서 읽은 입력 토큰, out = 출력+생각 토큰)
 const SHAPE = () => ({
   messages: [],
   ledger: [],
+  presets: [],
   settings: {
     apiKey: "",
     model: "gemini-4-argon",
@@ -99,6 +104,55 @@ function mergeSettings(base, saved) {
   return s;
 }
 
+// 파일이나 옛 저장값에서 온 설정 중 쓸 수 있는 칸만 남긴다.
+function cleanPreset(o) {
+  const s = {};
+  if (!o || typeof o !== "object") return s;
+  if (typeof o.system === "string") s.system = o.system;
+  if (typeof o.lexicon === "string") s.lexicon = o.lexicon;
+  if (typeof o.model === "string" && o.model.trim()) s.model = o.model.trim();
+  const tp = Number(o.temperature);
+  if (o.temperature !== "" && o.temperature != null && Number.isFinite(tp) && tp >= 0 && tp <= 2) s.temperature = tp;
+  const mt = Number(o.maxTok);
+  if (o.maxTok !== "" && o.maxTok != null && Number.isFinite(mt) && mt >= 1 && mt <= 1000000) s.maxTok = Math.floor(mt);
+  if (typeof o.choices === "boolean") s.choices = o.choices;
+  if (o.safety && typeof o.safety === "object") {
+    s.safety = {};
+    for (const [k] of CATS) if (LEVELS.includes(o.safety[k])) s.safety[k] = o.safety[k];
+  }
+  return s;
+}
+function validPreset(p) { return !!(p && typeof p.name === "string" && p.name.trim() && p.settings && typeof p.settings === "object"); }
+function fixPreset(p) { return { id: p.id || crypto.randomUUID(), name: p.name.trim().slice(0, 40), at: p.at || Date.now(), settings: cleanPreset(p.settings) }; }
+function takePreset(s) { // 지금 설정에서 프리셋에 넣을 칸만 뽑는다
+  const o = {};
+  for (const k of PRESET_KEYS) o[k] = k === "safety" ? { ...s.safety } : s[k];
+  return cleanPreset(o);
+}
+function applyPreset(p) { // 프리셋에 든 칸만 덮는다. 열쇠·글자 크기는 그대로
+  const cur = store.data.settings, c = cleanPreset(p.settings);
+  store.data.settings = { ...cur, ...c, safety: { ...cur.safety, ...(c.safety || {}) } };
+}
+function mergePresets(cur, incoming) { // 이름이 같으면 덮어쓰고, 새 이름은 더한다
+  const out = [...cur]; let added = 0, replaced = 0, dropped = 0;
+  for (const p of incoming.filter(validPreset).map(fixPreset)) {
+    const i = out.findIndex((x) => x.name === p.name);
+    if (i >= 0) { out[i] = { ...p, id: out[i].id }; replaced++; }
+    else if (out.length >= PRESET_MAX) dropped++;
+    else { out.push(p); added++; }
+  }
+  return { list: out, added, replaced, dropped };
+}
+function download(name, obj) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" }));
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000); // 바로 치우면 일부 브라우저에서 다운로드가 끊김
+}
+
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -107,6 +161,7 @@ function load() {
     const base = SHAPE();
     return {
       messages: Array.isArray(d.messages) ? d.messages.filter(validMsg).map(fixMsg) : [],
+      presets: Array.isArray(d.presets) ? d.presets.filter(validPreset).map(fixPreset).slice(0, PRESET_MAX) : [],
       ledger: Array.isArray(d.ledger) ? d.ledger.filter((r) => r && typeof r === "object").slice(0, LEDGER_MAX) : [],
       settings: mergeSettings(base.settings, d.settings),
     };
@@ -201,6 +256,7 @@ async function ask() {
         if (t) {
           reply.text += t;
           const b = bubble(); if (b) b.innerHTML = fmt(reply.text);
+          updateJump();
         }
         if (c?.finishReason && !["STOP", "MAX_TOKENS", "FINISH_REASON_UNSPECIFIED"].includes(c.finishReason))
           blocked = `답이 멈춤: ${why(c.finishReason)}`;
@@ -338,6 +394,22 @@ const SCREENS = {
         <textarea id="lexicon" rows="8" placeholder="인물·세계관·말투 사전. 요약 말고 사전으로">${esc(s.lexicon)}</textarea>
         <p class="hint">시스템 프롬프트 바로 뒤에 통째로 같이 감.</p>
 
+        <h2>설정 프리셋 <span class="hint">${store.data.presets.length}개</span></h2>
+        <p class="hint">시스템 프롬프트·설정집·모델·온도·출력 한도·안전 필터를 이름 붙여 저장해 두고 한 번에 불러옴. 열쇠는 저장하지 않음. 불러와도 앞 대화는 그대로 남음.</p>
+        <div class="presetsave">
+          <input id="presetName" type="text" maxlength="40" autocomplete="off" placeholder="이름 (예: 세라피나 여왕)">
+          <button type="button" id="presetSave">지금 설정 저장</button>
+        </div>
+        ${store.data.presets.length ? `<ul class="presets">${store.data.presets.map((p) => `
+          <li class="preset" data-pid="${esc(p.id)}">
+            <span class="pname">${esc(p.name)}<small>${p.settings.system ? n(p.settings.system.length) + "자" : "프롬프트 없음"} · ${esc(String(p.settings.model || "").replace(/^models\//, ""))}</small></span>
+            <button type="button" class="small" data-pact="load">불러오기</button>
+            <button type="button" class="ghost small" data-pact="del">삭제</button>
+          </li>`).join("")}</ul>` : ""}
+        <button class="ghost" id="presetExport" type="button">프리셋 파일로 내보내기</button>
+        <button class="ghost" id="presetImport" type="button">프리셋 파일 가져오기</button>
+        <input id="presetFile" type="file" accept="application/json,.json" hidden>
+
         <details class="adv">
           <summary>고급 설정 — 안 건드려도 됨</summary>
 
@@ -468,6 +540,19 @@ function render() {
   else if (jumpToBottom) scrollTo(0, bottom);
   else scrollTo(0, y);
   jumpToBottom = false;
+  updateJump();
+}
+
+// 위로 올려 읽는 중이면(맨 아래까지 240px 넘게 남음) ‘↓ 맨 아래’ 버튼을 보인다. 대화 화면에서만.
+function updateJump() {
+  const el = document.getElementById("jump");
+  if (!el) return;
+  const far = document.body.dataset.screen === "chat" && document.documentElement.scrollHeight - scrollY - innerHeight > 240;
+  el.hidden = !far;
+  if (far) { // 입력창이 커져도 가리지 않게 입력창 위에 붙인다
+    const c = document.getElementById("composer");
+    el.style.bottom = `calc(var(--tabs) + env(safe-area-inset-bottom) + ${(c ? c.offsetHeight : 0) + 12}px)`;
+  }
 }
 
 function grow(t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
@@ -547,16 +632,54 @@ function wireSettings() {
     btn.disabled = false; btn.textContent = "전체 모델 목록 불러오기";
   });
 
+  document.getElementById("presetSave").addEventListener("click", () => {
+    const input = document.getElementById("presetName");
+    const name = input.value.trim().slice(0, 40);
+    if (!name) { toast("이름을 먼저 적기"); input.focus(); return; }
+    const list = store.data.presets, i = list.findIndex((p) => p.name === name);
+    if (i >= 0 && !confirm(`‘${name}’이 이미 있음. 지금 설정으로 덮어씀.`)) return;
+    if (i < 0 && list.length >= PRESET_MAX) { toast(`프리셋은 ${PRESET_MAX}개까지. 하나를 지우기`); return; }
+    const before = JSON.stringify(list);
+    const item = { id: i >= 0 ? list[i].id : crypto.randomUUID(), name, at: Date.now(), settings: takePreset(store.data.settings) };
+    if (i >= 0) list[i] = item; else list.push(item);
+    if (!store.saveQuiet()) { store.data.presets = JSON.parse(before); return; } // 저장 실패하면 원래대로
+    render();
+    toast(`‘${name}’ 저장함`);
+  });
+  document.querySelectorAll("[data-pact]").forEach((b) => b.addEventListener("click", () => {
+    const id = b.closest("[data-pid]").dataset.pid;
+    const p = store.data.presets.find((x) => x.id === id);
+    if (!p) return;
+    if (b.dataset.pact === "load") { applyPreset(p); store.save(); toast(`‘${p.name}’ 불러옴 — 앞 대화는 그대로 남음`); }
+    else if (confirm(`‘${p.name}’ 프리셋을 지움.`)) { store.data.presets = store.data.presets.filter((x) => x.id !== id); store.save(); }
+  }));
+  document.getElementById("presetExport").addEventListener("click", () => {
+    if (!store.data.presets.length) return toast("저장된 프리셋이 없음");
+    download("제미니채팅-프리셋.json", { kind: "제미니채팅-프리셋", presets: store.data.presets });
+  });
+  const pfile = document.getElementById("presetFile");
+  document.getElementById("presetImport").addEventListener("click", () => pfile.click());
+  pfile.addEventListener("change", async () => {
+    const f = pfile.files[0];
+    if (!f) return;
+    try {
+      const j = JSON.parse(await f.text());
+      const arr = Array.isArray(j) ? j : j.presets;
+      if (!Array.isArray(arr)) throw new Error("프리셋(presets)이 없는 파일");
+      const good = arr.filter(validPreset);
+      if (!good.length) throw new Error("쓸 수 있는 프리셋이 없음");
+      const m = mergePresets(store.data.presets, good);
+      if (m.replaced && !confirm(`같은 이름 ${m.replaced}개는 덮어씀. 계속할까?`)) return;
+      store.data.presets = m.list;
+      store.save();
+      toast(`프리셋 ${m.added}개 추가, ${m.replaced}개 덮어씀${m.dropped ? `, ${m.dropped}개는 ${PRESET_MAX}개 한도로 못 넣음` : ""}`);
+    } catch (err) { toast("가져오기 실패: " + err.message); }
+    pfile.value = "";
+  });
+
   document.getElementById("export").addEventListener("click", () => {
     const { apiKey, ...settings } = s; // 열쇠는 백업 파일에 넣지 않는다
-    const out = { messages: store.data.messages, settings, ledger: store.data.ledger };
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: "application/json" }));
-    a.download = "제미니채팅.json";
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000); // 바로 치우면 일부 브라우저에서 다운로드가 끊김
+    download("제미니채팅.json", { messages: store.data.messages, settings, ledger: store.data.ledger, presets: store.data.presets });
   });
 
   const file = document.getElementById("importFile");
@@ -576,6 +699,7 @@ function wireSettings() {
         store.data.settings = mergeSettings(store.data.settings, rest);
       }
       if (!Array.isArray(j) && Array.isArray(j.ledger)) store.data.ledger = j.ledger.slice(0, LEDGER_MAX);
+      if (!Array.isArray(j) && Array.isArray(j.presets)) store.data.presets = mergePresets(store.data.presets, j.presets).list;
       store.save();
       toast("가져왔음");
     } catch (err) { toast("가져오기 실패: " + err.message); }
@@ -610,6 +734,10 @@ for (const ev of ["touchstart", "wheel", "keydown", "mousedown"]) addEventListen
 addEventListener("load", () => setTimeout(() => {
   if (!touched && document.body.dataset.screen === "chat") scrollTo(0, document.documentElement.scrollHeight);
 }, 50));
+
+document.getElementById("jump").addEventListener("click", () => scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" }));
+addEventListener("scroll", updateJump, { passive: true });
+addEventListener("resize", updateJump);
 
 addEventListener("hashchange", render);
 render();
