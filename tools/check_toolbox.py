@@ -132,7 +132,7 @@ def 검사(root: Path) -> list[str]:
         문제.append(f"서랍을 확인하지 못함: {e}")
 
     # 이 저장소 하나만으로 돌아야 한다. 다른 저장소나 이 기계만의 경로에 기대면 잡는다
-    # idea-bin은 아이디어를 넘기는 행선지 이름이라 CLAUDE.md와 세션기록.md에만 쓸 수 있다. 없어도 돌아야 하므로 도구·스킬·앱은 기대면 안 된다
+    # idea-bin은 아이디어를 넘기는 행선지 이름이라 CLAUDE.md에만 쓸 수 있다. 없어도 돌아야 하므로 도구·스킬·앱은 기대면 안 된다
     밖 = re.compile(r"/home/[A-Za-z0-9_.-]+/|/Users/[A-Za-z0-9_.-]+/|idea-bin")
     밖_경로만 = re.compile(r"/home/[A-Za-z0-9_.-]+/|/Users/[A-Za-z0-9_.-]+/")
     글꼴 = {".md", ".py", ".mjs", ".js", ".html", ".css", ".json", ".webmanifest"}
@@ -142,7 +142,7 @@ def 검사(root: Path) -> list[str]:
             continue
         if rel.as_posix() == "tools/check_toolbox.py":
             continue
-        검사 = 밖_경로만 if rel.as_posix() in {"CLAUDE.md", "세션기록.md"} else 밖
+        검사 = 밖_경로만 if rel.as_posix() in {"CLAUDE.md"} else 밖
         m = 검사.search(f.read_text(encoding="utf-8", errors="ignore"))
         if m:
             문제.append(f"저장소 밖에 기댐 ('{m.group(0)}'): {정규(rel.as_posix())}")
