@@ -1,0 +1,62 @@
+/* 돌려보기 — 폰 먼저. 390x844에서 깨지지 않는 것이 기준. 어두운 바탕 고정(그림이 주인공). */
+:root {
+  --bg: #101214;
+  --card: #1a1d21;
+  --line: #2a2e34;
+  --ink: #e9ebee;
+  --dim: #9aa1ab;
+  --accent: #6b9bff;
+  --bar: 52px;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+        "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  display: flex; flex-direction: column; min-height: 100dvh;
+  overscroll-behavior: none;
+}
+
+.bar {
+  height: calc(var(--bar) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 16px 0;
+  display: flex; align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+.bar h1 { margin: 0; font-size: 18px; font-weight: 700; }
+
+#stage { flex: 1; display: flex; flex-direction: column; justify-content: center; min-height: 0; }
+
+#empty { padding: 32px 24px; text-align: center; }
+.lead { font-size: 18px; margin: 0 0 24px; }
+.note { color: var(--dim); font-size: 14px; margin: 20px 0 0; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 16px; border-radius: 12px;
+  background: var(--card); color: var(--ink); border: 1px solid var(--line);
+  font: inherit; font-size: 15px; cursor: pointer;
+}
+.btn.big { min-height: 52px; padding: 0 28px; background: var(--accent); color: #0b1020; border-color: transparent; font-weight: 700; font-size: 17px; }
+.btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: .4; }
+
+#view[hidden], #empty[hidden], #ctl[hidden] { display: none; }
+#view { display: flex; flex-direction: column; align-items: center; }
+.frame { width: 100%; display: flex; justify-content: center; }
+#gl {
+  display: block; width: 100%; height: auto; max-height: calc(100dvh - var(--bar) - 190px);
+  object-fit: contain; touch-action: none; background: #000;
+}
+.msg { min-height: 24px; margin: 8px 16px 0; color: var(--dim); font-size: 14px; text-align: center; }
+
+.ctl {
+  padding: 8px 16px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line); background: var(--bg);
+}
+.slide { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--dim); }
+.slide input { flex: 1; accent-color: var(--accent); }
+.row { display: flex; gap: 8px; margin-top: 8px; }
+.row .btn { flex: 1; padding: 0 8px; }
