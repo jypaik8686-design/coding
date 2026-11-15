@@ -11,7 +11,9 @@ const MODELS = {
   "nai-diffusion-5-full": { 이름: "V5 Full", 품질: ", very aesthetic, masterpiece, no text" },
   "nai-diffusion-4-5-full": { 이름: "V4.5 Full", 품질: ", location, very aesthetic, masterpiece, no text" },
 };
-const DEFAULT_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, signature, watermark, username, blurry";
+// 사용자가 직접 말한 취향(정장, 중국식 미인, 금발)을 태그로 옮긴 처음 값. art/취향.md의 '좋아하는 것'과 같아야 한다.
+const DEFAULT_SCENE = "1girl, solo, business suit, formal, blonde hair, long hair, east asian, mature female, elegant, looking at viewer, upper body";
+const DEFAULT_NEG ="lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, signature, watermark, username, blurry";
 
 // ── 데이터 모양 ──────────────────────────────────────────────
 // log 항목 하나: { id, scene, style, negative, seed, model, w, h, steps, scale, at, verdict }
@@ -19,7 +21,7 @@ const DEFAULT_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifact
 const SHAPE = () => ({
   settings: { token: "", model: "nai-diffusion-5-full", customModel: "", size: "세로", steps: 28, scale: 5, quality: true },
   taste: { style: "", negative: DEFAULT_NEG },
-  draft: { scene: "", seedLock: false, seed: null },
+  draft: { scene: DEFAULT_SCENE, seedLock: false, seed: null, seeded: true },
   log: [],
 });
 
@@ -37,10 +39,13 @@ function load() {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) || "null");
     if (!raw || typeof raw !== "object") return base;
+    const draft = { ...base.draft, ...(raw.draft || {}) };
+    // 기본값이 생기기 전에 저장된 옛 데이터: 비어 있던 칸은 기본값으로 채우고, 직접 적은 것은 건드리지 않는다.
+    if (!raw.draft?.seeded) { draft.seeded = true; if (!String(raw.draft?.scene || "").trim()) draft.scene = DEFAULT_SCENE; }
     return {
       settings: { ...base.settings, ...(raw.settings || {}) },
       taste: { ...base.taste, ...(raw.taste || {}) },
-      draft: { ...base.draft, ...(raw.draft || {}) },
+      draft,
       log: Array.isArray(raw.log) ? raw.log.filter((r) => r && r.id) : [],
     };
   } catch { return base; }
