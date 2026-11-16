@@ -1,0 +1,651 @@
+# Illustrative example audit conforming to audit.schema.yaml.
+#
+# Stripe is used as the subject because their webhook DX is the calibration
+# anchor named in references/methodology.md and references/rubric.md.
+# Scores and evidence are illustrative and intentionally compact - they show
+# the SHAPE the schema expects, not a real Stripe audit. Use this file to
+# validate the schema and as a structural reference when filling
+# assets/report-template.yaml.
+
+audit:
+  platform: Stripe
+  prepared: 2026-06-04
+
+  access:
+    level: L0
+    notes: public docs and SDK source only; no signed-in evidence needed for the categories scored
+
+  audience:
+    designation: developer-platform
+    signals:
+      - tier: primary
+        segment: developers integrating payment processing
+        evidence_quote: Financial infrastructure for the internet
+        source_section: hero copy on https://stripe.com/
+      - tier: primary
+        segment: developers
+        evidence_quote: Start now
+        source_section: docs top nav "Get started" linking directly to API quickstart
+      - tier: secondary
+        segment: enterprise finance and ops teams
+        evidence_quote: Used by businesses of every size
+        source_section: customer logo strip on https://stripe.com/
+
+  reviewer:
+    skill: webhook-dx-audit
+    skill_version: "0.2.0"
+
+  passes:
+    pass_1:
+      mode: unattended
+      completed: 2026-06-04
+
+  grade:
+    overall_pct: 88
+    band: A
+    projected:
+      pct: 95
+      band: A
+    coverage:
+      criteria_total: 54
+      scored: 54
+      not_applicable: 0
+      not_assessed: 0
+
+  summary: |
+    Stripe's outbound webhook surface is the calibration anchor referenced in
+    this skill's methodology. The event catalog is complete and machine-readable,
+    signing is documented end to end with an SDK helper, delivery semantics are
+    explicit, and both a CLI and a dashboard cover the configuration surface.
+    The remaining gaps are at the margins (e.g. no official Terraform provider
+    for webhook configuration at audit time) and do not move the headline
+    grade. This audit is illustrative; a real review would cite specific doc
+    URLs and SDK source lines for every claim.
+
+  scorecard:
+    - id: discovery-and-signup
+      name: Discovery & signup
+      score_pct: 100
+      weight: 4
+      note: |
+        Webhooks is a top-level section under docs; signup is a one-step API key
+        flow.
+
+    - id: onboarding-and-first-event
+      name: Onboarding & first event
+      score_pct: 100
+      weight: 6
+      note: |
+        Quickstart guides the path; CLI `stripe trigger` fires a test event from
+        the terminal.
+
+    - id: implementation-guidance
+      name: Implementation guidance
+      score_pct: 90
+      weight: 9
+      note: |
+        Multi-language verification examples; idempotency documented;
+        best-practices coverage strong; ingest-verify-queue pattern named
+        partially.
+
+    - id: event-catalog-and-schema
+      name: Event catalog & schema
+      score_pct: 93
+      weight: 13
+      note: |
+        Complete event types catalog, per-event payload definitions, consistent
+        envelope, documented versioning. Machine-readable spec partial pending
+        per-event webhook bodies in OpenAPI 3.1.
+
+    - id: security-and-authentication
+      name: Security & authentication
+      score_pct: 83
+      projected_pct: 100
+      weight: 15
+      note: |
+        HMAC-SHA256 with timestamp tolerance documented; secret rotation
+        supported; published source IPs. Destination auth options for receivers
+        are not the primary framing.
+
+    - id: delivery-semantics-and-reliability
+      name: Delivery semantics & reliability
+      score_pct: 86
+      weight: 15
+      note: |
+        Retry policy precise; at-least-once stated; manual replay from dashboard
+        and API; auto-disable on sustained failure; email alerts.
+
+    - id: setup-surfaces
+      name: Setup surfaces (UI/API/CLI/IaC)
+      score_pct: 75
+      projected_pct: 100
+      weight: 9
+      note: |
+        Dashboard, API, and CLI all cover webhook configuration. No
+        vendor-maintained Terraform provider for webhook endpoints at audit
+        time.
+
+    - id: sdks-and-verification-libraries
+      name: SDKs & verification libraries
+      score_pct: 100
+      weight: 8
+      note: |
+        Official SDKs across major languages; `constructEvent` verification
+        helpers; typed event payloads.
+
+    - id: consumer-self-serve-and-subscriptions
+      name: Consumer self-serve & subscriptions
+      score_pct: 100
+      weight: 6
+      note: |
+        Full self-serve via dashboard and API; per-event-type subscriptions;
+        multiple endpoints supported.
+
+    - id: consumer-facing-observability
+      name: Consumer-facing observability
+      score_pct: 100
+      weight: 6
+      note: |
+        Delivery log per endpoint with payload, response, attempt count, and
+        timing.
+
+    - id: local-dev-and-local-to-prod
+      name: Local dev & local-to-prod
+      score_pct: 80
+      weight: 5
+      note: |
+        `stripe listen` tunnel; CLI fixtures for multi-step flows; test mode
+        with high fidelity to live; local-to-production transition documented.
+
+    - id: agent-ai-readiness
+      name: Agent / AI readiness
+      score_pct: 92
+      weight: 4
+      note: |
+        Stripe Projects for agent-driven provisioning; CLI is agent-shaped;
+        public docs available in machine-readable formats.
+
+  findings:
+
+    - category_id: discovery-and-signup
+      intro: |
+        Webhooks is reachable in one click from the docs nav and the Workbench
+        section in the dashboard surfaces webhook configuration prominently.
+      criteria:
+        - id: findability-of-webhook-docs
+          name: Findability of webhook docs
+          score: 2
+          status: scored
+          evidence: |
+            Webhooks is a top-level section under docs.stripe.com.
+        - id: in-product-discoverability-of-webhook-configuration
+          name: In-product discoverability of webhook configuration
+          score: 2
+          status: scored
+          evidence: |
+            Webhooks appear in the developer workbench navigation; configuration
+            screen reachable without plan gating.
+
+    - category_id: onboarding-and-first-event
+      intro: |
+        Time to first event is minutes from a fresh account thanks to the
+        published CLI and test mode.
+      criteria:
+        - id: guided-path-to-first-webhook
+          name: Guided path to first webhook
+          score: 2
+          status: scored
+          evidence: |
+            Quickstart and dashboard cues walk a new account through registering
+            a webhook endpoint.
+        - id: time-to-first-event
+          name: Time to first event
+          score: 2
+          status: scored
+          evidence: |
+            `stripe listen` + `stripe trigger <event>` delivers a first event to
+            localhost in under a minute.
+        - id: test-event-trigger
+          name: Test event / trigger
+          score: 2
+          status: scored
+          evidence: |
+            CLI `stripe trigger` and dashboard "Send test webhook" cover the
+            test path.
+
+    - category_id: implementation-guidance
+      intro: |
+        Verification, idempotency, and handler best practices are addressed in
+        prose plus SDK helpers; reliability-focused architectures are referenced
+        partially.
+      criteria:
+        - id: verification-walkthrough-with-code
+          name: Verification walkthrough with code
+          score: 2
+          status: scored
+          evidence: |
+            Multi-language signature verification examples plus
+            `Webhook.constructEvent` SDK helpers.
+        - id: processing-and-handler-guidance
+          name: Processing & handler guidance
+          score: 1
+          status: scored
+          evidence: |
+            Docs name async-processing pattern and timeout. Reference
+            architectures named partially; the explicit ingest-verify-queue
+            framing is implicit rather than headlined.
+        - id: idempotency-guidance
+          name: Idempotency guidance
+          score: 2
+          status: scored
+          evidence: |
+            Top-level `id` on the event identified as the dedup key; idempotent
+            handler pattern explained.
+        - id: best-practices-coverage
+          name: Best-practices coverage
+          score: 2
+          status: scored
+          evidence: |
+            Out-of-order delivery, retries, timeouts addressed in webhook best
+            practices docs.
+        - id: accuracy-and-freshness
+          name: Accuracy & freshness
+          score: 2
+          status: scored
+          evidence: |
+            Docs are kept consistent with SDK and API behavior.
+
+    - category_id: event-catalog-and-schema
+      intro: |
+        Catalog is complete and machine-readable; envelope is documented; per-
+        event request bodies in OpenAPI are partial.
+      criteria:
+        - id: event-type-catalog
+          name: Event type catalog
+          score: 2
+          status: scored
+          evidence: |
+            Complete list of event types at docs.stripe.com/api/events/types.
+        - id: payload-definitions
+          name: Payload definitions
+          score: 2
+          status: scored
+          evidence: |
+            Per-event payload pages document typed fields.
+        - id: per-event-unique-id
+          name: Per-event unique ID
+          score: 2
+          status: scored
+          evidence: |
+            Top-level `id` on every event documented as the dedup key.
+        - id: machine-readable-spec
+          name: Machine-readable spec
+          score: 1
+          status: scored
+          evidence: |
+            OpenAPI spec ships per-event payload schemas, but the OpenAPI 3.1
+            `webhooks` block is partially populated; AsyncAPI variant not
+            published.
+        - id: sample-payloads
+          name: Sample payloads
+          score: 2
+          status: scored
+          evidence: |
+            Per-event sample payloads in docs; fireable via the CLI.
+        - id: versioning-and-evolution
+          name: Versioning & evolution
+          score: 2
+          status: scored
+          evidence: |
+            API versioning policy documented; per-endpoint version pinning
+            supported.
+        - id: payload-shape-guidance
+          name: Payload shape guidance
+          score: 2
+          status: scored
+          evidence: |
+            Envelope (`id`, `type`, `data`, `created`, ...) consistent and
+            documented; thin vs fat distinction discussed in API design notes.
+
+    - category_id: security-and-authentication
+      intro: |
+        HMAC scheme with timestamp and rotation; EventBridge destination uses
+        AWS-native auth; receiver-side auth options are not the headline.
+      criteria:
+        - id: signature-scheme
+          name: Signature scheme (webhooks)
+          score: 2
+          status: scored
+          evidence: |
+            HMAC-SHA256 with the `Stripe-Signature` header documented end to
+            end.
+        - id: replay-protection
+          name: Replay protection (webhooks)
+          score: 2
+          status: scored
+          evidence: |
+            Timestamp included in signed material; tolerance window documented
+            (5-minute default).
+        - id: secret-rotation
+          name: Secret rotation (webhooks)
+          score: 2
+          status: scored
+          evidence: |
+            Endpoint signing secret rotation documented with overlap support.
+        - id: destination-native-auth
+          name: Destination-native auth (non-HTTP)
+          score: 2
+          status: scored
+          evidence: |
+            Amazon EventBridge destination uses AWS partner event source
+            integration with IAM-driven access.
+        - id: destination-auth-options
+          name: Destination auth options (webhooks)
+          score: 0
+          status: not_supported
+          status_reason: Receiver-side auth (bearer, mTLS) is not framed as an auth option in the webhook docs.
+          evidence: |
+            The signature scheme is the primary integrator-facing auth model;
+            additional receiver-side auth options are not documented as such.
+        - id: source-ip-egress
+          name: Source IP / egress (webhooks)
+          score: 2
+          status: scored
+          evidence: |
+            Published source IP list for webhook deliveries.
+
+    - category_id: delivery-semantics-and-reliability
+      intro: |
+        Retry policy, replay, alerting, and auto-disable all documented.
+      criteria:
+        - id: destination-type-breadth
+          name: Destination type breadth
+          score: 1
+          status: scored
+          evidence: |
+            HTTP webhooks plus Amazon EventBridge; meets the additional-type
+            minimum but coverage of other clouds (GCP Pub/Sub, Azure Event Grid)
+            is not the headline.
+        - id: retry-policy
+          name: Retry policy
+          score: 2
+          status: scored
+          evidence: |
+            Backoff schedule and total retry window documented.
+        - id: delivery-guarantee-stated
+          name: Delivery guarantee stated
+          score: 2
+          status: scored
+          evidence: |
+            At-least-once delivery stated with idempotency guidance tied to it.
+        - id: manual-replay-redelivery
+          name: Manual replay / redelivery
+          score: 2
+          status: scored
+          evidence: |
+            Manual replay available from the dashboard and the API.
+        - id: failure-handling-and-auto-disable
+          name: Failure handling & auto-disable
+          score: 2
+          status: scored
+          evidence: |
+            Post-retry behavior documented; auto-disable on sustained failure
+            with documented reactivation.
+        - id: failure-alerting
+          name: Failure alerting
+          score: 1
+          status: scored
+          evidence: |
+            Email alerts on disabled endpoints; configurability across channels
+            limited.
+        - id: ordering-and-rate-controls
+          name: Ordering & rate controls
+          score: 1
+          status: scored
+          evidence: |
+            Ordering caveats documented; consumer-side rate caps not first-class
+            beyond per-endpoint disable.
+
+    - category_id: setup-surfaces
+      intro: |
+        Dashboard, API, and CLI all cover the webhook configuration surface.
+      criteria:
+        - id: dashboard-configuration
+          name: Dashboard configuration
+          score: 2
+          status: scored
+          evidence: |
+            Full CRUD in the developer dashboard.
+        - id: api-configuration
+          name: API configuration
+          score: 2
+          status: scored
+          evidence: |
+            CRUD documented under /v1/webhook_endpoints.
+        - id: cli-support
+          name: CLI support
+          score: 2
+          status: scored
+          evidence: |
+            `stripe webhook_endpoints` plus `stripe listen`, `stripe trigger`,
+            and `stripe fixtures` cover config and testing.
+        - id: infrastructure-as-code
+          name: Infrastructure as code
+          score: 0
+          status: not_supported
+          status_reason: No vendor-maintained Terraform/Pulumi provider for webhook endpoints at audit time.
+          evidence: |
+            Community Terraform providers exist; no first-party IaC for webhook
+            resources at the time of this illustrative audit.
+
+    - category_id: sdks-and-verification-libraries
+      intro: |
+        Official SDKs in major languages with first-class verification helpers.
+      criteria:
+        - id: sdk-availability
+          name: SDK availability
+          score: 2
+          status: scored
+          evidence: |
+            Official SDKs across Node, Python, Ruby, PHP, Java, Go, .NET.
+        - id: verification-helper
+          name: Verification helper (webhooks)
+          score: 2
+          status: scored
+          evidence: |
+            `Webhook.constructEvent` (or language equivalent) ships in each
+            official SDK.
+        - id: typed-events-payloads
+          name: Typed events / payloads
+          score: 2
+          status: scored
+          evidence: |
+            Typed event payloads in TypeScript SDK; equivalents in other typed
+            SDKs.
+
+    - category_id: consumer-self-serve-and-subscriptions
+      intro: |
+        Endpoint management is fully self-serve with per-event-type filtering
+        and multi-endpoint support.
+      criteria:
+        - id: self-serve-endpoint-management
+          name: Self-serve endpoint management
+          score: 2
+          status: scored
+          evidence: |
+            CRUD via dashboard and API.
+        - id: subscription-granularity
+          name: Subscription granularity
+          score: 2
+          status: scored
+          evidence: |
+            `enabled_events` array per endpoint allows per-event-type
+            subscription.
+        - id: multiple-endpoints
+          name: Multiple endpoints
+          score: 2
+          status: scored
+          evidence: |
+            Multiple endpoints per account; no documented cap relevant for
+            integrators.
+
+    - category_id: consumer-facing-observability
+      intro: |
+        Delivery logs are first-class in the dashboard.
+      criteria:
+        - id: delivery-logs
+          name: Delivery logs
+          score: 2
+          status: scored
+          evidence: |
+            Per-endpoint delivery log with status and timestamp.
+        - id: payload-and-response-inspection
+          name: Payload & response inspection
+          score: 2
+          status: scored
+          evidence: |
+            Sent payload and receiver response visible per attempt.
+        - id: latency-and-attempt-detail
+          name: Latency / attempt detail
+          score: 2
+          status: scored
+          evidence: |
+            Attempt count, next-retry timing, and response timing surfaced.
+
+    - category_id: local-dev-and-local-to-prod
+      intro: |
+        `stripe listen` covers tunneling; fixtures cover scripted flows; test
+        mode parity is strong.
+      criteria:
+        - id: local-receiving-story
+          name: Local receiving story
+          score: 2
+          status: scored
+          evidence: |
+            `stripe listen --forward-to localhost:PORT/...` documented.
+        - id: inspect-and-replay-in-dev
+          name: Inspect & replay in dev
+          score: 2
+          status: scored
+          evidence: |
+            CLI plus dashboard delivery log support inspection and replay during
+            development.
+        - id: test-sandbox-parity
+          name: Test / sandbox parity
+          score: 2
+          status: scored
+          evidence: |
+            Test mode mirrors live mode for webhook behavior.
+        - id: workflow-scenario-simulation
+          name: Workflow / scenario simulation
+          score: 1
+          status: scored
+          evidence: |
+            `stripe fixtures` lets developers script multi-step flows; curated
+            named lifecycle scenarios are not the headline offering.
+        - id: local-to-production-transition
+          name: Local-to-production transition
+          score: 2
+          status: scored
+          evidence: |
+            Promotion from test to live mode documented; per-mode signing
+            secrets explained.
+
+    - category_id: agent-ai-readiness
+      intro: |
+        Stripe Projects exposes agent-driven account provisioning; CLI is
+        agent-shaped; machine-readable docs available.
+      criteria:
+        - id: discoverable-index-llms-txt
+          name: Discoverable index (llms.txt)
+          score: 2
+          status: scored
+          evidence: |
+            llms.txt published and scoped.
+        - id: markdown-doc-versions
+          name: Markdown doc versions
+          score: 2
+          status: scored
+          evidence: |
+            Doc pages available with text/markdown content type.
+        - id: push-to-agent-doc-actions
+          name: Push-to-agent doc actions
+          score: 2
+          status: scored
+          evidence: |
+            Doc pages expose copy-as-markdown and open-in-agent actions.
+        - id: agent-guidance-and-skills
+          name: Agent guidance & skills
+          score: 2
+          status: scored
+          evidence: |
+            Stripe Projects at https://projects.dev acts as a task-oriented
+            agent entry point.
+        - id: api-access-for-agents
+          name: API access for agents
+          score: 2
+          status: scored
+          evidence: |
+            Documented public HTTP CRUD API for webhook endpoint configuration.
+        - id: cli-or-mcp-for-the-webhook-surface
+          name: CLI or MCP for the webhook surface
+          score: 1
+          status: scored
+          evidence: |
+            CLI covers webhook config and testing with structured output. An
+            MCP surface specifically scoped to webhooks is not the primary
+            agent interface.
+
+  recommendations:
+    - id: 1
+      title: Publish a vendor-maintained Terraform provider for webhook endpoints
+      why: |
+        Ops teams managing webhook configuration alongside their other cloud
+        resources cannot declaratively pin or diff their endpoints today; they
+        either skip IaC for webhooks or rely on community providers whose
+        resource coverage drifts behind the API.
+      body: |
+        Cat 7 IaC is the only baseline gap. A first-party IaC resource for
+        webhook endpoints closes the configuration surface for ops teams.
+      categories_addressed:
+        - setup-surfaces
+      target_scores:
+        - criterion_id: infrastructure-as-code
+          target_score: 2
+      effort: m
+
+    - id: 2
+      title: Frame receiver-side auth options explicitly in the webhook docs
+      why: |
+        Integrators scanning the docs for "how do I authenticate inbound
+        webhook deliveries on my receiver" find only the signature scheme;
+        the custom-headers passthrough is documented as a generic knob, so
+        teams that need bearer/mTLS reach for hand-rolled solutions instead
+        of the option already in product.
+      body: |
+        The signature scheme is the primary auth model; documenting bearer/mTLS
+        options on the receiver side as first-class auth (not just custom
+        headers) closes the Cat 5 destination-auth-options gap.
+      categories_addressed:
+        - security-and-authentication
+      target_scores:
+        - criterion_id: destination-auth-options
+          target_score: 2
+          note: assumes both bearer and mTLS are documented as auth, not just one
+      effort: docs
+
+  access_limits: []
+
+  sources:
+    - url: https://stripe.com/
+      label: Homepage and product framing
+    - url: https://docs.stripe.com/
+      label: Docs index
+    - url: https://docs.stripe.com/webhooks
+      label: Webhooks documentation root
+    - url: https://docs.stripe.com/api/events
+      label: Events API reference
+    - url: https://docs.stripe.com/cli
+      label: Stripe CLI documentation
+    - url: https://projects.dev
+      label: Stripe Projects agent provisioning surface

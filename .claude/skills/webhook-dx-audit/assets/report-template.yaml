@@ -1,0 +1,811 @@
+# Webhook DX Audit template.
+#
+# Fill in the placeholder values for each new audit and lint the result with:
+#
+#   cd skills/webhook-dx-audit && npm run lint:file -- <path-to-audit.yaml>
+#
+# Authoritative references:
+#   - schema/audit.schema.yaml   - field shape; locks CategoryId and CriterionId enums
+#   - schema/README.md           - status taxonomy and dual-score handling
+#   - references/rubric.md       - 12 categories, every criterion, 0/1/2 anchors
+#   - references/methodology.md  - how to find evidence; writing tactics
+#   - references/scoring.md      - category weights and grade-band math
+#
+# Style:
+#   - snake_case field names; block YAML for objects; multi-line prose in `|` block scalars.
+#   - Strings marked `TBD` are placeholders an auditor MUST replace; leaving any in a real
+#     audit is a sign the audit is incomplete.
+#   - Optional fields are commented out; uncomment and fill when relevant.
+
+audit:
+
+  # ----------------------------------------------------------------------------
+  # Header
+  # ----------------------------------------------------------------------------
+
+  # Platform under audit.
+  platform: TBD
+
+  # Date the audit was prepared (ISO 8601).
+  prepared: 2026-01-01
+
+  # OPTIONAL one-line context (e.g. "Existing Hookdeck Outpost customer.").
+  # Drop the key entirely if not relevant.
+  # context: TBD
+
+  access:
+    # L0 public docs only, L1 logged-in account, L2 active usage with deliveries
+    # observed. See rubric.md "Access level requirements: source of truth for
+    # Not Assessed".
+    level: L0
+    notes: TBD
+
+  audience:
+    # developer-platform | no-code-saas | mixed. Drives Table 2 of the N/A
+    # logic in rubric.md. Verify against the homepage; never default away
+    # without reason (developer-platform is a Pass-1 fallback only when the
+    # homepage cannot be fetched). See methodology.md step 0.
+    designation: developer-platform
+    # At least three signals supporting the designation, each with a verbatim
+    # quote from the source. Tiers: primary | secondary | tertiary.
+    signals:
+      - tier: primary
+        segment: TBD
+        evidence_quote: TBD
+        source_section: TBD
+      - tier: secondary
+        segment: TBD
+        evidence_quote: TBD
+        source_section: TBD
+      - tier: tertiary
+        segment: TBD
+        evidence_quote: TBD
+        source_section: TBD
+
+  reviewer:
+    # Skill that produced the audit; match the SKILL.md frontmatter version.
+    skill: webhook-dx-audit
+    skill_version: "0.2.0"
+    # OPTIONAL. Humans who participated in any pass (HITL Pass 2 is typical).
+    # human_reviewers:
+    #   - name: TBD
+    #     passes: [pass-2]
+
+  passes:
+    # The unattended research pass is always present.
+    pass_1:
+      mode: unattended
+      completed: 2026-01-01
+    # OPTIONAL. Uncomment when an HITL pass ran. `closed_criteria` lists the
+    # criterion IDs Pass 2 lifted from Not Assessed (or revised based on
+    # observed evidence).
+    # pass_2:
+    #   mode: hitl
+    #   completed: 2026-01-01
+    #   closed_criteria: []
+    #   notes: TBD
+
+  # ----------------------------------------------------------------------------
+  # Grade
+  # ----------------------------------------------------------------------------
+
+  grade:
+    # Headline percentage and band per scoring.md. For Pass-1-only audits this
+    # is the Public-scope grade unless the audit explicitly leads with the
+    # Provisional minimum.
+    overall_pct: 0
+    band: F
+    # OPTIONAL dual-score detail. Populate when the run produced distinct
+    # Public-scope and Provisional-minimum numbers (Pass-1-only). When HITL
+    # Pass 2 has closed every Not Assessed criterion the two converge; drop
+    # these sub-objects.
+    # public_scope:
+    #   pct: 0
+    #   band: F
+    # provisional_minimum:
+    #   pct: 0
+    #   band: F
+    # hitl_headroom_pct: 0
+    coverage:
+      criteria_total: 0
+      scored: 0
+      not_applicable: 0
+      not_assessed: 0
+
+  # ----------------------------------------------------------------------------
+  # Summary
+  #
+  # Multi-line block scalar. Developer-to-developer voice; no marketing
+  # language; American English. See methodology.md Tactics:
+  #   - "Scope the summary to webhook-surface features." Only list features
+  #     that contribute to the webhook and event-destination surface. An
+  #     OpenAPI spec without a `webhooks` block, an MCP server without
+  #     webhook tools, or a CLI that does not manage webhook config belongs
+  #     in its category findings, not in the summary.
+  #   - "Stay factual; no editorial." No company-stage commentary; no
+  #     unanchored qualifiers ("unusually", "remarkably", "solid",
+  #     "impressive", "painful", etc.).
+  # ----------------------------------------------------------------------------
+
+  summary: |
+    TBD
+
+  # ----------------------------------------------------------------------------
+  # Scorecard - per-category summary
+  #
+  # One entry per category, in rubric order. `score_pct` for the single
+  # converged value; add `public_scope_pct` and `provisional_min_pct` when
+  # dual-scoring. `weight` matches scoring.md and sums to 100 across the 12
+  # categories.
+  # ----------------------------------------------------------------------------
+
+  scorecard:
+    - id: discovery-and-signup
+      name: Discovery & signup
+      score_pct: 0
+      weight: 4
+      note: TBD
+
+    - id: onboarding-and-first-event
+      name: Onboarding & first event
+      score_pct: 0
+      weight: 6
+      note: TBD
+
+    - id: implementation-guidance
+      name: Implementation guidance
+      score_pct: 0
+      weight: 9
+      note: TBD
+
+    - id: event-catalog-and-schema
+      name: Event catalog & schema
+      score_pct: 0
+      weight: 13
+      note: TBD
+
+    - id: security-and-authentication
+      name: Security & authentication
+      score_pct: 0
+      weight: 15
+      note: TBD
+
+    - id: delivery-semantics-and-reliability
+      name: Delivery semantics & reliability
+      score_pct: 0
+      weight: 15
+      note: TBD
+
+    - id: setup-surfaces
+      name: Setup surfaces (UI/API/CLI/IaC)
+      score_pct: 0
+      weight: 9
+      note: TBD
+
+    - id: sdks-and-verification-libraries
+      name: SDKs & verification libraries
+      score_pct: 0
+      weight: 8
+      note: TBD
+
+    - id: consumer-self-serve-and-subscriptions
+      name: Consumer self-serve & subscriptions
+      score_pct: 0
+      weight: 6
+      note: TBD
+
+    - id: consumer-facing-observability
+      name: Consumer-facing observability
+      score_pct: 0
+      weight: 6
+      note: TBD
+
+    - id: local-dev-and-local-to-prod
+      name: Local dev & local-to-prod
+      score_pct: 0
+      weight: 5
+      note: TBD
+
+    - id: agent-ai-readiness
+      name: Agent / AI readiness
+      score_pct: 0
+      weight: 4
+      note: TBD
+
+  # ----------------------------------------------------------------------------
+  # Findings - per-criterion details
+  #
+  # One entry per category, in rubric order. Every criterion listed below; do
+  # not delete entries even when N/A or Not Assessed (set `status` and
+  # `score: null` and explain in `status_reason`).
+  #
+  # status enum:
+  #   - scored          : a 0/1/2 score with no special label
+  #   - not_supported   : 0 with "capability should exist but doesn't" intent
+  #   - not_applicable  : dropped from math via Table 1 or Table 2 of rubric.md
+  #   - not_assessed    : could not reach at the declared access level
+  #
+  # Evidence is multi-line (|). Quote the doc page, name the API field, or
+  # reference the in-product capture. Apply methodology.md Tactics' editorial
+  # rules: no editorial qualifiers, no company-stage commentary, observation
+  # not reaction.
+  #
+  # cross_refs is optional; populate when a criterion's gap is closed by a
+  # recommendation or relates to another category's score.
+  #
+  # recommendations_addressing lists the recommendation IDs that address gaps
+  # in this category (omit when no recommendations apply).
+  # ----------------------------------------------------------------------------
+
+  findings:
+
+    # ---- Cat 1: Discovery & signup --------------------------------------------
+    - category_id: discovery-and-signup
+      intro: |
+        TBD
+      criteria:
+        - id: findability-of-webhook-docs
+          name: Findability of webhook docs
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: in-product-discoverability-of-webhook-configuration
+          name: In-product discoverability of webhook configuration
+          score: 0
+          status: not_assessed
+          status_reason: requires L1 access
+          evidence: |
+            TBD
+
+    # ---- Cat 2: Onboarding & first event --------------------------------------
+    - category_id: onboarding-and-first-event
+      intro: |
+        TBD
+      criteria:
+        - id: guided-path-to-first-webhook
+          name: Guided path to first webhook
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: time-to-first-event
+          name: Time to first event
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: test-event-trigger
+          name: Test event / trigger
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+
+    # ---- Cat 3: Implementation guidance ---------------------------------------
+    - category_id: implementation-guidance
+      intro: |
+        TBD
+      criteria:
+        - id: verification-walkthrough-with-code
+          name: Verification walkthrough with code
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: processing-and-handler-guidance
+          name: Processing & handler guidance
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: idempotency-guidance
+          name: Idempotency guidance
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: best-practices-coverage
+          name: Best-practices coverage
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: accuracy-and-freshness
+          name: Accuracy & freshness
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+
+    # ---- Cat 4: Event catalog & schema ----------------------------------------
+    - category_id: event-catalog-and-schema
+      intro: |
+        TBD
+      criteria:
+        - id: event-type-catalog
+          name: Event type catalog
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: payload-definitions
+          name: Payload definitions
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: per-event-unique-id
+          name: Per-event unique ID
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: machine-readable-spec
+          name: Machine-readable spec
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: sample-payloads
+          name: Sample payloads
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: versioning-and-evolution
+          name: Versioning & evolution
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: payload-shape-guidance
+          name: Payload shape guidance
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+
+    # ---- Cat 5: Security & authentication -------------------------------------
+    # Table 1 of rubric.md is the source of truth for which Cat 5 criteria are
+    # N/A given the platform's destination types. Webhook-only -> destination-
+    # native-auth is N/A. Non-HTTP-only -> webhook-side criteria are N/A.
+    - category_id: security-and-authentication
+      intro: |
+        TBD
+      criteria:
+        - id: signature-scheme
+          name: Signature scheme (webhooks)
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: replay-protection
+          name: Replay protection (webhooks)
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: secret-rotation
+          name: Secret rotation (webhooks)
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: destination-native-auth
+          name: Destination-native auth (non-HTTP)
+          score: null
+          status: not_applicable
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: destination-auth-options
+          name: Destination auth options (webhooks)
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: source-ip-egress
+          name: Source IP / egress (webhooks)
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+
+    # ---- Cat 6: Delivery semantics & reliability ------------------------------
+    - category_id: delivery-semantics-and-reliability
+      intro: |
+        TBD
+      criteria:
+        - id: destination-type-breadth
+          name: Destination type breadth
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: retry-policy
+          name: Retry policy
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: delivery-guarantee-stated
+          name: Delivery guarantee stated
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: manual-replay-redelivery
+          name: Manual replay / redelivery
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: failure-handling-and-auto-disable
+          name: Failure handling & auto-disable
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: failure-alerting
+          name: Failure alerting
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: ordering-and-rate-controls
+          name: Ordering & rate controls
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+
+    # ---- Cat 7: Setup surfaces (UI/API/CLI/IaC) -------------------------------
+    # Cat 7 IaC and Cat 11 workflow simulation + local-to-prod are N/A under
+    # `no-code-saas` (Table 2 of rubric.md). Under `mixed`, score by judgment.
+    - category_id: setup-surfaces
+      intro: |
+        TBD
+      criteria:
+        - id: dashboard-configuration
+          name: Dashboard configuration
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: api-configuration
+          name: API configuration
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: cli-support
+          name: CLI support
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: infrastructure-as-code
+          name: Infrastructure as code
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+
+    # ---- Cat 8: SDKs & verification libraries ---------------------------------
+    - category_id: sdks-and-verification-libraries
+      intro: |
+        TBD
+      criteria:
+        - id: sdk-availability
+          name: SDK availability
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: verification-helper
+          name: Verification helper (webhooks)
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: typed-events-payloads
+          name: Typed events / payloads
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+
+    # ---- Cat 9: Consumer self-serve & subscriptions ---------------------------
+    - category_id: consumer-self-serve-and-subscriptions
+      intro: |
+        TBD
+      criteria:
+        - id: self-serve-endpoint-management
+          name: Self-serve endpoint management
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: subscription-granularity
+          name: Subscription granularity
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: multiple-endpoints
+          name: Multiple endpoints
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+
+    # ---- Cat 10: Consumer-facing observability --------------------------------
+    - category_id: consumer-facing-observability
+      intro: |
+        TBD
+      criteria:
+        - id: delivery-logs
+          name: Delivery logs
+          score: 0
+          status: not_assessed
+          status_reason: requires L2 access
+          evidence: |
+            TBD
+        - id: payload-and-response-inspection
+          name: Payload & response inspection
+          score: 0
+          status: not_assessed
+          status_reason: requires L2 access
+          evidence: |
+            TBD
+        - id: latency-and-attempt-detail
+          name: Latency / attempt detail
+          score: 0
+          status: not_assessed
+          status_reason: requires L2 access
+          evidence: |
+            TBD
+
+    # ---- Cat 11: Local dev & local-to-prod ------------------------------------
+    - category_id: local-dev-and-local-to-prod
+      intro: |
+        TBD
+      criteria:
+        - id: local-receiving-story
+          name: Local receiving story
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: inspect-and-replay-in-dev
+          name: Inspect & replay in dev
+          score: 0
+          status: not_assessed
+          status_reason: requires L2 access
+          evidence: |
+            TBD
+        - id: test-sandbox-parity
+          name: Test / sandbox parity
+          score: 0
+          status: not_assessed
+          status_reason: requires L2 access
+          evidence: |
+            TBD
+        - id: workflow-scenario-simulation
+          name: Workflow / scenario simulation
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: local-to-production-transition
+          name: Local-to-production transition
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+
+    # ---- Cat 12: Agent / AI readiness -----------------------------------------
+    # The only category that scores agent/AI concerns. Do NOT re-score the
+    # OpenAPI spec or typed SDKs here; those belong in Cat 4 and Cat 8.
+    - category_id: agent-ai-readiness
+      intro: |
+        TBD
+      criteria:
+        - id: discoverable-index-llms-txt
+          name: Discoverable index (llms.txt)
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: markdown-doc-versions
+          name: Markdown doc versions
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: push-to-agent-doc-actions
+          name: Push-to-agent doc actions
+          score: 0
+          status: not_assessed
+          status_reason: JS-rendered controls; verify in a real browser during HITL
+          evidence: |
+            TBD
+        - id: agent-guidance-and-skills
+          name: Agent guidance & skills
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: api-access-for-agents
+          name: API access for agents
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+        - id: cli-or-mcp-for-the-webhook-surface
+          name: CLI or MCP for the webhook surface
+          score: 0
+          status: not_supported
+          status_reason: TBD
+          evidence: |
+            TBD
+
+  # ----------------------------------------------------------------------------
+  # Recommendations - ranked by impact x ease
+  #
+  # IDs are positive integers unique within the audit. `why` and `body` are
+  # multi-line block scalars; Markdown is fine. `categories_addressed` must
+  # include at least one CategoryId.
+  #
+  # `why` is load-bearing: it names the integrator-side benefit of adopting
+  # the recommendation - the reason the operator should care. Cite the
+  # user-facing pain the gap creates. `body` is what to change. See
+  # methodology.md "Writing recommendations".
+  #
+  # `target_scores` lists per-criterion target scores: which criteria this
+  # recommendation would lift to which 0/1/2 score if implemented. Used to
+  # compute the projected scorecard (current vs potential). Be honest with
+  # the target: documenting an existing single auth option reaches 1, not
+  # 2 (the 2-anchor requires multiple documented options).
+  #
+  # `depends_on` lists other recommendation IDs that must land before this
+  # one delivers full value (hard dependencies only).
+  #
+  # `effort` is a coarse implementation indicator: docs | s | m | l. See
+  # the EffortLevel enum in schema/audit.schema.yaml for calibration.
+  # ----------------------------------------------------------------------------
+
+  recommendations:
+    - id: 1
+      title: TBD
+      why: |
+        TBD
+      body: |
+        TBD
+      # At least one CategoryId from schema/audit.schema.yaml's enum. Replace
+      # this placeholder with the category (or categories) the recommendation
+      # actually addresses.
+      categories_addressed:
+        - discovery-and-signup
+      # OPTIONAL: per-criterion target scores. Lets downstream renderers
+      # compute current vs potential. Omit when the recommendation does not
+      # move a specific criterion's score.
+      # target_scores:
+      #   - criterion_id: findability-of-webhook-docs
+      #     target_score: 2
+      # OPTIONAL: hard dependencies on other recommendation IDs.
+      # depends_on: []
+      # OPTIONAL: coarse implementation effort. docs | s | m | l.
+      # effort: docs
+      # OPTIONAL further reading
+      # further_reading:
+      #   - title: TBD
+      #     url: https://example.com/
+
+  # ----------------------------------------------------------------------------
+  # HITL evidence - OPTIONAL embedded section
+  #
+  # Populate when an HITL pass ran or when the audit pre-loaded HITL evidence
+  # from a standalone hitl-evidence YAML file. Same shape as
+  # hitl-evidence.schema.yaml minus the top-level `platform` field. Drop the
+  # `hitl_evidence:` block entirely when unused.
+  # ----------------------------------------------------------------------------
+
+  # hitl_evidence:
+  #   collected_during: pass-2
+  #   collected_on: 2026-01-01
+  #   active_usage:
+  #     access_level: L2
+  #     webhooks_fired: 0
+  #     external_destination_reached: false
+  #     in_product_delivery_view: false
+  #     in_product_test_trigger: false
+  #     dashboard_crud_verified: false
+  #     nav_path_to_webhook_config: TBD
+  #     sign_in_flow: TBD
+  #   delivery_payload_capture:
+  #     signing_mode: unknown
+  #     headers: {}
+  #     body: |
+  #       TBD
+  #     custom_headers_feature_in_use: false
+  #     signature_example: TBD
+  #     timestamp_example: TBD
+  #     event_topic_example: TBD
+  #     user_agent: TBD
+  #   audience_verification:
+  #     homepage_url: https://example.com/
+  #     designation: developer-platform
+  #     signals: []
+  #   scoring_decisions: []
+  #   other_observations: []
+
+  # ----------------------------------------------------------------------------
+  # Access limits
+  #
+  # Structured records of what could not be assessed and why. Empty array when
+  # nothing was gated. `would_hitl_resolve: true` when HITL Pass 2 would close
+  # the gap; `false` for structural limits (e.g. paid-plan-only surface no
+  # reviewer has access to).
+  # ----------------------------------------------------------------------------
+
+  access_limits: []
+
+  # ----------------------------------------------------------------------------
+  # Sources
+  #
+  # Every doc page, spec URL, SDK repo, dashboard screen, or in-product capture
+  # the audit relies on. At least one entry required.
+  # ----------------------------------------------------------------------------
+
+  sources:
+    - url: TBD
+      label: TBD
+      # OPTIONAL sub-location
+      # section: TBD

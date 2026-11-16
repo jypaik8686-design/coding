@@ -1,0 +1,55 @@
+# Illustrative example HITL evidence pre-load conforming to
+# hitl-evidence.schema.yaml.
+#
+# Stripe is used as the subject because their webhook DX is the calibration
+# anchor named in references/methodology.md. The values below are illustrative
+# (synthetic delivery payload, plausible audience verification) and are not a
+# real Stripe capture - they show the SHAPE the audit agent expects when
+# pre-loading human-in-the-loop (HITL) evidence at Pass 1 start.
+
+hitl_evidence:
+  platform: Stripe
+  collected_during: pass-2
+  collected_on: 2026-06-04
+
+  active_usage:
+    access_level: L2
+    webhooks_fired: 1
+    external_destination_reached: true
+    in_product_delivery_view: true
+    in_product_test_trigger: true
+    dashboard_crud_verified: true
+    nav_path_to_webhook_config: Developers > Webhooks
+    sign_in_flow: email-and-password
+
+  delivery_payload_capture:
+    signing_mode: hmac_sha256
+    headers:
+      content-type: application/json
+      user-agent: Stripe/1.0 (+https://stripe.com/docs/webhooks)
+      stripe-signature: "t=1717520000,v1=EXAMPLE_SIG_NOT_REAL"
+    custom_headers_feature_in_use: false
+    signature_example: "t=1717520000,v1=EXAMPLE_SIG_NOT_REAL"
+    timestamp_example: "1717520000"
+    event_topic_example: payment_intent.succeeded
+    user_agent: Stripe/1.0 (+https://stripe.com/docs/webhooks)
+
+  audience_verification:
+    homepage_url: https://stripe.com/
+    designation: developer-platform
+    signals:
+      - tier: primary
+        segment: developers integrating payment processing
+        evidence_quote: Financial infrastructure for the internet
+        source_section: hero copy on https://stripe.com/
+
+  scoring_decisions:
+    - category: delivery-semantics-and-reliability
+      criterion: destination-type-breadth
+      score: 1
+      reason: HTTP webhooks plus Amazon EventBridge meets the one-additional-type minimum; broader cloud coverage is partial.
+
+  other_observations:
+    - criterion: discoverable-index-llms-txt
+      observation: |
+        llms.txt confirmed at the docs root during browser verification.

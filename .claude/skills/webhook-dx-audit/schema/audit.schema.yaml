@@ -1,0 +1,961 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://hookdeck.com/webhook-skills/schemas/webhook-dx-audit/audit.schema.yaml
+title: Webhook DX Audit
+description: |
+  Structured audit produced by the webhook-dx-audit skill. Field names are
+  snake_case. Multi-line prose uses YAML block scalars (|). Category and
+  criterion IDs are locked enums; rubric changes that add or rename a criterion
+  are schema bumps.
+
+type: object
+additionalProperties: false
+required: [audit]
+properties:
+  audit:
+    $ref: '#/$defs/Audit'
+
+$defs:
+
+  Audit:
+    type: object
+    additionalProperties: false
+    required:
+      - platform
+      - prepared
+      - access
+      - audience
+      - reviewer
+      - passes
+      - grade
+      - summary
+      - scorecard
+      - findings
+      - recommendations
+      - sources
+    properties:
+      # ---- Cloud-agent reserved fields (optional today; populated when the cloud
+      # agent submits an audit). Reserved so standalone runs do not need them.
+      audit_id:
+        type: string
+        description: Stable identifier for this audit run. Populated by the cloud agent.
+      submitted_url:
+        type: string
+        format: uri
+        description: URL the cloud agent received as the audit subject.
+      submitted_at:
+        type: string
+        format: date-time
+        description: When the cloud agent received the submission.
+      submitter_id:
+        type: string
+        description: Identifier of the cloud-agent submitter.
+
+      # ---- Header
+      platform:
+        type: string
+        minLength: 1
+        description: Platform name (e.g. "Ordinal", "Stripe").
+      prepared:
+        type: string
+        format: date
+        description: Date the audit was prepared (ISO 8601 date).
+      context:
+        type: string
+        description: |
+          Optional one-line context for the run (e.g. "Existing Hookdeck Outpost
+          customer."). Omit if not relevant.
+      access:
+        $ref: '#/$defs/Access'
+      audience:
+        $ref: '#/$defs/Audience'
+      reviewer:
+        $ref: '#/$defs/Reviewer'
+      passes:
+        $ref: '#/$defs/Passes'
+
+      # ---- Body
+      grade:
+        $ref: '#/$defs/Grade'
+      summary:
+        type: string
+        minLength: 1
+        description: |
+          Multi-line summary (use the | block scalar). Describes what the platform's
+          webhook DX is like for an integrating developer, the headline grade, and
+          the one or two things that matter most. Developer-to-developer voice.
+      scorecard:
+        type: array
+        minItems: 12
+        maxItems: 12
+        items:
+          $ref: '#/$defs/ScorecardEntry'
+        description: |
+          One entry per category, in rubric order. Summary view of each category's
+          score, weight, and one-line note.
+      findings:
+        type: array
+        minItems: 12
+        maxItems: 12
+        items:
+          $ref: '#/$defs/Finding'
+        description: |
+          One entry per category, in rubric order. Per-criterion details with
+          evidence, source references, status, and cross-references.
+      recommendations:
+        type: array
+        items:
+          $ref: '#/$defs/Recommendation'
+        description: |
+          Prioritized recommendations ranked by impact x ease. IDs are positive
+          integers and unique within the audit.
+      hitl_evidence:
+        $ref: '#/$defs/HitlEvidence'
+        description: |
+          Embedded human-in-the-loop (HITL) evidence captured during the audit.
+          Same shape as the standalone companion file validated by
+          hitl-evidence.schema.yaml. Optional: present when the audit ran an
+          HITL pass or pre-loaded HITL evidence.
+      access_limits:
+        type: array
+        items:
+          $ref: '#/$defs/AccessLimit'
+        description: |
+          What could not be assessed and why. Empty array when nothing was gated.
+      sources:
+        type: array
+        minItems: 1
+        items:
+          $ref: '#/$defs/Source'
+
+  # ----------------------------------------------------------------------------
+  # Header components
+  # ----------------------------------------------------------------------------
+
+  Access:
+    type: object
+    additionalProperties: false
+    required: [level]
+    properties:
+      level:
+        $ref: '#/$defs/AccessLevel'
+      notes:
+        type: string
+        description: |
+          One line explaining how the level was reached (e.g. "active usage with
+          two webhooks fired and delivered"). Optional.
+
+  AccessLevel:
+    type: string
+    enum: [L0, L1, L2]
+    description: |
+      L0: public docs only. L1: logged-in account. L2: active usage (deliveries
+      observed). See rubric.md "Access level requirements".
+
+  Audience:
+    type: object
+    additionalProperties: false
+    required: [designation, signals]
+    properties:
+      designation:
+        $ref: '#/$defs/AudienceDesignation'
+      signals:
+        type: array
+        minItems: 1
+        items:
+          $ref: '#/$defs/AudienceSignal'
+
+  AudienceDesignation:
+    type: string
+    enum: [developer-platform, no-code-saas, mixed]
+    description: |
+      Drives Table 2 of the N/A logic in rubric.md. Verify via the homepage and
+      cite signals; never default away without reason.
+
+  AudienceSignal:
+    type: object
+    additionalProperties: false
+    required: [tier, segment, evidence_quote, source_section]
+    properties:
+      tier:
+        type: string
+        enum: [primary, secondary, tertiary]
+      segment:
+        type: string
+        minLength: 1
+        description: Short label for the audience segment (e.g. "marketing teams").
+      evidence_quote:
+        type: string
+        minLength: 1
+        description: Verbatim quote from the source.
+      source_section:
+        type: string
+        minLength: 1
+        description: |
+          Where the quote came from (e.g. "hero copy on https://www.tryordinal.com/").
+
+  Reviewer:
+    type: object
+    additionalProperties: false
+    required: [skill, skill_version]
+    properties:
+      skill:
+        type: string
+        description: Skill name that produced the audit (e.g. "webhook-dx-audit").
+      skill_version:
+        type: string
+        description: |
+          Skill version (semver string). Match the version field in SKILL.md
+          frontmatter at audit time.
+      human_reviewers:
+        type: array
+        items:
+          $ref: '#/$defs/HumanReviewer'
+
+  HumanReviewer:
+    type: object
+    additionalProperties: false
+    required: [name, passes]
+    properties:
+      name:
+        type: string
+        minLength: 1
+      passes:
+        type: array
+        minItems: 1
+        items:
+          enum: [pass-1, pass-2]
+
+  Passes:
+    type: object
+    additionalProperties: false
+    required: [pass_1]
+    properties:
+      pass_1:
+        $ref: '#/$defs/Pass1'
+      pass_2:
+        $ref: '#/$defs/Pass2'
+
+  Pass1:
+    type: object
+    additionalProperties: false
+    required: [mode, completed]
+    properties:
+      mode:
+        type: string
+        const: unattended
+      completed:
+        type: string
+        format: date
+      notes:
+        type: string
+
+  Pass2:
+    type: object
+    additionalProperties: false
+    required: [mode, completed]
+    properties:
+      mode:
+        type: string
+        const: hitl
+      completed:
+        type: string
+        format: date
+      closed_criteria:
+        type: array
+        items:
+          $ref: '#/$defs/CriterionId'
+        description: |
+          Criterion IDs that Pass 2 lifted from Not Assessed (or revised based on
+          observed evidence).
+      notes:
+        type: string
+
+  # ----------------------------------------------------------------------------
+  # Grade
+  # ----------------------------------------------------------------------------
+
+  Grade:
+    type: object
+    additionalProperties: false
+    required: [overall_pct, band, coverage]
+    properties:
+      overall_pct:
+        type: integer
+        minimum: 0
+        maximum: 100
+        description: |
+          Headline overall percentage. For Pass-1-only audits this is the
+          Public-scope grade unless the audit explicitly leads with the
+          Provisional minimum (note in summary which it is).
+      band:
+        $ref: '#/$defs/GradeBand'
+      public_scope:
+        $ref: '#/$defs/GradeRollup'
+        description: |
+          Optional dual-score. Public-scope grade drops Not Assessed criteria
+          from numerator and denominator. Present when the run produced distinct
+          public-scope and provisional-minimum numbers (e.g. Pass-1-only).
+      provisional_minimum:
+        $ref: '#/$defs/GradeRollup'
+        description: |
+          Optional dual-score. Provisional minimum treats Not Assessed as 0 with
+          full weight in the denominator. HITL can only raise this number.
+      hitl_headroom_pct:
+        type: integer
+        minimum: 0
+        maximum: 100
+        description: |
+          Public-scope minus Provisional minimum. The maximum points HITL Pass 2
+          could lift the Provisional minimum by. 0 when the two have converged.
+      projected:
+        $ref: '#/$defs/GradeRollup'
+        description: |
+          Optional projected roll-up assuming every recommendation lands as
+          specified. Computed from each recommendation's `target_scores`
+          (max across multiple recommendations targeting the same criterion),
+          rolled up via the weighting in scoring.md. Present when at least
+          one recommendation carries `target_scores`. Lets downstream
+          renderers display the audit as "current vs potential".
+      coverage:
+        $ref: '#/$defs/Coverage'
+
+  GradeBand:
+    type: string
+    enum: [A, B, C, D, F]
+    description: |
+      Grade band per scoring.md: 85-100 A; 70-84 B; 50-69 C; 30-49 D; 0-29 F.
+
+  GradeRollup:
+    type: object
+    additionalProperties: false
+    required: [pct, band]
+    properties:
+      pct:
+        type: integer
+        minimum: 0
+        maximum: 100
+      band:
+        $ref: '#/$defs/GradeBand'
+
+  Coverage:
+    type: object
+    additionalProperties: false
+    required: [criteria_total, scored, not_applicable, not_assessed]
+    properties:
+      criteria_total:
+        type: integer
+        minimum: 0
+      scored:
+        type: integer
+        minimum: 0
+      not_applicable:
+        type: integer
+        minimum: 0
+      not_assessed:
+        type: integer
+        minimum: 0
+
+  # ----------------------------------------------------------------------------
+  # Scorecard (per-category summary)
+  # ----------------------------------------------------------------------------
+
+  ScorecardEntry:
+    type: object
+    additionalProperties: false
+    required: [id, name, weight, note]
+    properties:
+      id:
+        $ref: '#/$defs/CategoryId'
+      name:
+        type: string
+        minLength: 1
+      score_pct:
+        type: integer
+        minimum: 0
+        maximum: 100
+        description: |
+          Single converged score for the category. Required when the audit reports
+          a single overall grade (post-HITL, or standalone with no HITL planned).
+      public_scope_pct:
+        type: integer
+        minimum: 0
+        maximum: 100
+        description: |
+          Dual-score Public-scope category percentage. Present when grade.public_scope
+          is present.
+      provisional_min_pct:
+        type: integer
+        minimum: 0
+        maximum: 100
+        description: |
+          Dual-score Provisional-minimum category percentage. Present when
+          grade.provisional_minimum is present.
+      projected_pct:
+        type: integer
+        minimum: 0
+        maximum: 100
+        description: |
+          Projected category percentage assuming every recommendation that
+          targets criteria in this category lands as specified. Present when
+          grade.projected is present. Computed by taking the max
+          target_score across recommendations per criterion (current score
+          for criteria not targeted by any recommendation) and rolling up
+          via the standard category weighting.
+      weight:
+        type: integer
+        minimum: 0
+        maximum: 100
+        description: Category weight per scoring.md. Sums to 100 across categories.
+      note:
+        type: string
+        minLength: 1
+        description: |
+          One-line summary of what drove the category score. Multi-line allowed
+          but should stay terse; detailed evidence belongs in findings.
+
+  # ----------------------------------------------------------------------------
+  # Findings (per-category criterion details)
+  # ----------------------------------------------------------------------------
+
+  Finding:
+    type: object
+    additionalProperties: false
+    required: [category_id, intro, criteria]
+    properties:
+      category_id:
+        $ref: '#/$defs/CategoryId'
+      intro:
+        type: string
+        minLength: 1
+        description: |
+          Short paragraph (block scalar) describing what an integrating developer
+          experiences in this category, grounded in observed evidence.
+      criteria:
+        type: array
+        minItems: 1
+        items:
+          $ref: '#/$defs/CriterionFinding'
+      recommendations_addressing:
+        type: array
+        items:
+          type: integer
+          minimum: 1
+        description: |
+          Recommendation IDs that address gaps in this category.
+
+  CriterionFinding:
+    type: object
+    additionalProperties: false
+    required: [id, name, status, evidence]
+    properties:
+      id:
+        $ref: '#/$defs/CriterionId'
+      name:
+        type: string
+        minLength: 1
+      score:
+        oneOf:
+          - type: integer
+            enum: [0, 1, 2]
+          - type: 'null'
+        description: |
+          0/1/2 when the criterion was scored or marked Not Supported (which is
+          0 with intent labelled). null when status is not_applicable or
+          not_assessed.
+      status:
+        $ref: '#/$defs/CriterionStatus'
+      status_reason:
+        type: string
+        description: |
+          Required when status is not_supported, not_applicable, or not_assessed.
+          One line explaining why the label applies (e.g. "no non-HTTP destinations
+          offered" for N/A; "dashboard-gated, requires Pro plan" for not_assessed).
+      evidence:
+        type: string
+        minLength: 1
+        description: |
+          Multi-line block scalar with the concrete evidence. Quote the doc page,
+          name the API field, reference the screenshot. Every score traces here.
+      sources:
+        type: array
+        items:
+          $ref: '#/$defs/Source'
+        description: |
+          Optional per-criterion source references. Either a URL or an in-product
+          capture reference. Aggregated alongside the audit-level sources list.
+      cross_refs:
+        $ref: '#/$defs/CrossRefs'
+
+  CriterionStatus:
+    type: string
+    enum: [scored, not_supported, not_applicable, not_assessed]
+    description: |
+      scored: a 0/1/2 score with no special label. not_supported: 0 with the
+      "capability should exist but doesn't" label. not_applicable: dropped from
+      math via a logical rule. not_assessed: cannot reach at the declared access
+      level; HITL would resolve.
+
+  CrossRefs:
+    type: object
+    additionalProperties: false
+    properties:
+      recommendations:
+        type: array
+        items:
+          type: integer
+          minimum: 1
+        description: Recommendation IDs that address this criterion's gap.
+      categories:
+        type: array
+        items:
+          $ref: '#/$defs/CategoryId'
+        description: |
+          Related category IDs (e.g. Cat 8 verification helper cross-refs Cat 5
+          signature scheme).
+
+  # ----------------------------------------------------------------------------
+  # Recommendations
+  # ----------------------------------------------------------------------------
+
+  Recommendation:
+    type: object
+    additionalProperties: false
+    required: [id, title, why, body, categories_addressed]
+    properties:
+      id:
+        type: integer
+        minimum: 1
+        description: Unique recommendation ID, ordered by impact x ease.
+      title:
+        type: string
+        minLength: 1
+      why:
+        type: string
+        minLength: 1
+        description: |
+          One or two sentences naming the integrator-side benefit of adopting
+          this recommendation - the reason the operator should care. Cite the
+          user-facing pain the gap creates (e.g. "integrators cannot verify
+          deliveries without reverse-engineering the signing scheme",
+          "production handlers drop events under burst because the timeout
+          window is undocumented"). The `body` field describes what to
+          change; `why` describes why the operator should change it. Treat
+          this as load-bearing: a recommendation without a clear why becomes
+          an order rather than an argument and tends to be ignored.
+      body:
+        type: string
+        minLength: 1
+        description: |
+          Multi-line block scalar. Markdown content is preserved verbatim.
+          Describes the operator-side change. The benefit framing lives in
+          `why`; do not duplicate it here.
+      categories_addressed:
+        type: array
+        minItems: 1
+        items:
+          $ref: '#/$defs/CategoryId'
+      target_scores:
+        type: array
+        items:
+          $ref: '#/$defs/TargetScore'
+        description: |
+          Per-criterion target scores: which criteria this recommendation
+          would lift to which score if implemented as specified. Used by
+          downstream renderers to compute a projected scorecard (current
+          vs potential) and to make the recommendation's impact explicit
+          and auditable. When multiple recommendations target the same
+          criterion, the projected score is the max across them. Omit the
+          field when the recommendation does not move any criterion's
+          score (rare; usually a sign the recommendation should be split
+          or its categories_addressed re-examined).
+      depends_on:
+        type: array
+        items:
+          type: integer
+          minimum: 1
+        description: |
+          Other recommendation IDs that should land before this one for it
+          to deliver its full value. Hard dependencies only (e.g. Rec 2's
+          verification step references Rec 1 documenting the signing
+          scheme). Soft sequencing preferences belong in the body. Empty
+          array (or omit) when the recommendation stands alone.
+      effort:
+        $ref: '#/$defs/EffortLevel'
+        description: |
+          Coarse implementation effort. Lets downstream renderers display
+          a one-line indicator under each recommendation and lets readers
+          sort or filter by lift. Calibrated as: `docs` is a single page
+          or section with little or no engineering work; `s` is a small
+          product change (a button, a new endpoint, a config knob) on
+          the order of days; `m` is a new feature surface (a CLI, a UI
+          surface, a new integration) on the order of weeks; `l` is an
+          architectural change on the order of months (a new destination
+          type with platform plumbing, a schema migration, an SDK suite).
+      further_reading:
+        type: array
+        items:
+          $ref: '#/$defs/FurtherReading'
+
+  FurtherReading:
+    type: object
+    additionalProperties: false
+    required: [title, url]
+    properties:
+      title:
+        type: string
+        minLength: 1
+      url:
+        type: string
+        format: uri
+
+  TargetScore:
+    type: object
+    additionalProperties: false
+    required: [criterion_id, target_score]
+    properties:
+      criterion_id:
+        $ref: '#/$defs/CriterionId'
+      target_score:
+        type: integer
+        enum: [0, 1, 2]
+        description: |
+          The score this criterion is expected to reach if the
+          recommendation is implemented as specified in `body`. Be honest:
+          if the recommendation only documents the existing custom-headers
+          feature as an auth option, the target on destination-auth-options
+          is 1 (one option, documented as auth), not 2 (multiple options).
+      note:
+        type: string
+        description: |
+          Optional one-line caveat (e.g. "assumes the operator also wires
+          up egress IPs separately", "to reach 2 requires SDK helpers too").
+
+  EffortLevel:
+    type: string
+    enum: [docs, s, m, l]
+    description: |
+      docs: one page or section, paste-ready or near-it, no engineering
+      cycles. s: small product change on the order of days. m: new
+      feature surface on the order of weeks. l: architectural change on
+      the order of months.
+
+  # ----------------------------------------------------------------------------
+  # HITL evidence (embedded in audit; same shape used in standalone companion file)
+  # ----------------------------------------------------------------------------
+
+  HitlEvidence:
+    type: object
+    additionalProperties: false
+    required: [collected_during, collected_on]
+    properties:
+      collected_during:
+        type: string
+        enum: [pass-1, pass-2]
+        description: |
+          Which pass produced the evidence. Almost always pass-2; pass-1 only if
+          the human pre-loaded evidence before the unattended pass ran.
+      collected_on:
+        type: string
+        format: date
+      active_usage:
+        $ref: '#/$defs/ActiveUsage'
+      delivery_payload_capture:
+        $ref: '#/$defs/DeliveryPayloadCapture'
+      audience_verification:
+        $ref: '#/$defs/AudienceVerification'
+      scoring_decisions:
+        type: array
+        items:
+          $ref: '#/$defs/ScoringDecision'
+        description: |
+          Audience-driven or HITL-derived scoring decisions worth preserving so a
+          re-run does not re-derive them differently.
+      other_observations:
+        type: array
+        items:
+          $ref: '#/$defs/HitlObservation'
+        description: |
+          Free-form HITL findings keyed by criterion id (or category id when no
+          single criterion fits).
+
+  ActiveUsage:
+    type: object
+    additionalProperties: false
+    properties:
+      access_level:
+        $ref: '#/$defs/AccessLevel'
+      webhooks_fired:
+        type: integer
+        minimum: 0
+      external_destination_reached:
+        type: boolean
+      in_product_delivery_view:
+        type: boolean
+      in_product_test_trigger:
+        type: boolean
+      dashboard_crud_verified:
+        type: boolean
+        description: Create, edit, disable, delete verified end to end.
+      nav_path_to_webhook_config:
+        type: string
+        description: e.g. "Integrations then Webhooks".
+      sign_in_flow:
+        type: string
+        description: e.g. "Google SSO".
+
+  DeliveryPayloadCapture:
+    type: object
+    additionalProperties: false
+    required: [signing_mode, headers]
+    properties:
+      signing_mode:
+        type: string
+        enum:
+          - standard_webhooks
+          - hmac_sha256
+          - ecdsa
+          - asymmetric_other
+          - none
+          - unknown
+        description: |
+          Signing mode observed from the actual delivery. standard_webhooks is the
+          Standard Webhooks specification (https://www.standardwebhooks.com/).
+      headers:
+        type: object
+        additionalProperties:
+          type: string
+        description: |
+          Headers present on every delivery, with verified values from the
+          captured payload. Header names lower-cased.
+      body:
+        type: string
+        description: |
+          The captured delivery body. Optional but recommended. Multi-line block
+          scalar.
+      custom_headers_feature_in_use:
+        type: boolean
+        description: |
+          true when the platform exposes a custom-headers configuration on
+          webhook creation AND the captured delivery shows it being used.
+      signature_example:
+        type: string
+        description: |
+          Example signature value verbatim (e.g. "v1,0jZ7xcLn1bzurihFk/...").
+      timestamp_example:
+        type: string
+        description: |
+          Example timestamp value verbatim (e.g. "1780423503"). String, not
+          number, to preserve format (Unix vs ISO).
+      event_topic_example:
+        type: string
+        description: |
+          Example event topic / type value (e.g. "post.content.edited").
+      user_agent:
+        type: string
+        description: |
+          User-agent header value identifying the sender (e.g. "Outpost/1.0.4").
+
+  AudienceVerification:
+    type: object
+    additionalProperties: false
+    required: [homepage_url, designation, signals]
+    properties:
+      homepage_url:
+        type: string
+        format: uri
+      designation:
+        $ref: '#/$defs/AudienceDesignation'
+      signals:
+        type: array
+        minItems: 1
+        items:
+          $ref: '#/$defs/AudienceSignal'
+
+  ScoringDecision:
+    type: object
+    additionalProperties: false
+    required: [category, criterion, score, reason]
+    properties:
+      category:
+        $ref: '#/$defs/CategoryId'
+      criterion:
+        $ref: '#/$defs/CriterionId'
+      score:
+        oneOf:
+          - type: integer
+            enum: [0, 1, 2]
+          - type: 'null'
+      reason:
+        type: string
+        minLength: 1
+
+  HitlObservation:
+    type: object
+    additionalProperties: false
+    required: [observation]
+    properties:
+      criterion:
+        $ref: '#/$defs/CriterionId'
+      category:
+        $ref: '#/$defs/CategoryId'
+      observation:
+        type: string
+        minLength: 1
+        description: Multi-line block scalar.
+
+  # ----------------------------------------------------------------------------
+  # Access limits
+  # ----------------------------------------------------------------------------
+
+  AccessLimit:
+    type: object
+    additionalProperties: false
+    required: [scope, reason]
+    properties:
+      scope:
+        type: string
+        minLength: 1
+        description: |
+          What could not be assessed (e.g. "Cat 10 delivery logs", "all L2
+          criteria").
+      reason:
+        type: string
+        minLength: 1
+        description: |
+          Why (e.g. "no test account; HITL Pass 2 would fill", "dashboard region
+          gated").
+      would_hitl_resolve:
+        type: boolean
+        description: |
+          true when HITL Pass 2 would close the gap. false when the limit is
+          structural (e.g. platform requires a paid plan no human reviewer has).
+
+  # ----------------------------------------------------------------------------
+  # Sources
+  # ----------------------------------------------------------------------------
+
+  Source:
+    type: object
+    additionalProperties: false
+    required: [url, label]
+    properties:
+      url:
+        type: string
+        description: |
+          URL or in-product capture reference. A plain string (not strictly
+          formatted as a URI) because in-product captures may be referenced by a
+          stable identifier rather than a public URL.
+      label:
+        type: string
+        minLength: 1
+        description: Short label for the source.
+      section:
+        type: string
+        description: |
+          Optional sub-location within the source (e.g. "hero copy", "API
+          authentication section").
+
+  # ----------------------------------------------------------------------------
+  # Locked IDs (source-of-truth enums).
+  #
+  # CategoryId values match the rubric's 12 categories in order. CriterionId
+  # values match the criteria listed under each category in rubric.md. Adding or
+  # renaming a criterion is a schema bump; never re-purpose an existing ID.
+  # ----------------------------------------------------------------------------
+
+  CategoryId:
+    type: string
+    enum:
+      - discovery-and-signup
+      - onboarding-and-first-event
+      - implementation-guidance
+      - event-catalog-and-schema
+      - security-and-authentication
+      - delivery-semantics-and-reliability
+      - setup-surfaces
+      - sdks-and-verification-libraries
+      - consumer-self-serve-and-subscriptions
+      - consumer-facing-observability
+      - local-dev-and-local-to-prod
+      - agent-ai-readiness
+
+  CriterionId:
+    type: string
+    enum:
+      # Cat 1: Discovery & signup
+      - findability-of-webhook-docs
+      - in-product-discoverability-of-webhook-configuration
+
+      # Cat 2: Onboarding & first event
+      - guided-path-to-first-webhook
+      - time-to-first-event
+      - test-event-trigger
+
+      # Cat 3: Implementation guidance
+      - verification-walkthrough-with-code
+      - processing-and-handler-guidance
+      - idempotency-guidance
+      - best-practices-coverage
+      - accuracy-and-freshness
+
+      # Cat 4: Event catalog & schema
+      - event-type-catalog
+      - payload-definitions
+      - per-event-unique-id
+      - machine-readable-spec
+      - sample-payloads
+      - versioning-and-evolution
+      - payload-shape-guidance
+
+      # Cat 5: Security & authentication
+      - signature-scheme
+      - replay-protection
+      - secret-rotation
+      - destination-native-auth
+      - destination-auth-options
+      - source-ip-egress
+
+      # Cat 6: Delivery semantics & reliability
+      - destination-type-breadth
+      - retry-policy
+      - delivery-guarantee-stated
+      - manual-replay-redelivery
+      - failure-handling-and-auto-disable
+      - failure-alerting
+      - ordering-and-rate-controls
+
+      # Cat 7: Setup surfaces (UI/API/CLI/IaC)
+      - dashboard-configuration
+      - api-configuration
+      - cli-support
+      - infrastructure-as-code
+
+      # Cat 8: SDKs & verification libraries
+      - sdk-availability
+      - verification-helper
+      - typed-events-payloads
+
+      # Cat 9: Consumer self-serve & subscriptions
+      - self-serve-endpoint-management
+      - subscription-granularity
+      - multiple-endpoints
+
+      # Cat 10: Consumer-facing observability
+      - delivery-logs
+      - payload-and-response-inspection
+      - latency-and-attempt-detail
+
+      # Cat 11: Local dev & local-to-prod
+      - local-receiving-story
+      - inspect-and-replay-in-dev
+      - test-sandbox-parity
+      - workflow-scenario-simulation
+      - local-to-production-transition
+
+      # Cat 12: Agent / AI readiness
+      - discoverable-index-llms-txt
+      - markdown-doc-versions
+      - push-to-agent-doc-actions
+      - agent-guidance-and-skills
+      - api-access-for-agents
+      - cli-or-mcp-for-the-webhook-surface

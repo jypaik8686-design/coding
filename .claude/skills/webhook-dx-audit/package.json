@@ -1,0 +1,16 @@
+{
+  "name": "@hookdeck/webhook-dx-audit",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Schema and validation tooling for the webhook-dx-audit skill.",
+  "scripts": {
+    "lint": "node scripts/lint-audit.mjs assets/report-template.yaml schema/audit.schema.example.yaml schema/hitl-evidence.schema.example.yaml",
+    "lint:file": "node scripts/lint-audit.mjs"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "js-yaml": "^4.1.0"
+  }
+}

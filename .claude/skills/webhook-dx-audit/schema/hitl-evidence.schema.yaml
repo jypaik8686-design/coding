@@ -1,0 +1,44 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://hookdeck.com/webhook-skills/schemas/webhook-dx-audit/hitl-evidence.schema.yaml
+title: Webhook DX Audit - HITL Evidence Pre-load
+description: |
+  Standalone hitl-evidence YAML file. The audit agent reads this at Pass 1 start
+  to skip human-in-the-loop (HITL) asks that are already answered. The shape
+  matches audit.hitl_evidence in audit.schema.yaml, plus a required top-level
+  platform field so the file is self-identifying.
+
+type: object
+additionalProperties: false
+required: [hitl_evidence]
+properties:
+  hitl_evidence:
+    type: object
+    additionalProperties: false
+    required: [platform, collected_during, collected_on]
+    properties:
+      platform:
+        type: string
+        minLength: 1
+        description: |
+          Platform name. Must match the audit's platform field when an audit
+          pre-loads this evidence file.
+      collected_during:
+        type: string
+        enum: [pass-1, pass-2]
+      collected_on:
+        type: string
+        format: date
+      active_usage:
+        $ref: 'audit.schema.yaml#/$defs/ActiveUsage'
+      delivery_payload_capture:
+        $ref: 'audit.schema.yaml#/$defs/DeliveryPayloadCapture'
+      audience_verification:
+        $ref: 'audit.schema.yaml#/$defs/AudienceVerification'
+      scoring_decisions:
+        type: array
+        items:
+          $ref: 'audit.schema.yaml#/$defs/ScoringDecision'
+      other_observations:
+        type: array
+        items:
+          $ref: 'audit.schema.yaml#/$defs/HitlObservation'

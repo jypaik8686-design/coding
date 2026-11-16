@@ -77,7 +77,12 @@ def 검사(root: Path) -> list[str]:
                 continue
             머리 = m.group(1)
             이름 = re.search(r"^name:\s*(.+)$", 머리, re.M)
-            설명 = re.search(r"^description:\s*(.+)$", 머리, re.M)
+            설명 = re.search(r"^description:[ \t]*([^\s>|][^\n]*)$", 머리, re.M)
+            if not 설명:
+                # YAML 여러 줄 꼴(`description: >` 또는 `|`): 들여쓴 줄을 이어 붙인다
+                여러줄 = re.search(r"^description:[ \t]*[>|][+-]?[ \t]*\n((?:[ \t]+[^\n]*\n?)+)", 머리, re.M)
+                if 여러줄:
+                    설명 = re.match(r"([\s\S]*)", " ".join(여러줄.group(1).split()))
             if not 이름:
                 문제.append(f"스킬에 name 없음: {rel}")
             elif 정규(이름.group(1)) != 정규(d.name):
