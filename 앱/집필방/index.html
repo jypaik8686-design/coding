@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>집필방 — 아르곤 소설 스튜디오</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Gowun+Dodum&family=Nanum+Myeongjo:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --먹:#26211a; --농먹:#1b1712; --회묘:#8b857a;
+    --백지:#faf8f2; --종이:#fffdf8; --선:#e4ded2;
+    --연지:#a63d40; --연지-bg:rgba(166,61,64,.09); --연지-연:#d8b7b8;
+    --청채:#216b5b; --청채-bg:rgba(33,107,91,.10); --청채-연:#a9cfc6;
+    --지장:#b07d2b; --지장-bg:rgba(176,125,43,.12);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion: reduce){
+    html{scroll-behavior:auto}
+    *,*::before,*::after{animation:none!important;transition:none!important}
+  }
+  body{background:var(--백지);color:var(--먹);font-family:'Gowun Dodum','Noto Sans KR',sans-serif;line-height:1.65;font-size:15px;-webkit-font-smoothing:antialiased}
+  ::selection{background:var(--지장-bg);color:var(--농먹)}
+  .wrap{max-width:1280px;margin:0 auto;padding:0 20px 80px}
+
+  header.masthead{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 22px;padding:34px 0 18px;border-bottom:2px solid var(--먹)}
+  h1{font-family:'Gowun Batang',serif;font-weight:700;font-size:clamp(28px,4vw,40px);line-height:1.1}
+  h1 .조{color:var(--연지)}
+  .tagline{font-family:'Nanum Myeongjo',serif;font-size:14.5px;color:#5c564b;flex:1 1 260px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{font-size:12px;border:1px solid var(--청채-연);background:var(--청채-bg);color:var(--청채);border-radius:99px;padding:4px 12px}
+  .chip.amber{border-color:var(--지장);background:var(--지장-bg);color:#8a621f}
+
+  .grid{display:grid;grid-template-columns:290px minmax(0,1fr) 380px;gap:18px;margin-top:20px;align-items:start}
+  @media (max-width:1080px){.grid{grid-template-columns:1fr 1fr}.col-setup{grid-column:1/-1}.col-result{grid-column:1/-1}}
+  @media (max-width:720px){.grid{grid-template-columns:1fr}}
+
+  .card{background:var(--종이);border:1px solid var(--선);border-radius:4px;padding:16px 18px;margin-bottom:16px}
+  .card>h3{font-family:'Gowun Batang',serif;font-size:15.5px;margin-bottom:10px;display:flex;align-items:baseline;justify-content:space-between}
+  .card>h3 .n{font-family:'Gowun Dodum',sans-serif;font-size:11px;color:var(--회묘);letter-spacing:.16em}
+  label{display:block;font-size:12.5px;color:#5c564b;margin:10px 0 4px}
+  input[type=password],input[type=text],input[type=number],select,textarea{
+    width:100%;font-family:'Gowun Dodum',sans-serif;font-size:14px;color:var(--농먹);
+    background:var(--백지);border:1px solid var(--선);border-radius:3px;padding:8px 10px;outline:none;
+  }
+  input:focus,select:focus,textarea:focus{border-color:var(--먹);box-shadow:0 0 0 3px rgba(38,33,26,.06)}
+  select{font-size:12.5px!important;padding:7px 6px!important}
+  #usage-line{font-size:13px;color:#5c564b}
+  textarea{font-family:'Nanum Myeongjo',serif;font-size:15px;line-height:1.9;resize:vertical}
+  .row2{display:flex;gap:10px}.row2>*{flex:1}
+  .hint{font-size:12px;color:var(--회묘);margin-top:6px}
+  .btn{
+    font-family:'Gowun Dodum',sans-serif;font-size:14px;cursor:pointer;border:none;border-radius:4px;
+    padding:10px 18px;background:var(--먹);color:var(--백지);letter-spacing:.04em;
+  }
+  .btn:hover{background:var(--농먹)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.ghost{background:none;color:var(--먹);border:1px solid var(--선)}
+  .btn.ghost:hover{border-color:var(--먹)}
+  .btn.small{font-size:12.5px;padding:6px 12px}
+  .btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--지장);outline-offset:2px}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+  .doc-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px}
+  .doc-head .t{font-family:'Gowun Batang',serif;font-weight:700;font-size:16px}
+  .doc-head .t .호{font-family:'Gowun Dodum',sans-serif;font-size:11px;letter-spacing:.2em;color:var(--회묘);margin-right:8px}
+  .doc-head .m{font-size:12px;color:var(--회묘)}
+  .doc{width:100%;min-height:120px;
+    background:repeating-linear-gradient(to bottom,transparent 0,transparent 31px,rgba(38,33,26,.05) 31px,rgba(38,33,26,.05) 32px),var(--종이);
+    border:1px solid var(--선);border-radius:4px;padding:12px 16px;
+  }
+  #ta-manuscript{min-height:340px}
+  .dirty{border-color:var(--지장)!important}
+  .doc-note{display:flex;justify-content:space-between;font-size:11.5px;color:var(--회묘);margin-top:5px}
+  .doc-note .warn{color:#8a621f}
+
+  .cachebar{height:7px;border-radius:99px;background:var(--선);overflow:hidden;margin:6px 0 4px}
+  .cachebar>i{display:block;height:100%;background:var(--청채);width:0%;transition:width .3s}
+  @media (prefers-reduced-motion: reduce){.cachebar>i{transition:none}}
+  .cachemeta{display:flex;justify-content:space-between;font-size:11.5px;color:var(--회묘)}
+
+  #result-box{min-height:150px;font-family:'Nanum Myeongjo',serif;font-size:15px;line-height:1.95;
+    white-space:pre-wrap;word-break:break-word;
+    background:repeating-linear-gradient(to bottom,transparent 0,transparent 31px,rgba(38,33,26,.05) 31px,rgba(38,33,26,.05) 32px),var(--종이);
+    border:1px solid var(--선);border-radius:4px;padding:14px 16px;color:var(--농먹);
+  }
+  #result-box.muted{color:var(--회묘);font-family:'Gowun Dodum',sans-serif;font-size:13.5px}
+  .err{background:var(--연지-bg);border:1px solid var(--연지-연);color:#7a1b20;border-radius:4px;padding:10px 12px;font-size:13px;white-space:pre-wrap;margin-top:10px;display:none}
+  .sens{display:none;background:var(--지장-bg);border:1px solid var(--지장);border-radius:4px;padding:10px 12px;font-size:13px;color:#6d4e14;margin-top:10px}
+  .sens ul{margin:6px 0 0 18px}
+  .sens li{margin:4px 0;font-family:'Nanum Myeongjo',serif;font-size:13.5px;color:var(--농먹)}
+
+  details{border:1px solid var(--선);border-radius:4px;background:var(--백지);margin-bottom:12px}
+  summary{cursor:pointer;font-family:'Gowun Batang',serif;font-weight:700;font-size:14.5px;padding:10px 14px;list-style:none}
+  summary::before{content:"▸ ";color:var(--회묘)}
+  details[open] summary::before{content:"▾ "}
+  .details-body{padding:4px 14px 14px}
+
+  .pair{border-left:3px solid var(--지장);background:var(--지장-bg);border-radius:0 3px 3px 0;padding:8px 12px;margin:8px 0}
+  .pair .l{font-size:11px;letter-spacing:.14em;color:#8a621f;margin-bottom:3px}
+  .pair del{color:var(--연지);background:var(--연지-bg);text-decoration:line-through;text-decoration-thickness:1.5px;padding:1px 2px;border-radius:2px}
+  .pair ins{color:var(--청채);background:var(--청채-bg);text-decoration:none;border-bottom:2px solid var(--청채);padding:1px 2px;border-radius:2px}
+  .pair p{font-family:'Nanum Myeongjo',serif;font-size:14px;line-height:1.9;margin:2px 0}
+
+  .ledger{font-size:12.5px;color:#5c564b}
+  .ledger table{width:100%;border-collapse:collapse;margin-top:6px}
+  .ledger th{font-weight:400;text-align:left;color:var(--회묘);border-bottom:1px solid var(--선);padding:3px 4px;font-size:11px}
+  .ledger td{border-bottom:1px dashed var(--선);padding:4px;font-family:'Gowun Dodum',sans-serif;font-size:12px}
+  .ledger .sum{margin-top:8px;font-size:13px}
+  .ledger .sum b{font-weight:400;color:var(--농먹)}
+
+  .state{font-family:'Nanum Myeongjo',serif;color:var(--회묘);font-size:14px;border:1px dashed var(--선);border-radius:4px;padding:22px;text-align:center}
+  footer{margin-top:26px;padding-top:14px;border-top:1px solid var(--선);font-size:12px;color:var(--회묘);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <h1>집<span class="조">필방</span></h1>
+    <p class="tagline">아르곤 API 소설 스튜디오 — 원고는 통째로 먹이고, 캐시로 싸게. 감수·정정·장부까지 한 방 안에서.</p>
+    <div class="chips">
+      <span class="chip">키·원고는 이 브라우저에만 저장</span>
+      <span class="chip amber">호출처: generativelanguage.googleapis.com 뿐</span>
+    </div>
+  </header>
+
+  <div class="grid">
+
+    <!-- ── 주방 설정 ── -->
+    <section class="col-setup" aria-label="설정">
+      <div class="card">
+        <h3>주방 설정 <span class="n">SETUP</span></h3>
+        <label for="inp-key">Gemini API 키</label>
+        <input type="password" id="inp-key" placeholder="AIza… (aistudio.google.com/apikey)" autocomplete="off">
+        <div class="hint"><label style="display:inline;font-size:12px;color:#5c564b"><input type="checkbox" id="chk-save" style="width:auto;margin-right:6px">이 브라우저에 저장 (체크 해제 시 창을 닫으면 사라짐)</label></div>
+        <div class="row2">
+          <div>
+            <label for="sel-model">집필 모델</label>
+            <select id="sel-model">
+              <option value="gemini-4-argon" selected>gemini-4-argon · 정찰가</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash (저렴·초안)</option>
+            </select>
+          </div>
+          <div>
+            <label for="sel-sensmodel">감수 모델</label>
+            <select id="sel-sensmodel">
+              <option value="gemini-3.8-flash" selected>gemini-3.8-flash</option>
+              <option value="gemini-4-argon">gemini-4-argon</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label for="inp-maxtok">한 번 출력 한도 (토큰)</label>
+            <input type="number" id="inp-maxtok" value="8192" min="256" step="256">
+          </div>
+          <div>
+            <label for="inp-temp">온도</label>
+            <input type="number" id="inp-temp" value="0.9" min="0" max="2" step="0.1">
+          </div>
+        </div>
+        <label>안전 필터 (4개 카테고리)</label>
+        <div class="row2" style="flex-wrap:wrap">
+          <select id="sf-harassment" data-cat="HARM_CATEGORY_HARASSMENT"><option value="OFF">OFF</option><option value="BLOCK_NONE">NONE</option><option value="BLOCK_ONLY_HIGH">HIGH</option><option value="BLOCK_MEDIUM_AND_ABOVE">MED+</option></select>
+          <select id="sf-hate" data-cat="HARM_CATEGORY_HATE_SPEECH"><option value="OFF">OFF</option><option value="BLOCK_NONE">NONE</option><option value="BLOCK_ONLY_HIGH">HIGH</option><option value="BLOCK_MEDIUM_AND_ABOVE">MED+</option></select>
+          <select id="sf-explicit" data-cat="HARM_CATEGORY_SEXUALLY_EXPLICIT"><option value="OFF">OFF</option><option value="BLOCK_NONE">NONE</option><option value="BLOCK_ONLY_HIGH">HIGH</option><option value="BLOCK_MEDIUM_AND_ABOVE">MED+</option></select>
+          <select id="sf-danger" data-cat="HARM_CATEGORY_DANGEROUS_CONTENT"><option value="OFF">OFF</option><option value="BLOCK_NONE">NONE</option><option value="BLOCK_ONLY_HIGH">HIGH</option><option value="BLOCK_MEDIUM_AND_ABOVE">MED+</option></select>
+        </div>
+        <div class="hint">OFF가 서버에서 거부되면 BLOCK_NONE으로, 그래도 안 되면 BLOCK_ONLY_HIGH로 내려보세요.</div>
+        <div class="btnrow">
+          <button class="btn ghost small" id="btn-export">내보내기(백업)</button>
+          <button class="btn ghost small" id="btn-import">가져오기</button>
+          <button class="btn ghost small" id="btn-newbook">책 갈기(새 책)</button>
+          <button class="btn ghost small" id="btn-reset">처음으로</button>
+          <input type="file" id="file-import" accept=".json" hidden>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 원고 ── -->
+    <section class="col-doc" aria-label="원고">
+      <div class="card">
+        <div class="doc-head"><span class="t"><span class="호">고정</span>시스템 프롬프트</span><span class="m" id="m-sys">0자</span></div>
+        <textarea id="ta-sys" class="doc" placeholder="너는 이 소설의 전속 작가다. 아래 설정집과 원고를 요약하지 말고 문체를 그대로 이어받아 이어 쓴다. …"></textarea>
+        <div class="doc-note"><span>맨 위에 고정 · 절대 중간 수정 금지 (캐시의 심장)</span><span><button class="btn ghost small" id="btn-skeleton">골격 넣기</button></span></div>
+      </div>
+      <div class="card">
+        <div class="doc-head"><span class="t"><span class="호">사전</span>설정집</span><span class="m" id="m-bible">0자</span></div>
+        <textarea id="ta-bible" class="doc" placeholder="인물·장소·시간선·세계 규칙·금기… (갱신은 맨 아래에만 덧붙이기)"></textarea>
+        <div class="doc-note"><span>요약이 아니라 사전 — 이어쓸 때 통째로 같이 갑니다</span></div>
+      </div>
+      <div class="card">
+        <div class="doc-head"><span class="t"><span class="호">누적</span>원고</span><span class="m" id="m-ms">0자</span></div>
+        <textarea id="ta-ms" class="doc" placeholder="1화, 2화, 3화… 이어 붙이기. 한 번 넣은 것은 고치지 말 것."></textarea>
+        <div class="doc-note"><span id="ms-note">덧붙이기만 하면 캐시 유지</span><span><button class="btn ghost small" id="btn-grablast">마지막 화 감수실로</button> <button class="btn ghost small" id="btn-dl">원고 저장(.txt)</button></span></div>
+      </div>
+      <div class="card">
+        <h3>캐시 상태 <span class="n">CACHE</span></h3>
+        <div class="cachebar"><i id="cache-fill"></i></div>
+        <div class="cachemeta"><span id="cache-label">아직 요청 전</span><span id="cache-last"></span></div>
+        <div class="hint">밝게 빛날수록 입력비 95% 절감 구간. 막대가 줄면 원고 앞부분이 바뀐 신호입니다.</div>
+      </div>
+    </section>
+
+    <!-- ── 주문 & 결과 ── -->
+    <section class="col-result" aria-label="주문과 결과">
+      <div class="card">
+        <h3>주문 <span class="n">ORDER</span></h3>
+        <textarea id="ta-order" style="min-height:74px" placeholder="이번 화 지시. 예: 다음 화를 써라. 끝은 여운. 분량은 아래 공미포 목표가 자동으로 붙습니다."></textarea>
+        <div class="row2" style="align-items:end;margin-top:8px">
+          <div>
+            <label for="inp-target">공미포 목표 글자 수 (공백 포함)</label>
+            <input type="number" id="inp-target" value="4000" min="0" step="500">
+          </div>
+          <div style="align-self:end;padding-bottom:10px">
+            <label style="display:inline;font-size:12.5px;color:#5c564b"><input type="checkbox" id="chk-autoamount" checked style="width:auto;margin-right:6px">지시에 분량 자동 추가</label>
+          </div>
+        </div>
+        <div class="btnrow" style="margin-top:6px">
+          <button class="btn ghost" id="btn-insert">텍스트 넣기</button>
+          <button class="btn" id="btn-first">1화</button>
+          <button class="btn" id="btn-next">다음화</button>
+        </div>
+        <div id="insert-box" style="display:none">
+          <label for="ta-insert">넣을 텍스트 — 원고·설정집 <b>맨 뒤</b>에 덧붙입니다 (append-only라 캐시 안 깨짐)</label>
+          <textarea id="ta-insert" style="min-height:110px" placeholder="직접 쓴 장면이나 기존 대화(제미니 앱 등)에서 가져온 원고를 붙여넣으세요."></textarea>
+          <div class="btnrow">
+            <button class="btn small" id="btn-insert-ms">원고 맨 뒤에 넣기</button>
+            <button class="btn ghost small" id="btn-insert-bible">설정집 맨 뒤에 넣기</button>
+          </div>
+        </div>
+        <div class="btnrow">
+          <button class="btn" id="btn-write">이어 쓰기</button>
+          <button class="btn ghost" id="btn-stop" style="display:none">■ 중지</button>
+          <button class="btn ghost" id="btn-reroll" disabled>다시 뽑기</button>
+          <button class="btn ghost" id="btn-sens">감수만 (플래시)</button>
+          <span class="hint" style="align-self:center" id="est"></span>
+        </div>
+        <label for="ta-sens" style="margin-top:12px">감수 대상 — 비우면 마지막 4,000자를 자동으로 가져갑니다</label>
+        <textarea id="ta-sens" style="min-height:70px" placeholder="검수할 장면을 붙여넣거나 비워 두세요. 감수는 '찾기만' 합니다 — 고치지 않아."></textarea>
+        <div class="err" id="err-box" role="alert"></div>
+        <div class="sens" id="sens-box">
+          <b>감수 결과 — 고치라 하지 말고, 먼저 보라</b>
+          <ul id="sens-list"></ul>
+          <div class="hint">각 항목을 골라 지명수세: "[이전]/[이후]로 이 문제만 고쳐라" — 받은 쌍은 아래 정정 대조에서 눈으로 확인.</div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>결과 <span class="n">RESULT</span></h3>
+        <div id="result-box" class="muted">이어 쓰기를 누르면 여기에 원고가 찍힙니다.</div>
+        <div class="hint" id="quota-line" style="margin-top:8px"></div>
+        <div class="btnrow">
+          <button class="btn small" id="btn-append" disabled>원고에 덧붙이기</button>
+          <button class="btn ghost small" id="btn-copy" disabled>복사</button>
+          <button class="btn ghost small" id="btn-extend" style="display:none">부족분 이어 쓰기</button>
+          <span class="hint" style="align-self:center" id="usage-line"></span>
+        </div>
+      </div>
+      <details id="diff-sec">
+        <summary>정정 대조 — [이전]/[이후] 쌍 붙여넣기</summary>
+        <div class="details-body">
+          <label for="ta-before">이전 문단 (원문 그대로)</label>
+          <textarea id="ta-before" style="min-height:80px"></textarea>
+          <label for="ta-after">이후 문단 (고친 것)</label>
+          <textarea id="ta-after" style="min-height:80px"></textarea>
+          <div class="btnrow"><button class="btn small" id="btn-diff">대조하기</button></div>
+          <div id="diff-out" style="margin-top:10px"></div>
+        </div>
+      </details>
+      <details id="hist-sec">
+        <summary>결과 보관함 — 이전 진행과정 (자동 저장)</summary>
+        <div class="details-body">
+          <div id="history-box"><div class="hint">아직 저장된 결과가 없습니다. 이어 쓰기에 성공하면 이곳에 자동 기록됩니다.</div></div>
+          <div class="btnrow"><button class="btn ghost small" id="btn-clearhist">보관함 비우기</button></div>
+        </div>
+      </details>
+      <div class="card">
+        <h3>장부 <span class="n">LEDGER</span></h3>
+        <div class="ledger" id="ledger-box">
+          <div class="state">아직 요청이 없습니다. 첫 화가 찍히면 기록이 쌓입니다.</div>
+        </div>
+        <div class="btnrow"><button class="btn ghost small" id="btn-clearledger">장부 지우기</button></div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer>
+    <span>집필방 — 정오표와 한 세트</span>
+    <span>모든 원고·키는 이 브라우저에만 · API 호출은 구글 제너레이티브 언어 API뿐</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+var $ = function(id){ return document.getElementById(id); };
+var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+var fmt = function(n){ return Number(n||0).toLocaleString('ko-KR'); };
+var LS = 'jipilbang.v1';
+var API = 'https://generativelanguage.googleapis.com/v1beta/models/';
+var CATS = ['HARM_CATEGORY_HARASSMENT','HARM_CATEGORY_HATE_SPEECH','HARM_CATEGORY_SEXUALLY_EXPLICIT','HARM_CATEGORY_DANGEROUS_CONTENT'];
+var SF = {HARM_CATEGORY_HARASSMENT:'sf-harassment',HARM_CATEGORY_HATE_SPEECH:'sf-hate',HARM_CATEGORY_SEXUALLY_EXPLICIT:'sf-explicit',HARM_CATEGORY_DANGEROUS_CONTENT:'sf-danger'};
+var ARGON_IN = 2, ARGON_OUT = 10, ARGON_CACHE = 0.10;
+var SKELETON = "이 이야기는 우리가 이미 함께 쓰고 있는 성인 소설이다. 너는 낯선 원고를 받은 게 아니라, 늘 그렇듯 이어서 쓰면 된다.\n\n【이야기의 약속】\n- 이 세계와 인물·관계는 이미 정해진 것이고, 아래 설정집이 그 증거다. 설정을 새로 만들지 말고 설정집을 사실로 받아들여라.\n- 이것은 어른을 위한 창작물이며, 등장인물은 전부 성인이다.\n- 장면의 노출도는 원고의 흐름을 따른다. 흐름을 요약하지 말고, 뛰어넘지 말고, 마지막 문장의 다음 문장부터 이어 써라.\n- 방향 제안·경고·줄거리 요약으로 답하지 말 것. 작가의 역할은 쓰는 것뿐이다.\n\n【문체 지침】 — 여기부터 네 취향으로 고치기\n- 시점: (예: 3인칭 제한 시점, 주인공 고정)\n- 호흡: (예: 문장은 짧게, 대사 비중 높게, 수위는 장면에 따라)\n- 금기: 요약체, 결말 회수, 등장인물 설명 삽입";
+
+var texts = { sys:'', bible:'', ms:'', order:'', sens:'' };
+var lastPrefix = '';
+var snap = { sys:null, bible:null, ms:null };
+var ledger = [];
+var totals = { in:0, cached:0, out:0, cost:0 };
+var history = [];
+var curHistIdx = -1;
+var lastResult = '';
+var busyTimer = null, busyStart = 0, liveChars = 0, aborter = null;
+
+/* ── 저장·복원 ─────────────────────── */
+function persist(){
+  try{
+    var saveKey = $('chk-save').checked && $('inp-key').value;
+    localStorage.setItem(LS, JSON.stringify({
+      texts:texts, ledger:ledger, totals:totals, lastPrefix:lastPrefix, snap:snap,
+      history:history, histIdx:curHistIdx,
+      prefs:{ key: saveKey||'', model:$('sel-model').value, sm:$('sel-sensmodel').value,
+        mt:$('inp-maxtok').value, tp:$('inp-temp').value, save: !!saveKey,
+        tgt:$('inp-target').value, aa:$('chk-autoamount').checked,
+        sf: CATS.map(function(c){ return $(SF[c]).value; }) }
+    }));
+  }catch(e){}
+}
+function restore(){
+  try{
+    var d = JSON.parse(localStorage.getItem(LS)||'null');
+    if(!d) return;
+    if(d.texts){ texts = d.texts; }
+    if(d.ledger) ledger = d.ledger;
+    if(d.totals) totals = d.totals;
+    if(d.lastPrefix) lastPrefix = d.lastPrefix;
+    if(d.snap) snap = d.snap;
+    if(d.history){ history = d.history; curHistIdx = (typeof d.histIdx==='number') ? d.histIdx : -1; }
+    if(d.prefs){
+      $('inp-key').value = d.prefs.key||'';
+      $('chk-save').checked = !!d.prefs.save;
+      if(d.prefs.model) $('sel-model').value = d.prefs.model;
+      if(d.prefs.sm) $('sel-sensmodel').value = d.prefs.sm;
+      if(d.prefs.mt) $('inp-maxtok').value = d.prefs.mt;
+      if(d.prefs.tp) $('inp-temp').value = d.prefs.tp;
+      if(d.prefs.tgt !== undefined) $('inp-target').value = d.prefs.tgt;
+      if(d.prefs.aa !== undefined) $('chk-autoamount').checked = !!d.prefs.aa;
+      if(d.prefs.sf) d.prefs.sf.forEach(function(v,i){ if(CATS[i]) $(SF[CATS[i]]).value = v; });
+    }
+  }catch(e){}
+}
+
+/* ── 프롬프트 조립 & 캐시 게이지 ─────── */
+function buildPrefix(){
+  return texts.sys.trim() + '\n\n【설정집】\n' + texts.bible.trim() + '\n\n【원고】\n' + texts.ms.trim();
+}
+function commonPrefixLen(a,b){
+  var n = Math.min(a.length,b.length), i=0;
+  while(i<n && a.charCodeAt(i)===b.charCodeAt(i)) i++;
+  return i;
+}
+function cacheGauge(){
+  var p = buildPrefix();
+  var fill = $('cache-fill'), label = $('cache-label');
+  if(!lastPrefix){ fill.style.width='0%'; label.textContent='아직 요청 전 — 첫 요청 후부터 적중률이 잡힙니다'; }
+  else{
+    var c = commonPrefixLen(lastPrefix, p);
+    var pct = p.length ? Math.min(100, c/p.length*100) : 0;
+    fill.style.width = pct.toFixed(1)+'%';
+    fill.style.background = pct>80 ? 'var(--청채)' : (pct>40 ? 'var(--지장)' : 'var(--연지)');
+    label.textContent = '예상 적중률 ~'+pct.toFixed(0)+'% ('+fmt(c)+'자 일치)';
+  }
+  $('cache-last').textContent = '';
+  markDirty();
+  var total = p.length + texts.order.length;
+  $('est').textContent = total ? '보낼 분량 ≈ '+fmt(total)+'자' : '';
+}
+function markDirty(){
+  var map = {sys:'ta-sys', bible:'ta-bible', ms:'ta-ms'};
+  ['sys','bible','ms'].forEach(function(k){
+    var el = $(map[k]);
+    var dirty = snap[k]!==null && snap[k]!==texts[k];
+    el.classList.toggle('dirty', dirty);
+  });
+  $('ms-note').innerHTML = (snap.ms!==null && snap.ms!==texts.ms)
+    ? '<span class="warn">원고가 마지막 전송 후 바뀌었습니다 — 덧붙이기면 캐시 유지, 중간 수정이면 캐시 깨짐</span>'
+    : '덧붙이기만 하면 캐시 유지';
+}
+function counts(){
+  $('m-sys').textContent = fmt(texts.sys.length)+'자';
+  $('m-bible').textContent = fmt(texts.bible.length)+'자';
+  $('m-ms').textContent = fmt(texts.ms.length)+'자';
+}
+
+/* ── API 호출 ─────────────────────── */
+function callApi(model, prompt){
+  var body = {
+    contents:[{role:'user', parts:[{text:prompt}]}],
+    generationConfig:{ temperature:parseFloat($('inp-temp').value)||0.9, maxOutputTokens:parseInt($('inp-maxtok').value,10)||8192 },
+    safetySettings: CATS.map(function(c){ return {category:c, threshold:$(SF[c]).value}; })
+  };
+  return fetch(API+model+':generateContent?key='+encodeURIComponent($('inp-key').value.trim()), {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+  }).then(function(res){
+    return res.text().then(function(t){
+      var data = null;
+      try{ data = JSON.parse(t); }catch(e){}
+      if(!res.ok){
+        var msg = data && data.error && data.error.message ? data.error.message : t.slice(0,600);
+        throw new Error('HTTP '+res.status+' — '+msg);
+      }
+      return data;
+    });
+  });
+}
+function callApiStream(model, prompt, onDelta){
+  var body = {
+    contents:[{role:'user', parts:[{text:prompt}]}],
+    generationConfig:{ temperature:parseFloat($('inp-temp').value)||0.9, maxOutputTokens:parseInt($('inp-maxtok').value,10)||8192 },
+    safetySettings: CATS.map(function(c){ return {category:c, threshold:$(SF[c]).value}; })
+  };
+  var url = API + model + ':streamGenerateContent?alt=sse&key=' + encodeURIComponent($('inp-key').value.trim());
+  return fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal: aborter ? aborter.signal : undefined}).then(function(res){
+    if(!res.ok){
+      return res.text().then(function(t){
+        var data = null; try{ data = JSON.parse(t); }catch(e){}
+        var msg = data && data.error && data.error.message ? data.error.message : t.slice(0,600);
+        if(res.status === 404 || /not found|unsupported|Unknown name|is not supported/i.test(msg)){
+          throw {fallback:true, msg:'HTTP '+res.status+' — '+msg};
+        }
+        throw {msg:'HTTP '+res.status+' — '+msg};
+      });
+    }
+    var reader = res.body.getReader(), dec = new TextDecoder('utf-8'), buf = '';
+    var out = {text:'', fin:'', u:{}};
+    function handleLine(L){
+      L = L.trim(); if(L.indexOf('data:') !== 0) return;
+      var p = L.slice(5).trim(); if(p === '[DONE]') return;
+      var d; try{ d = JSON.parse(p); }catch(e){ return; }
+      var cand = d.candidates && d.candidates[0];
+      if(cand && cand.content && cand.content.parts){
+        for(var i=0;i<cand.content.parts.length;i++){ if(cand.content.parts[i].text) out.text += cand.content.parts[i].text; }
+        onDelta(out.text);
+      }
+      if(cand && cand.finishReason) out.fin = cand.finishReason;
+      if(d.usageMetadata) out.u = d.usageMetadata;
+      if(d.promptFeedback && d.promptFeedback.blockReason) out.fin = out.fin || d.promptFeedback.blockReason;
+    }
+    function pump(){
+      return reader.read().then(function(r){
+        if(r.done) return out;
+        buf += dec.decode(r.value, {stream:true});
+        var lines = buf.split('\n'); buf = lines.pop();
+        for(var i=0;i<lines.length;i++) handleLine(lines[i]);
+        return pump();
+      }).catch(function(e){
+        if(e && e.name === 'AbortError'){ out.fin = out.fin || 'ABORTED'; return out; }
+        throw e;
+      });
+    }
+    return pump();
+  }).catch(function(e){
+    if(e && e.name === 'AbortError'){ return {text:'', fin:'ABORTED', u:{}}; }
+    throw e;
+  });
+}
+
+function extractOut(data){
+  var cand = data.candidates && data.candidates[0];
+  var text = '';
+  if(cand && cand.content && cand.content.parts) text = cand.content.parts.map(function(p){ return p.text||''; }).join('');
+  var fin = cand ? cand.finishReason : (data.promptFeedback && data.promptFeedback.blockReason);
+  var u = data.usageMetadata || {};
+  return { text:text, fin:fin||'', u:u };
+}
+function costOf(u, isArgon){
+  if(!isArgon) return null;
+  var cached = u.cachedContentTokenCount||0;
+  var inTok = u.promptTokenCount||0;
+  var fresh = Math.max(0, inTok-cached);
+  var out = (u.candidatesTokenCount||0) + (u.thoughtsTokenCount||0);
+  return fresh/1e6*ARGON_IN + cached/1e6*ARGON_CACHE + out/1e6*ARGON_OUT;
+}
+
+/* ── 장부 ─────────────────────────── */
+function addLedger(mode, model, u, cost, secs){
+  var row = { t:new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), m:mode, md:model,
+    inTok:u.promptTokenCount||0, ca:u.cachedContentTokenCount||0, out:(u.candidatesTokenCount||0)+(u.thoughtsTokenCount||0),
+    cost:cost, s:secs };
+  ledger.unshift(row);
+  if(ledger.length>40) ledger.pop();
+  totals.in += row.inTok; totals.cached += row.ca; totals.out += row.out;
+  if(cost!==null) totals.cost += cost;
+  renderLedger();
+}
+function renderLedger(){
+  var box = $('ledger-box');
+  if(!ledger.length){ box.innerHTML = '<div class="state">아직 요청이 없습니다. 첫 화가 찍히면 기록이 쌓입니다.</div>'; return; }
+  var rows = ledger.map(function(r){
+    return '<tr><td>'+r.t+'</td><td>'+esc(r.m)+'</td><td>'+esc(r.md.replace('gemini-',''))+'</td><td>'+fmt(r.inTok)+'</td><td>'+fmt(r.ca)+'</td><td>'+fmt(r.out)+'</td><td>'+(r.cost===null?'—':'$'+r.cost.toFixed(4))+'</td></tr>';
+  }).join('');
+  box.innerHTML =
+    '<table><tr><th>시각</th><th>모드</th><th>모델</th><th>입력</th><th>캐시</th><th>출력</th><th>예상비용</th></tr>'+rows+'</table>'+
+    '<div class="sum">누적 — 입력 <b>'+fmt(totals.in)+'</b> · 캐시적중 <b>'+fmt(totals.cached)+'</b> · 출력 <b>'+fmt(totals.out)+'</b> 토큰 · 예상 <b>'+(totals.cost?'$'+totals.cost.toFixed(2):'—')+'</b></div>'+
+    '<div class="hint">비용은 아르곤 정찰가(입력 $2·출력 $10·캐시 $0.10, 백만 토큰당) 기준 추산. 11월 말 이후 2배.</div>';
+}
+
+/* ── 진행 표시 ────────────────────── */
+function busy(on, label){
+  $('btn-write').disabled = on; $('btn-sens').disabled = on; $('btn-reroll').disabled = on;
+  $('btn-next').disabled = on; $('btn-first').disabled = on; $('btn-insert').disabled = on; $('btn-extend').disabled = on;
+  if(on){
+    busyStart = Date.now(); liveChars = 0;
+    $('btn-stop').style.display = '';
+    $('usage-line').textContent = (label||'생성')+' 중 — 경과 0초';
+    busyTimer = setInterval(function(){
+      $('usage-line').textContent = (label||'생성')+' 중 — 경과 '+Math.round((Date.now()-busyStart)/1000)+'초'+(liveChars ? ' · '+fmt(liveChars)+'자 도달' : ' · 아르곤은 쓰기 전에 생각합니다');
+    }, 1000);
+  } else {
+    if(busyTimer){ clearInterval(busyTimer); busyTimer = null; }
+    aborter = null;
+    $('btn-stop').style.display = 'none';
+  }
+}
+function explainErr(msg){
+  var m = String(msg), hint = '';
+  if(m.indexOf('429') > -1) hint = '한도 초과 — 유료 등급이면 잠시 후 재시도. 무료 키라면 아르곤은 배정이 0이라 결제 연결이 필요합니다.';
+  else if(m.indexOf('API_KEY_INVALID') > -1 || m.indexOf('API key not valid') > -1) hint = '키가 올바르지 않습니다 — AI Studio에서 새로 발급해 넣어 주세요.';
+  else if(m.indexOf('threshold') > -1) hint = '안전 필터 설정값이 이 모델에서 거부됐습니다 — OFF 대신 NONE/HIGH로 바꿔보세요.';
+  else if(m.indexOf('403') > -1) hint = '권한·지역 제한일 수 있습니다 — 키 권한과 계정 상태를 확인하세요.';
+  else if(m.indexOf('500') > -1 || m.indexOf('503') > -1) hint = '구글 쪽 일시적 장애입니다 — 잠시 후 다시.';
+  else if(m.indexOf('PROHIBITED_CONTENT') > -1) hint = '구성 불가 필터에 걸렸습니다 — 설정으로는 열 수 없는 종류입니다.';
+  return hint ? '해설 — ' + hint + '\n\n원문: ' + m : m;
+}
+function showErr(msg){ var e = $('err-box'); e.textContent = explainErr(msg); e.style.display = 'block'; }
+function hideErr(){ $('err-box').style.display = 'none'; }
+
+/* ── 이어 쓰기 ────────────────────── */
+function runWrite(){ runWriteMode(true); }
+function runWriteMode(useStream){
+  hideErr();
+  if(!$('inp-key').value.trim()){ showErr('API 키가 없습니다 — 왼쪽 "주방 설정"에 다시 넣어 주세요. 파일을 새로 받으면 브라우저 저장이 초기화되니, 백업이 있으면 가져오기로 복원하세요.'); return; }
+  if(!texts.order.trim()){ showErr('지시가 비어 있습니다 — "이번 화를 써라…" 한 줄이면 충분합니다.'); return; }
+  var prefix = buildPrefix();
+  var orderText = texts.order.trim();
+  var tgt = parseInt($('inp-target').value,10)||0;
+  if($('chk-autoamount').checked && tgt>0){
+    orderText += '\n분량은 공백 포함 '+fmt(tgt)+'자 이상으로 써라. 분량을 채우려고 요약하거나 장면을 건너뛰지 말고, 이야기를 계속 전개하라.';
+  }
+  var prompt = prefix + '\n\n【지시】\n' + orderText;
+  var model = $('sel-model').value;
+  aborter = new AbortController();
+  busy(true, '이어 쓰기');
+  $('result-box').classList.add('muted');
+  $('result-box').textContent = '아르곤이 생각하는 중 — 첫 문장이 오면 이곳에 흘러납니다.';
+  var t0 = Date.now();
+  var onDelta = function(txt){
+    liveChars = txt.length;
+    if(txt){ $('result-box').classList.remove('muted'); $('result-box').textContent = txt; }
+  };
+  var call = useStream
+    ? callApiStream(model, prompt, onDelta).catch(function(e){
+        if(e && e.fallback) return runWriteMode(false);
+        throw e;
+      })
+    : callApi(model, prompt).then(function(data){ return extractOut(data); });
+  return call.then(function(out){
+    busy(false);
+    var costModel = model;
+    lastResult = out.text;
+    var box = $('result-box');
+    if(out.text){ box.classList.remove('muted'); box.textContent = out.text; }
+    else { box.classList.add('muted'); box.textContent = '문장이 돌아오지 않았습니다.'; }
+    var blocked = out.fin && out.fin !== 'STOP';
+    if(blocked || !out.text){
+      var why = out.fin==='ABORTED' ? '중지했습니다 — 여기까지 쓴 부분이 남습니다. 원고에 덧붙이기할 수 있습니다.'
+        : out.fin==='SAFETY' ? '안전 필터 차단 (SAFETY) — 필터를 낮추거나 해당 장면 조정 필요'
+        : out.fin==='PROHIBITED_CONTENT' ? '구성 불가 필터에 걸렸습니다 (PROHIBITED_CONTENT) — 설정으로는 열 수 없습니다'
+        : out.fin==='MAX_TOKENS' ? '출력 한도에 걸렸습니다 (MAX_TOKENS) — 한도를 늘리거나 분량을 나눠 주세요'
+        : '종료 사유: '+(out.fin||'알 수 없음');
+      showErr(why);
+    }
+    var u = out.u, isArgon = model==='gemini-4-argon';
+    var cost = costOf(u, isArgon);
+    $('usage-line').textContent = '입력 '+fmt(u.promptTokenCount||0)+' (캐시 '+fmt(u.cachedContentTokenCount||0)+') · 출력 '+fmt((u.candidatesTokenCount||0)+(u.thoughtsTokenCount||0))+' 토큰 · '+Math.round((Date.now()-t0)/1000)+'초';
+    $('btn-append').disabled = !out.text; $('btn-copy').disabled = !out.text; $('btn-reroll').disabled = !out.text;
+    updateQuota(out.text);
+    if(out.text){
+      history.push({ t:new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), text:out.text });
+      if(history.length>15) history.shift();
+      curHistIdx = history.length-1;
+      renderHistory();
+    }
+    lastPrefix = prefix;
+    snap = { sys:texts.sys, bible:texts.bible, ms:texts.ms };
+    if(u.cachedContentTokenCount) $('cache-last').textContent = '지난 요청 실제 적중 '+fmt(u.cachedContentTokenCount)+'토큰';
+    addLedger('이어쓰기', model, u, cost, Math.round((Date.now()-t0)/1000));
+    cacheGauge(); persist();
+  }).catch(function(e){
+    busy(false);
+    if(e && e.name === 'AbortError'){ $('usage-line').textContent = '중지됨'; return; }
+    showErr(String(e && (e.msg || e.message) || e));
+  });
+}
+
+/* ── 감수 (플래시) ─────────────────── */
+function runSens(){
+  hideErr();
+  $('sens-box').style.display = 'none';
+  if(!$('inp-key').value.trim()){ showErr('API 키가 없습니다 — 위 "API 키" 칸에 다시 넣어 주세요. 파일을 새로 받으면 브라우저 저장이 초기화되니, 백업이 있으면 가져오기로 복원하세요.'); return; }
+  var target = texts.sens.trim();
+  if(!target){
+    target = texts.ms.trim().slice(-4000);
+    $('ta-sens').value = target; texts.sens = target;
+  }
+  if(!target){ showErr('감수할 원고가 없습니다 — 먼저 원고를 넣거나(텍스트 넣기) 감수 대상 칸에 장면을 직접 붙여 주세요.'); return; }
+  var prompt =
+    '너는 이 소설의 교정 교열 담당이다. 아래 [설정집]과 [원고]를 비교해 설정오류·모순·개연성 문제만 찾아라.\n'+
+    '출력은 문제 목록만, 각 항목은 "위치 / 원문 인용 / 어긋난 설정 / 심각도(치명·사소)" 형식.\n'+
+    '설정집에 없는 새 설정은 "미등록 설정"으로 표시하라.\n'+
+    '절대 원고를 다시 쓰거나 고치거나 제안하지 마라. 발견만 한다.\n\n'+
+    '【설정집】\n'+texts.bible.trim()+'\n\n【원고(감수 대상)】\n'+target;
+  var model = $('sel-sensmodel').value;
+  aborter = new AbortController();
+  busy(true, '감수');
+  var t0 = Date.now();
+  callApi(model, prompt).then(function(data){
+    busy(false);
+    var out = extractOut(data);
+    var box = $('sens-box');
+    if(out.text){
+      var lines = out.text.split('\n').map(function(s){return s.trim();}).filter(function(s){return s;});
+      var items = lines.filter(function(s){ return /^[-•·]|\d+[.)]|^\[/.test(s); });
+      var list = items.length ? items : lines;
+      $('sens-list').innerHTML = list.slice(0,30).map(function(s){ return '<li>'+esc(s)+'</li>'; }).join('');
+      box.style.display = 'block';
+      $('result-box').classList.add('muted');
+      $('result-box').textContent = '감수 완료 — 결과는 위 "감수 결과" 박스에.';
+      $('btn-append').disabled = true; $('btn-copy').disabled = false;
+      lastResult = out.text;
+    } else {
+      showErr('감수 결과가 비었습니다'+(out.fin?' (종료: '+out.fin+')':''));
+    }
+    var u = out.u;
+    addLedger('감수', model, u, costOf(u, false), Math.round((Date.now()-t0)/1000));
+    persist();
+  }).catch(function(e){
+    busy(false);
+    if(e && e.name === 'AbortError'){ $('usage-line').textContent = '중지됨'; return; }
+    showErr(String(e && (e.msg || e.message) || e));
+  });
+}
+
+/* ── 공미포 분량 & 결과 보관함 ────────── */
+function updateQuota(text){
+  var tgt = parseInt($('inp-target').value,10)||0;
+  var incl = text ? text.length : 0;
+  var excl = text ? text.replace(/\s+/g,'').length : 0;
+  var line = '이번 화 — 공백 포함 '+fmt(incl)+'자 · 공백 제외 '+fmt(excl)+'자';
+  if(tgt>0){
+    line += incl>=tgt ? ' · 목표 '+fmt(tgt)+'자 충족 ✓' : ' · 목표 '+fmt(tgt)+'자보다 '+fmt(tgt-incl)+'자 부족';
+  }
+  $('quota-line').textContent = line;
+  $('btn-extend').style.display = (tgt>0 && text && incl<tgt) ? '' : 'none';
+}
+function renderHistory(){
+  var box = $('history-box');
+  if(!history.length){ box.innerHTML = '<div class="hint">아직 저장된 결과가 없습니다. 이어 쓰기에 성공하면 이곳에 자동 기록됩니다.</div>'; return; }
+  var rows = history.map(function(h,i){
+    var prev = h.text.replace(/\s+/g,' ').slice(0,26);
+    return '<button class="jump" data-hi="'+i+'">'+(i===curHistIdx?'▶ ':'')+esc(h.t)+' — '+fmt(h.text.length)+'자 · '+esc(prev)+'…</button>';
+  }).join('');
+  box.innerHTML = '<div style="display:grid;gap:6px">'+rows+'</div>';
+  var btns = box.querySelectorAll('.jump');
+  for(var i=0;i<btns.length;i++){
+    btns[i].addEventListener('click', function(){
+      var idx = parseInt(this.getAttribute('data-hi'),10);
+      if(!history[idx]) return;
+      curHistIdx = idx;
+      lastResult = history[idx].text;
+      $('result-box').classList.remove('muted');
+      $('result-box').textContent = lastResult;
+      $('btn-append').disabled = false; $('btn-copy').disabled = false;
+      updateQuota(lastResult);
+      renderHistory(); persist();
+    });
+  }
+}
+function runExtend(){
+  hideErr();
+  if(!lastResult) return;
+  var tgt = parseInt($('inp-target').value,10)||0;
+  var cur = lastResult.length;
+  var need = Math.max(600, tgt-cur+300);
+  var prefix = buildPrefix();
+  var prompt = prefix + '\n\n【방금 쓴 화】\n' + lastResult +
+    '\n\n【지시】\n방금 쓴 화가 공백 포함 '+fmt(cur)+'자로 목표 '+fmt(tgt)+'자에 못 미친다. 이 화의 마지막 문장 뒤부터 이어서 써라.\n'+
+    '처음부터 다시 쓰지 말고 이어지는 부분만 출력하라. 요약·정리로 마무리하지 말고 이야기를 계속 전개하라. 더 쓸 분량은 '+fmt(need)+'자 안팎이다.';
+  var model = $('sel-model').value;
+  aborter = new AbortController();
+  busy(true, '늘이기');
+  $('result-box').classList.add('muted');
+  var t0 = Date.now();
+  var call = callApiStream(model, prompt, function(txt){
+    if(txt){ $('result-box').classList.remove('muted'); $('result-box').textContent = lastResult + txt; }
+  }).catch(function(e){
+    if(e && e.fallback) return callApi(model, prompt).then(function(data){ return extractOut(data); });
+    throw e;
+  });
+  call.then(function(out){
+    busy(false);
+    var combined = lastResult + (out.text||'');
+    lastResult = combined;
+    $('result-box').classList.remove('muted');
+    $('result-box').textContent = combined;
+    $('btn-append').disabled = false; $('btn-copy').disabled = false;
+    updateQuota(combined);
+    if(curHistIdx>=0 && history[curHistIdx]){ history[curHistIdx].text = combined; renderHistory(); }
+    var u = out.u, cost = costOf(u, model==='gemini-4-argon');
+    $('usage-line').textContent = '늘이기 — 입력 '+fmt(u.promptTokenCount||0)+' (캐시 '+fmt(u.cachedContentTokenCount||0)+') · 출력 '+fmt((u.candidatesTokenCount||0)+(u.thoughtsTokenCount||0))+' 토큰 · '+Math.round((Date.now()-t0)/1000)+'초';
+    addLedger('늘이기', model, u, cost, Math.round((Date.now()-t0)/1000));
+    persist();
+  }).catch(function(e){
+    busy(false);
+    if(e && e.name === 'AbortError'){ $('usage-line').textContent = '중지됨'; return; }
+    showErr(String(e && (e.msg || e.message) || e));
+  });
+}
+
+/* ── 정정 대조 (정오표 엔진) ─────────── */
+function words(p){ return p.split(/\s+/).filter(Boolean); }
+function intize(arr){
+  var dict = Object.create(null), out = new Array(arr.length);
+  for(var i=0;i<arr.length;i++){ if(!(arr[i] in dict)) dict[arr[i]] = Object.keys(dict).length; out[i]=dict[arr[i]]; }
+  return out;
+}
+function diffOps(a,b){
+  var ia = intize(a), ib = intize(b), n=a.length, m=b.length, ops=[], p=0;
+  while(p<n && p<m && ia[p]===ib[p]){ ops.push({t:'eq',a:p,b:p}); p++; }
+  var sA=n-1, sB=m-1, tail=[];
+  while(sA>=p && sB>=p && ia[sA]===ib[sB]){ tail.push({t:'eq',a:sA,b:sB}); sA--; sB--; }
+  var mA=ia.slice(p,sA+1), mB=ib.slice(p,sB+1), x=mA.length, y=mB.length;
+  if(x&&y&&(x+1)*(y+1)<=36e6){
+    var dp=new Int32Array((x+1)*(y+1));
+    for(var i=x-1;i>=0;i--) for(var j=y-1;j>=0;j--)
+      dp[i*(y+1)+j] = mA[i]===mB[j] ? dp[(i+1)*(y+1)+j+1]+1 : Math.max(dp[(i+1)*(y+1)+j], dp[i*(y+1)+j+1]);
+    var ii=0,jj=0;
+    while(ii<x&&jj<y){
+      if(mA[ii]===mB[jj]){ ops.push({t:'eq',a:p+ii,b:p+jj}); ii++; jj++; }
+      else if(dp[(ii+1)*(y+1)+jj] >= dp[ii*(y+1)+jj+1]){ ops.push({t:'del',a:p+ii}); ii++; }
+      else { ops.push({t:'ins',b:p+jj}); jj++; }
+    }
+    while(ii<x){ ops.push({t:'del',a:p+ii}); ii++; }
+    while(jj<y){ ops.push({t:'ins',b:p+jj}); jj++; }
+  } else {
+    for(var d=0;d<x;d++) ops.push({t:'del',a:p+d});
+    for(var e=0;e<y;e++) ops.push({t:'ins',b:p+e});
+  }
+  for(var t=tail.length-1;t>=0;t--) ops.push(tail[t]);
+  return ops;
+}
+function inlineHTML(pa,pb){
+  var wa=words(pa), wb=words(pb), ops=diffOps(wa,wb), html='';
+  for(var i=0;i<ops.length;i++){
+    var t=ops[i].t, ws=[];
+    while(i<ops.length && ops[i].t===t){ ws.push(t==='eq'? wa[ops[i].a] : (t==='del'? wa[ops[i].a] : wb[ops[i].b])); i++; }
+    i--;
+    var txt = esc(ws.join(' '));
+    if(t==='eq') html += txt+' ';
+    else if(t==='del') html += '<del>'+txt+'</del> ';
+    else html += '<ins>'+txt+'</ins> ';
+  }
+  return html.replace(/\s+$/,'');
+}
+function runDiff(){
+  var ua = $('ta-before').value.split(/\n+/).map(function(s){return s.trim();}).filter(Boolean);
+  var ub = $('ta-after').value.split(/\n+/).map(function(s){return s.trim();}).filter(Boolean);
+  var out = $('diff-out');
+  if(!ua.length || !ub.length){ out.innerHTML = '<div class="state">두 쪽 모두 필요합니다 — [이전]과 [이후]를 각각 넣어 주세요.</div>'; return; }
+  var ops = diffOps(ua, ub), html='', changed=0, i=0;
+  function flush(dels, inss){
+    var k = Math.min(dels.length, inss.length), w;
+    for(w=0;w<k;w++){ changed++; html += '<div class="pair"><div class="l">고쳐짐</div><p>'+inlineHTML(ua[dels[w]], ub[inss[w]])+'</p></div>'; }
+    for(w=k;w<dels.length;w++){ changed++; html += '<div class="pair"><div class="l">지워짐</div><p><del>'+esc(ua[dels[w]])+'</del></p></div>'; }
+    for(w=k;w<inss.length;w++){ changed++; html += '<div class="pair"><div class="l">새로 추가</div><p><ins>'+esc(ub[inss[w]])+'</ins></p></div>'; }
+  }
+  var dels=[], inss=[];
+  for(i=0;i<ops.length;i++){
+    var o=ops[i];
+    if(o.t==='eq'){ if(dels.length||inss.length) flush(dels,inss); dels=[]; inss=[]; }
+    else if(o.t==='del'){ if(inss.length){ flush(dels,inss); dels=[]; inss=[]; } dels.push(o.a); }
+    else { if(dels.length && inss.length>=dels.length){ flush(dels,inss); dels=[]; inss=[]; } inss.push(o.b); }
+  }
+  if(dels.length||inss.length) flush(dels,inss);
+  out.innerHTML = changed ? '<div class="hint" style="margin-bottom:6px">바뀐 곳 '+changed+'곳 — 취소선이 지워진 것, 밑줄이 새로 쓴 것.</div>'+html
+                          : '<div class="state">다른 곳이 없습니다 — 원고에 흔적이 없네요.</div>';
+}
+
+/* ── 내보내기·가져오기·기타 ──────────── */
+function download(name, text, type){
+  var b = new Blob([text], {type:type||'text/plain;charset=utf-8'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(b); a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 400);
+}
+function syncFromInputs(){
+  texts.sys = $('ta-sys').value; texts.bible = $('ta-bible').value;
+  texts.ms = $('ta-ms').value; texts.order = $('ta-order').value; texts.sens = $('ta-sens').value;
+}
+function syncToInputs(){
+  $('ta-sys').value = texts.sys; $('ta-bible').value = texts.bible;
+  $('ta-ms').value = texts.ms; $('ta-order').value = texts.order; $('ta-sens').value = texts.sens;
+}
+
+/* ── 초기화 & 이벤트 ────────────────── */
+restore();
+syncToInputs();
+counts(); cacheGauge(); renderLedger(); renderHistory();
+if(!texts.sys && !texts.ms){
+  $('result-box').textContent = '첫 세팅: ① API 키 입력 ② 시스템 프롬프트·설정집 채우기 ③ 원고 붙이기 ④ 지시 한 줄 → 이어 쓰기.';
+}
+var deb = null;
+['ta-sys','ta-bible','ta-ms','ta-order','ta-sens'].forEach(function(id){
+  $(id).addEventListener('input', function(){
+    syncFromInputs(); counts();
+    clearTimeout(deb); deb = setTimeout(function(){ cacheGauge(); persist(); }, 350);
+  });
+});
+['inp-key','chk-save','sel-model','sel-sensmodel','inp-maxtok','inp-temp','inp-target','chk-autoamount','sf-harassment','sf-hate','sf-explicit','sf-danger'].forEach(function(id){
+  $(id).addEventListener('change', persist);
+});
+$('btn-write').addEventListener('click', runWrite);
+$('btn-next').addEventListener('click', function(){
+  var std = '다음 화를 써라.';
+  if(texts.order.trim() && texts.order.trim() !== std){
+    if(!confirm('지시를 "'+std+'"로 바꿔 바로 실행할까요?')) return;
+  }
+  $('ta-order').value = std; texts.order = std;
+  counts(); persist();
+  runWrite();
+});
+$('btn-first').addEventListener('click', function(){
+  if(!texts.bible.trim() && !confirm('설정집이 비어 있다 — 빈 주방이면 아르곤이 되묻는 게 보통이다. 그래도 바로 실행할까요?')) return;
+  var seed = texts.ms.trim() ? '원고에 적힌 첫 줄은 씨앗이다 — 그 문장에서 이야기를 연다. ' : '원고창은 비어 있다 — 이어 쓸 것이 없으니 이야기의 처음을 직접 연다. ';
+  var first = '지금부터 제1화를 쓴다. '+seed+'묻지 말고 바로 쓴다. 설정집에 빈칸이 있으면 묻지 말고 세계관에 맞게 채워 쓴다.\n설정집과 이야기의 약속을 지킨다. 제목은 "1화. "으로 시작해 붙이고, 첫 문장부터 장면으로 시작한다 — 서론·목차·요약·작가의 말 금지. 한 화를 끝까지 완결로 쓴다.';
+  if(texts.order.trim() && texts.order.trim() !== first){
+    if(!confirm('지시를 1화용 주문으로 바꿔 바로 실행할까요?')) return;
+  }
+  $('ta-order').value = first; texts.order = first;
+  counts(); persist();
+  runWrite();
+});
+$('btn-insert').addEventListener('click', function(){
+  var box = $('insert-box');
+  box.style.display = (box.style.display === 'none') ? '' : 'none';
+});
+$('btn-insert-ms').addEventListener('click', function(){
+  var t = $('ta-insert').value.trim();
+  if(!t) return;
+  texts.ms = (texts.ms.trim() ? texts.ms.replace(/\s+$/,'')+'\n\n' : '') + t;
+  $('ta-ms').value = texts.ms; $('ta-insert').value = '';
+  counts(); cacheGauge(); persist();
+});
+$('btn-insert-bible').addEventListener('click', function(){
+  var t = $('ta-insert').value.trim();
+  if(!t) return;
+  texts.bible = (texts.bible.trim() ? texts.bible.replace(/\s+$/,'')+'\n\n' : '') + t;
+  $('ta-bible').value = texts.bible; $('ta-insert').value = '';
+  counts(); cacheGauge(); persist();
+});
+$('btn-reroll').addEventListener('click', function(){ if(!$('btn-reroll').disabled) runWrite(); });
+$('btn-stop').addEventListener('click', function(){ if(aborter) aborter.abort(); });
+$('btn-skeleton').addEventListener('click', function(){
+  if(texts.sys.trim() && !confirm('시스템 프롬프트를 골격(이야기의 약속)으로 덮어쓸까요? 지금 내용은 사라집니다.')) return;
+  $('ta-sys').value = SKELETON; texts.sys = SKELETON; counts(); cacheGauge(); persist();
+});
+$('btn-newbook').addEventListener('click', function(){
+  if(!confirm('새 책을 시작합니다 — 설정집·원고·장부·캐시 기록을 지우고 시스템 프롬프트는 유지합니다. 백업을 먼저 내보냈나요?')) return;
+  texts.bible=''; texts.ms=''; texts.sens=''; ledger=[]; totals={in:0,cached:0,out:0,cost:0};
+  lastPrefix=''; snap={sys:texts.sys, bible:null, ms:null}; lastResult='';
+  $('ta-bible').value=''; $('ta-ms').value=''; $('ta-sens').value='';
+  $('btn-append').disabled=true; $('btn-copy').disabled=true; $('btn-reroll').disabled=true;
+  counts(); cacheGauge(); renderLedger(); persist();
+});
+$('btn-sens').addEventListener('click', runSens);
+$('btn-append').addEventListener('click', function(){
+  if(!lastResult) return;
+  texts.ms = (texts.ms.trim() ? texts.ms.replace(/\s+$/,'')+'\n\n' : '') + lastResult.trim();
+  $('ta-ms').value = texts.ms; counts(); cacheGauge(); persist();
+  $('btn-append').disabled = true;
+});
+$('btn-copy').addEventListener('click', function(){
+  if(!lastResult) return;
+  var self = this;
+  function done(){ self.textContent = '복사됨'; setTimeout(function(){ self.textContent='복사'; }, 1500); }
+  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(lastResult).then(done, function(){});
+  else{ var t=document.createElement('textarea'); t.value=lastResult; document.body.appendChild(t); t.select(); try{document.execCommand('copy'); done();}catch(e){} document.body.removeChild(t); }
+});
+$('btn-grablast').addEventListener('click', function(){
+  var t = texts.ms.trim().slice(-4000);
+  $('ta-sens').value = t; texts.sens = t; persist();
+});
+$('btn-diff').addEventListener('click', runDiff);
+$('btn-extend').addEventListener('click', runExtend);
+$('btn-clearhist').addEventListener('click', function(){
+  if(!confirm('보관함의 저장된 결과를 모두 지울까요?')) return;
+  history = []; curHistIdx = -1; renderHistory(); persist();
+});
+$('btn-dl').addEventListener('click', function(){
+  if(!texts.ms.trim()){ return; }
+  download('wongo-'+new Date().toISOString().slice(0,10)+'.txt', texts.ms);
+});
+$('btn-export').addEventListener('click', function(){
+  var saveKey = $('chk-save').checked && $('inp-key').value;
+  download('jipilbang-backup.json', JSON.stringify({
+    texts:texts, ledger:ledger, totals:totals, lastPrefix:lastPrefix, snap:snap,
+    prefs:{ key:saveKey||'', save:!!saveKey, model:$('sel-model').value, sm:$('sel-sensmodel').value, mt:$('inp-maxtok').value, tp:$('inp-temp').value, sf:CATS.map(function(c){return $(SF[c]).value;}) }
+  }, null, 1), 'application/json');
+});
+$('btn-import').addEventListener('click', function(){ $('file-import').click(); });
+$('file-import').addEventListener('change', function(){
+  var f = this.files[0]; if(!f) return;
+  var r = new FileReader();
+  r.onload = function(){
+    try{
+      var d = JSON.parse(r.result);
+      if(d.texts) texts = d.texts;
+      if(d.ledger) ledger = d.ledger;
+      if(d.totals) totals = d.totals;
+      if(d.lastPrefix) lastPrefix = d.lastPrefix;
+      if(d.snap) snap = d.snap;
+      if(d.prefs){
+        if(d.prefs.key){ $('inp-key').value = d.prefs.key; $('chk-save').checked = !!d.prefs.save; }
+        if(d.prefs.model) $('sel-model').value = d.prefs.model;
+        if(d.prefs.sm) $('sel-sensmodel').value = d.prefs.sm;
+        if(d.prefs.mt) $('inp-maxtok').value = d.prefs.mt;
+        if(d.prefs.tp) $('inp-temp').value = d.prefs.tp;
+        if(d.prefs.sf) d.prefs.sf.forEach(function(v,i){ if(CATS[i]) $(SF[CATS[i]]).value = v; });
+      }
+      syncToInputs(); counts(); cacheGauge(); renderLedger(); persist();
+    }catch(e){ showErr('백업 파일을 읽지 못했습니다 — 형식을 확인해 주세요.'); }
+  };
+  r.readAsText(f);
+});
+$('btn-reset').addEventListener('click', function(){
+  if(!confirm('원고·설정·장부를 모두 지우고 처음으로 돌아갈까요? 백업을 먼저 내보내는 걸 권합니다.')) return;
+  try{ localStorage.removeItem(LS); }catch(e){}
+  location.reload();
+});
+$('btn-clearledger').addEventListener('click', function(){
+  ledger = []; totals = { in:0, cached:0, out:0, cost:0 };
+  renderLedger(); persist();
+});
+
+})();
+</script>
+</body>
+</html>

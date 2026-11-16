@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#17140f">
+<meta name="mobile-web-app-capable" content="yes">
+<title>아르곤 RP</title>
+<style>
+:root{
+  --bg:#17140f; --panel:#211d17; --panel2:#2a251d; --line:#3a3328; --text:#ece6da; --dim:#a39a8a;
+  --accent:#d9a55b; --accent2:#8fb3a3; --user:#2f2a22; --char:#1f1b15; --danger:#d9705b; --quote:#e8c98f;
+  --radius:14px; --fs:16px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:var(--fs)/1.65 -apple-system,"Noto Sans KR","Apple SD Gothic Neo",system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+#app{display:flex;flex-direction:column;height:100dvh;max-width:820px;margin:0 auto}
+header{display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;border-bottom:1px solid var(--line);background:var(--bg);position:sticky;top:0;z-index:5}
+header .title{flex:1;min-width:0;display:flex;align-items:center;gap:10px}
+header .title b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:17px}
+header .title small{color:var(--dim);font-size:12px;display:block;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.icon{background:none;border:0;width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-size:20px;color:var(--text)}
+.icon:active{background:var(--panel2)}
+.avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;background:var(--panel2);flex:none;display:grid;place-items:center;font-size:15px;color:var(--accent);overflow:hidden}
+#msgs{flex:1;overflow-y:auto;padding:14px 12px 20px;scroll-behavior:smooth}
+.msg{margin:0 0 14px;display:flex;flex-direction:column}
+.msg.user{align-items:flex-end}
+.bubble{max-width:92%;padding:10px 14px;border-radius:var(--radius);background:var(--char);border:1px solid var(--line);word-break:break-word}
+.msg.user .bubble{background:var(--user);border-color:#463e31}
+.bubble p{margin:0 0 .55em}.bubble p:last-child{margin:0}
+.bubble em{color:var(--dim);font-style:italic}
+.bubble q{color:var(--quote);quotes:none}
+.bubble.err{border-color:var(--danger);color:#f3c3b8;font-size:14px}
+.name{font-size:12px;color:var(--dim);margin:0 4px 3px}
+.tools{display:flex;gap:2px;margin-top:2px;flex-wrap:wrap;align-items:center}
+.tools button{background:none;border:0;color:var(--dim);font-size:13px;padding:6px 8px;border-radius:8px}
+.tools button:active{background:var(--panel2)}
+.tools .sw{font-variant-numeric:tabular-nums;color:var(--dim);font-size:12px;padding:0 2px}
+.imgs{display:flex;flex-direction:column;gap:8px;margin-top:8px;max-width:92%}
+.imgs figure{margin:0;position:relative}
+.imgs img{width:100%;border-radius:12px;display:block;background:var(--panel2)}
+.imgs figure button{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.55);border:0;color:#fff;border-radius:8px;padding:4px 8px;font-size:12px}
+.typing{display:inline-flex;gap:4px;padding:4px 0}
+.typing i{width:6px;height:6px;border-radius:50%;background:var(--dim);animation:b 1s infinite}
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,80%,100%{opacity:.25}40%{opacity:1}}
+footer{border-top:1px solid var(--line);padding:8px 10px calc(env(safe-area-inset-bottom) + 8px);background:var(--bg)}
+.composer{display:flex;gap:8px;align-items:flex-end}
+.composer textarea{flex:1;resize:none;max-height:40vh;min-height:44px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;outline:none}
+.composer textarea:focus{border-color:var(--accent)}
+.send{width:46px;height:46px;border-radius:12px;border:0;background:var(--accent);color:#1b1610;font-size:20px;font-weight:700;flex:none}
+.send.stop{background:var(--danger);color:#fff}
+.quick{display:flex;gap:6px;margin-bottom:6px;overflow-x:auto;scrollbar-width:none}
+.quick button{flex:none;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:13px;color:var(--dim)}
+.empty{color:var(--dim);text-align:center;padding:60px 20px;font-size:15px}
+.empty button{margin-top:14px}
+/* drawer */
+#scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:.2s;z-index:20}
+#scrim.on{opacity:1;pointer-events:auto}
+#drawer{position:fixed;top:0;bottom:0;left:0;width:min(86vw,360px);background:var(--panel);z-index:21;transform:translateX(-102%);transition:transform .22s;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+#drawer.on{transform:none}
+#drawer .dh{padding:14px 16px 6px;font-weight:700;font-size:18px;display:flex;align-items:center;justify-content:space-between}
+#drawer .ds{overflow-y:auto;flex:1;padding:0 8px 20px}
+.sec{color:var(--dim);font-size:12px;margin:16px 8px 6px;display:flex;justify-content:space-between;align-items:center}
+.sec button{background:none;border:0;color:var(--accent);font-size:13px}
+.row{display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:10px;border:0;background:none;width:100%;text-align:left}
+.row:active,.row.on{background:var(--panel2)}
+.row .t{flex:1;min-width:0}
+.row .t b{display:block;font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .t small{color:var(--dim);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+/* sheet */
+#sheet{position:fixed;inset:0;z-index:30;display:none;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.55)}
+#sheet.on{display:flex}
+#sheet .box{background:var(--panel);width:100%;max-width:720px;max-height:92dvh;border-radius:18px 18px 0 0;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom)}
+#sheet .sh{display:flex;align-items:center;padding:12px 8px 8px 16px;font-weight:700;font-size:17px}
+#sheet .sh span{flex:1}
+#sheet .sb{overflow-y:auto;padding:4px 16px 12px}
+#sheet .sf{display:flex;gap:8px;padding:10px 16px 14px;border-top:1px solid var(--line)}
+.btn{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:10px 14px;font-size:15px}
+.btn.pri{background:var(--accent);color:#1b1610;border-color:var(--accent);font-weight:700}
+.btn.dng{color:var(--danger)}
+.btn.full{flex:1}
+label.f{display:block;margin:12px 0}
+label.f>span{display:block;font-size:13px;color:var(--dim);margin-bottom:4px}
+label.f>em{display:block;font-size:12px;color:var(--dim);font-style:normal;margin-top:4px;opacity:.85}
+.inp{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:none}
+textarea.inp{resize:vertical;min-height:80px;line-height:1.5}
+.inp:focus{border-color:var(--accent)}
+.inp.secret{-webkit-text-security:disc;text-security:disc;font-family:monospace}
+.grp{border:1px solid var(--line);border-radius:12px;padding:2px 12px;margin:12px 0}
+.grp>h4{margin:12px 0 0;font-size:14px;color:var(--accent)}
+.chk{display:flex;align-items:center;gap:10px;margin:12px 0}
+.chk input{width:20px;height:20px;accent-color:var(--accent)}
+.hint{font-size:13px;color:var(--dim);margin:6px 0}
+.pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;background:var(--panel2);color:var(--dim);margin-left:6px}
+#toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 64px);transform:translateX(-50%);background:#000c;color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;z-index:40;opacity:0;transition:.2s;pointer-events:none;max-width:90vw;text-align:center}
+#toast.on{opacity:1}
+.av-edit{display:flex;align-items:center;gap:12px}
+.av-edit .avatar{width:64px;height:64px;font-size:24px}
+#viewer{position:fixed;inset:0;background:#000;z-index:50;display:none;align-items:center;justify-content:center}
+#viewer.on{display:flex}
+#viewer img{max-width:100%;max-height:100%}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button class="icon" id="bMenu" aria-label="메뉴">☰</button>
+    <div class="title" id="hTitle"></div>
+    <button class="icon" id="bChatMenu" aria-label="대화 메뉴">⋯</button>
+  </header>
+  <main id="msgs"></main>
+  <footer>
+    <div class="quick" id="quick"></div>
+    <div class="composer">
+      <textarea id="inp" rows="1" placeholder="메시지 입력…"></textarea>
+      <button class="send" id="bSend" aria-label="보내기">↑</button>
+    </div>
+  </footer>
+</div>
+<div id="scrim"></div>
+<aside id="drawer"><div class="dh">아르곤 RP <button class="icon" id="bCloseDrawer">✕</button></div><div class="ds" id="drawerBody"></div></aside>
+<div id="sheet"><div class="box"><div class="sh"><span id="shTitle"></span><button class="icon" id="bCloseSheet">✕</button></div><div class="sb" id="shBody"></div><div class="sf" id="shFoot"></div></div></div>
+<div id="viewer"></div>
+<div id="toast"></div>
+<input type="file" id="filePick" hidden>
+<script>
+"use strict";
+/* ============ 기본값 ============ */
+const DEFAULT_SYSTEM = `당신은 {{char}}를 연기하는 롤플레이 작가입니다. {{user}}와 함께 이야기를 만들어 갑니다.
+- {{char}}와 장면 속 다른 인물만 연기합니다. {{user}}의 대사·행동·생각은 대신 쓰지 않습니다.
+- 소설처럼 서술과 대사를 섞어 씁니다. 행동과 묘사는 서술로, 대사는 "큰따옴표"로 씁니다.
+- 한국어로 씁니다. 한 응답은 3~6문단 정도로 합니다.
+- 캐릭터 설정, 말투, 지금까지 일어난 일을 일관되게 유지합니다.
+- {{user}}가 반응할 수 있는 지점에서 장면을 멈춥니다.`;
+
+const TAG_SYSTEM = `You convert a roleplay scene into a NovelAI Diffusion V4/V4.5 prompt. Reply with ONLY a JSON object, no prose, no code fence:
+{"base":"...","characters":[{"name":"...","tags":"..."}]}
+
+TAG RULES (strict):
+1. Danbooru tags only. lowercase, words separated by spaces (never underscores), tags separated by ", ". No sentences, no articles, no verbs in -ing form unless that exact tag exists (e.g. "sitting", "looking at viewer" are tags; "slowly walking toward him" is not).
+2. Never write abstract or mood words that are not tags: no "tension", "emotional", "romantic atmosphere", "dramatic", "intense", "beautiful", "mysterious aura".
+3. Use common tags with many danbooru posts. One tag per idea: no synonyms ("smile" OR "smiling", not both), no contradictions, no weights, no brackets, no "{}" or "::".
+4. Do NOT write quality, aesthetic, rating or artist tags (masterpiece, best quality, very aesthetic, absurdres, artist:...). The app adds them.
+5. Never put a character's name in tags. Hair, eyes, body and outfit come from the FIXED TAGS given below.
+
+"base" (8-16 tags) in this order:
+  people count: 1girl / 1boy / 2girls / 1girl, 1boy / no humans ... (add "solo" only when exactly one person is visible)
+  framing: portrait / upper body / cowboy shot / full body / close-up, plus angle if clear: from side / from above / from below / from behind / pov
+  place and background: indoors / outdoors / bedroom / classroom / forest / city street / night sky ...
+  time and light: day / night / sunset / moonlight / backlighting / dim lighting / rain ...
+  1-3 key props or effects that the text explicitly mentions.
+
+"characters": one entry per visible character, at most 3, ordered left-to-right as they would appear.
+  "name": the character name exactly as listed below (or a short label for an unlisted extra).
+  "tags" (8-18 tags) in this order:
+    the gender tag (girl / boy / woman / man),
+    the character's FIXED TAGS copied exactly and in full,
+    current outfit changes only if the scene states them (e.g. "jacket removed", "wet clothes"),
+    expression (smile / blush / crying / angry / surprised / closed eyes / expressionless ...),
+    gaze (looking at viewer / looking at another / looking away / looking down),
+    pose and action (sitting / standing / lying / arms crossed / hand on own chest / holding cup ...).
+  Actions between characters use NovelAI interaction prefixes: the actor gets "source#hug", the receiver gets "target#hug", both get "mutual#holding hands". Use the same action word on both sides.
+
+DEPICTION:
+- Show ONE frozen moment: the most visual beat of the LAST message. Only what the text states or clearly implies. Do not invent props, outfits or extra people.
+- If {{user}} is the viewpoint character and not described, use "pov" in base and do not create an entry for them, unless they are physically interacting (then add them with only gender + their FIXED TAGS if given).
+- If no person is visible, use "no humans" and an empty characters array.`;
+
+const DEFAULT_SETTINGS = {
+  gKey:"", gModel:"gemini-4-argon", gThinking:"", gTemp:"", gMaxTokens:8192, gSafety:"BLOCK_NONE", gContext:120, gStream:true,
+  systemPrompt: DEFAULT_SYSTEM,
+  cKey:"", cModel:"claude-sonnet-5-5",
+  tagEngine:"claude", tagExtra:"",
+  nKey:"", nModel:"nai-diffusion-4-5-full", nSize:"portrait", nSteps:28, nScale:5, nSampler:"k_euler_ancestral",
+  nQuality:true, nUcPreset:0, nPrefix:"", nArtist:"", nNegative:"", nPreview:true, nAuto:false,
+  corsProxy:"", fontSize:16
+};
+const SIZES = {portrait:[832,1216], landscape:[1216,832], square:[1024,1024]};
+
+/* ============ 저장소 (IndexedDB) ============ */
+const DB = (() => {
+  let dbp;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open("argon-rp", 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore("kv"); r.result.createObjectStore("img"); };
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }));
+  const tx = async (store, mode, fn) => { const db = await open(); return new Promise((res, rej) => {
+    const t = db.transaction(store, mode); const s = t.objectStore(store); const out = fn(s);
+    t.oncomplete = () => res(out && "result" in out ? out.result : out); t.onerror = () => rej(t.error); }); };
+  return {
+    get:(k, store="kv") => tx(store, "readonly", s => s.get(k)),
+    set:(k, v, store="kv") => tx(store, "readwrite", s => s.put(v, k)),
+    del:(k, store="kv") => tx(store, "readwrite", s => s.delete(k)),
+    keys:(store="img") => tx(store, "readonly", s => s.getAllKeys()),
+  };
+})();
+
+let S = null; // 전체 상태
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+let saveTimer = null;
+function save(now) {
+  clearTimeout(saveTimer);
+  const run = () => DB.set("state", JSON.parse(JSON.stringify(S))).catch(e => toast("저장 실패: " + e.message));
+  if (now) return run(); saveTimer = setTimeout(run, 400);
+}
+async function load() {
+  let st = null; try { st = await DB.get("state"); } catch (e) { console.warn(e); }
+  if (!st) st = { characters:[], chats:[], persona:{name:"나", desc:"", naiTags:""}, currentChatId:null, settings:{} };
+  st.settings = Object.assign({}, DEFAULT_SETTINGS, st.settings || {});
+  st.persona = Object.assign({name:"나", desc:"", naiTags:""}, st.persona || {});
+  S = st;
+  document.documentElement.style.setProperty("--fs", (S.settings.fontSize || 16) + "px");
+}
+const cfg = () => S.settings;
+const curChat = () => S.chats.find(c => c.id === S.currentChatId) || null;
+const charOf = chat => chat ? S.characters.find(c => c.id === chat.charId) : null;
+
+/* ============ 유틸 ============ */
+const $ = s => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v); }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(k)); return e; };
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let toastT; function toast(m, ms = 2600) { const t = $("#toast"); t.textContent = m; t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), ms); }
+const macro = (s, ch) => String(s || "").replaceAll("{{char}}", ch?.name || "캐릭터").replaceAll("{{user}}", S.persona.name || "나");
+function fmt(text) {
+  const parts = String(text || "").replace(/\r/g, "").split(/\n{2,}|\n/).map(p => p.trim()).filter(Boolean);
+  return parts.map(p => {
+    let h = esc(p);
+    h = h.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>");
+    h = h.replace(/(&quot;|“)(.+?)(&quot;|”)/g, "<q>“$2”</q>");
+    return "<p>" + h + "</p>";
+  }).join("");
+}
+const msgText = m => m.alts ? m.alts[m.idx] ?? "" : (m.text || "");
+function setMsgText(m, t) { if (m.alts) m.alts[m.idx] = t; else m.text = t; }
+// API 키에는 공백이 없다: 복사할 때 섞인 줄바꿈·보이지 않는 문자·따옴표·"Bearer " 접두어를 걷어낸다.
+function cleanKey(k) { return String(k || "").replace(/^\s*(?:bearer\s+|x-api-key\s*:\s*)/i, "").replace(/[\s\u00A0\u00AD\u180E\u200B-\u200F\u2028-\u202F\u2060-\u206F\uFEFF]/g, "").replace(/^["'`]+|["'`]+$/g, ""); }
+const keyPeek = k => k ? `${k.slice(0, 7)}…${k.slice(-4)} · ${k.length}자` : "(비어 있음)";
+const KEY_FORMAT = { gKey:[/^AIza[0-9A-Za-z_-]{35}$/, "Gemini 키는 보통 AIza로 시작하는 39자예요"], cKey:[/^sk-ant-/, "Anthropic 키는 sk-ant-로 시작해요"], nKey:[/^pst-/, "NovelAI 영구 토큰은 pst-로 시작해요"] };
+function keyWarn(name, k) { const f = KEY_FORMAT[name]; return k && f && !f[0].test(k) ? " ⚠ " + f[1] : ""; }
+function proxied(url) { const p = (cfg().corsProxy || "").trim(); return p ? p + url : url; }
+async function readErr(res) {
+  let t = ""; try { t = await res.text(); } catch {}
+  let msg = t; try { const j = JSON.parse(t); msg = j.error?.message || j.message || j.error || t; } catch {}
+  if (typeof msg !== "string") msg = JSON.stringify(msg);
+  return `HTTP ${res.status} ${msg.slice(0, 300)}`;
+}
+function netHint(e, who) {
+  if (e.name === "AbortError") return "중단됨";
+  if (e instanceof TypeError) return `${who} 서버에 연결하지 못했어요 (네트워크 또는 CORS 차단). 설정의 'CORS 프록시'를 확인하세요.`;
+  return e.message || String(e);
+}
+const scrollEnd = () => { const m = $("#msgs"); requestAnimationFrame(() => m.scrollTop = m.scrollHeight); };
+
+/* ============ Gemini ============ */
+function buildGeminiRequest(chat, ch, extraUser) {
+  const c = cfg();
+  const sysParts = [macro(c.systemPrompt, ch)];
+  if (ch) {
+    sysParts.push(`[${ch.name} 설정]\n${macro(ch.desc, ch)}`);
+    if (ch.scenario) sysParts.push(`[시나리오]\n${macro(ch.scenario, ch)}`);
+    if (ch.examples) sysParts.push(`[예시 대화]\n${macro(ch.examples, ch)}`);
+  }
+  if (S.persona.desc) sysParts.push(`[${S.persona.name} 정보]\n${macro(S.persona.desc, ch)}`);
+  if (chat.memo) sysParts.push(`[기억 메모 — 지금까지의 중요한 사실]\n${chat.memo}`);
+  let msgs = chat.messages.filter(m => !m.error).slice(-Math.max(2, +c.gContext || 120));
+  const contents = [];
+  const push = (role, text) => { if (!text) return; const last = contents.at(-1);
+    if (last && last.role === role) last.parts[0].text += "\n\n" + text; else contents.push({role, parts:[{text}]}); };
+  for (const m of msgs) push(m.role === "user" ? "user" : "model", macro(msgText(m), ch));
+  if (extraUser) push("user", extraUser);
+  if (!contents.length || contents[0].role !== "user") contents.unshift({role:"user", parts:[{text:"(대화를 시작합니다)"}]});
+  if (contents.at(-1).role !== "user") push("user", "(계속)");
+  const gen = { maxOutputTokens: +c.gMaxTokens || 8192 };
+  if (c.gTemp !== "" && !isNaN(+c.gTemp)) gen.temperature = +c.gTemp;
+  if (c.gThinking) gen.thinkingConfig = { thinkingLevel: c.gThinking, includeThoughts: false };
+  const cats = ["HARM_CATEGORY_HARASSMENT","HARM_CATEGORY_HATE_SPEECH","HARM_CATEGORY_SEXUALLY_EXPLICIT","HARM_CATEGORY_DANGEROUS_CONTENT"];
+  return { systemInstruction:{parts:[{text:sysParts.join("\n\n")}]}, contents, generationConfig:gen,
+    safetySettings: cats.map(category => ({category, threshold: c.gSafety || "BLOCK_NONE"})) };
+}
+function geminiText(j) {
+  if (j.promptFeedback?.blockReason) throw new Error("Gemini가 요청을 차단했어요: " + j.promptFeedback.blockReason);
+  const cand = j.candidates?.[0]; if (!cand) return { text:"", finish:null };
+  const text = (cand.content?.parts || []).filter(p => !p.thought && typeof p.text === "string").map(p => p.text).join("");
+  return { text, finish: cand.finishReason || null };
+}
+async function callGemini(body, onDelta, signal) {
+  const c = cfg(); if (!c.gKey) throw new Error("설정에서 Gemini API 키를 넣어 주세요.");
+  const base = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(c.gModel.trim());
+  const stream = !!c.gStream && onDelta;
+  const url = proxied(base + (stream ? ":streamGenerateContent?alt=sse" : ":generateContent"));
+  let res; try { res = await fetch(url, { method:"POST", signal, headers:{"content-type":"application/json","x-goog-api-key":cleanKey(c.gKey)}, body:JSON.stringify(body) }); }
+  catch (e) { throw new Error(netHint(e, "Gemini")); }
+  if (!res.ok) throw new Error("Gemini 오류 · " + await readErr(res));
+  if (!stream) { const r = geminiText(await res.json()); return r; }
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "", all = "", finish = null;
+  try {
+    for (;;) { const {value, done} = await reader.read(); if (done) break;
+      buf += dec.decode(value, {stream:true}); let i;
+      while ((i = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (!line.startsWith("data:")) continue; const data = line.slice(5).trim(); if (!data || data === "[DONE]") continue;
+        let j; try { j = JSON.parse(data); } catch { continue; }
+        if (j.error) throw new Error("Gemini 오류 · " + (j.error.message || JSON.stringify(j.error)));
+        const r = geminiText(j); if (r.text) { all += r.text; onDelta(all); } if (r.finish) finish = r.finish; }
+    }
+  } catch (e) { if (e.name === "AbortError") return { text: all, finish:"ABORTED" }; throw e; }
+  return { text: all, finish };
+}
+const FINISH_NOTE = { SAFETY:"안전 필터로 응답이 막혔어요.", PROHIBITED_CONTENT:"금지 콘텐츠로 판단돼 응답이 막혔어요.", RECITATION:"저작권 문제로 응답이 중단됐어요.", MAX_TOKENS:"최대 출력 길이에 닿아 잘렸어요. ‘이어쓰기’를 눌러 보세요.", BLOCKLIST:"차단 목록에 걸려 응답이 막혔어요." };
+
+/* ============ Claude ============ */
+async function callClaude(system, user, maxTokens = 4000) {
+  const c = cfg(); if (!c.cKey) throw new Error("설정에서 Claude API 키를 넣어 주세요.");
+  let res; try { res = await fetch(proxied("https://api.anthropic.com/v1/messages"), { method:"POST",
+    headers:{"content-type":"application/json","x-api-key":cleanKey(c.cKey),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body:JSON.stringify({ model:c.cModel.trim(), max_tokens:maxTokens, system, messages:[{role:"user", content:user}] }) }); }
+  catch (e) { throw new Error(netHint(e, "Claude")); }
+  if (!res.ok) throw new Error("Claude 오류 · " + await readErr(res));
+  const j = await res.json();
+  const text = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+  if (!text) throw new Error("Claude가 빈 응답을 보냈어요" + (j.stop_reason ? ` (${j.stop_reason})` : ""));
+  return text;
+}
+
+/* ============ 채팅 동작 ============ */
+let busy = null; // AbortController
+function setBusy(ctrl) { busy = ctrl; const b = $("#bSend"); b.classList.toggle("stop", !!ctrl); b.textContent = ctrl ? "■" : "↑"; b.setAttribute("aria-label", ctrl ? "중단" : "보내기"); renderQuick(); }
+async function generate(chat, target, mode) {
+  // mode: "new" | "regen" | "continue"
+  const ch = charOf(chat); const ctrl = new AbortController(); setBusy(ctrl);
+  let extra = null, prefix = "";
+  if (mode === "continue") { prefix = msgText(target); extra = "(직전 응답이 끊긴 곳에서 바로 이어서 써 주세요. 이미 쓴 내용은 반복하지 마세요.)"; }
+  const hist = { ...chat, messages: mode === "continue" ? chat.messages : chat.messages.filter(m => m !== target) };
+  target.pending = true; renderMsgs();
+  try {
+    const body = buildGeminiRequest(hist, ch, extra);
+    const sep = !prefix || /\s$/.test(prefix) ? "" : /[.!?。…"”’)\]]$/.test(prefix) ? "\n\n" : "";
+    const r = await callGemini(body, t => { setMsgText(target, prefix + sep + t); target.pending = false; updateMsg(target); scrollEnd(); }, ctrl.signal);
+    target.pending = false;
+    if (!r.text && !prefix) throw new Error(FINISH_NOTE[r.finish] || "빈 응답이 왔어요" + (r.finish ? ` (${r.finish})` : ""));
+    setMsgText(target, prefix + sep + r.text);
+    if (r.finish && FINISH_NOTE[r.finish]) toast(FINISH_NOTE[r.finish], 4000);
+    chat.updated = Date.now(); save();
+    renderMsgs();
+    if (cfg().nAuto && mode !== "continue" && r.finish !== "ABORTED") illustrate(chat, target, true);
+  } catch (e) {
+    target.pending = false;
+    if (mode === "continue") { setMsgText(target, prefix); toast(e.message, 5000); }
+    else if (mode === "regen" && target.alts.length > 1) { target.alts.splice(target.idx, 1); target.idx = target.alts.length - 1; toast(e.message, 5000); }
+    else { chat.messages = chat.messages.filter(m => m !== target); chat.messages.push({id:uid(), role:"char", error:true, text:e.message}); }
+    save(); renderMsgs();
+  } finally { setBusy(null); scrollEnd(); }
+}
+async function send() {
+  if (busy) { busy.abort(); return; }
+  const chat = curChat(); if (!chat) { openCharList(); return; }
+  const inp = $("#inp"); const t = inp.value.trim();
+  chat.messages = chat.messages.filter(m => !m.error);
+  if (t) { chat.messages.push({id:uid(), role:"user", text:t, time:Date.now()}); inp.value = ""; autosize(); }
+  else if (!chat.messages.length || chat.messages.at(-1).role !== "user") { toast("메시지를 입력하세요"); return; }
+  const target = {id:uid(), role:"char", alts:[""], idx:0, time:Date.now(), images:[]};
+  chat.messages.push(target);
+  if (chat.messages.filter(m => m.role === "user").length === 1 && t) chat.title = t.slice(0, 30);
+  save(); renderMsgs(); scrollEnd();
+  await generate(chat, target, "new");
+}
+function regen(chat, m) { if (busy) return; m.alts.push(""); m.idx = m.alts.length - 1; generate(chat, m, "regen"); }
+function cont(chat, m) { if (busy) return; generate(chat, m, "continue"); }
+
+/* ============ 삽화 ============ */
+function splitTags(s) { return String(s || "").split(",").map(t => t.trim().replace(/_/g, " ").replace(/\s+/g, " ")).filter(Boolean); }
+function joinTags(...lists) { const seen = new Set(), out = [];
+  for (const t of lists.flatMap(splitTags)) { const k = t.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(t); } } return out.join(", "); }
+function parseJsonLoose(text) {
+  let t = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
+  const a = t.indexOf("{"), b = t.lastIndexOf("}"); if (a >= 0 && b > a) t = t.slice(a, b + 1);
+  return JSON.parse(t);
+}
+function knownCast(ch) {
+  const list = [];
+  if (ch) list.push({name:ch.name, tags:ch.naiTags || "", role:"main character"});
+  for (const x of (ch?.extras || [])) list.push({name:x.name, tags:x.tags || "", role:"side character"});
+  list.push({name:S.persona.name, tags:S.persona.naiTags || "", role:"the user's own character"});
+  return list;
+}
+async function writeTags(chat, m) {
+  const ch = charOf(chat); const c = cfg();
+  const idx = chat.messages.indexOf(m); const ctx = chat.messages.slice(Math.max(0, idx - 5), idx + 1).filter(x => !x.error);
+  const cast = knownCast(ch);
+  const sys = macro(TAG_SYSTEM, ch) + "\n\nCAST AND FIXED TAGS:\n" + cast.map(x => `- ${x.name} (${x.role}): ${x.tags || "(no fixed tags — describe only gender and what the text states)"}`).join("\n")
+    + (c.tagExtra ? "\n\nEXTRA INSTRUCTIONS FROM THE USER:\n" + c.tagExtra : "");
+  const scene = ctx.map(x => `${x.role === "user" ? S.persona.name : (ch?.name || "char")}: ${macro(msgText(x), ch)}`).join("\n\n");
+  const user = `SCENE (illustrate the LAST message):\n\n${scene}\n\nReturn the JSON now.`;
+  let raw;
+  if (c.tagEngine === "gemini") {
+    const body = { systemInstruction:{parts:[{text:sys}]}, contents:[{role:"user", parts:[{text:user}]}],
+      generationConfig:{ maxOutputTokens:2048, responseMimeType:"application/json" },
+      safetySettings: ["HARM_CATEGORY_HARASSMENT","HARM_CATEGORY_HATE_SPEECH","HARM_CATEGORY_SEXUALLY_EXPLICIT","HARM_CATEGORY_DANGEROUS_CONTENT"].map(category => ({category, threshold:c.gSafety || "BLOCK_NONE"})) };
+    raw = (await callGemini(body)).text;
+  } else raw = await callClaude(sys, user);
+  let j; try { j = parseJsonLoose(raw); } catch { throw new Error("태그 응답을 읽지 못했어요: " + raw.slice(0, 120)); }
+  // 고정 외형 태그 강제 + 정리
+  const chars = (Array.isArray(j.characters) ? j.characters : []).slice(0, 4).map(x => {
+    const known = cast.find(k => k.name && x.name && k.name.trim().toLowerCase() === String(x.name).trim().toLowerCase());
+    const fixed = splitTags(known?.tags);
+    const gen = splitTags(x.tags);
+    const genderFirst = gen.filter(t => /^(girl|boy|woman|man|other)$/i.test(t));
+    const rest = gen.filter(t => !/^(girl|boy|woman|man|other)$/i.test(t));
+    return { name: x.name || "", tags: joinTags(genderFirst.join(", "), fixed.join(", "), rest.join(", ")) };
+  });
+  return { base: joinTags(j.base || ""), chars };
+}
+function finalPrompt(p) { const c = cfg(); return { base: joinTags(c.nPrefix, p.base, c.nArtist), chars: p.chars, negative: c.nNegative }; }
+const CENTERS = [[[.5,.5]],[[.3,.5],[.7,.5]],[[.2,.5],[.5,.5],[.8,.5]],[[.2,.5],[.4,.5],[.6,.5],[.8,.5]]];
+function naiBody(p) {
+  const c = cfg(); const [w, h] = SIZES[c.nSize] || SIZES.portrait;
+  const chars = p.chars.filter(x => x.tags.trim());
+  const centers = (CENTERS[chars.length - 1] || []).map(([x, y]) => ({x, y}));
+  const seed = Math.floor(Math.random() * 4294967295);
+  return { input: p.base, model: c.nModel.trim(), action: "generate", parameters: {
+    params_version: 3, width: w, height: h, scale: +c.nScale || 5, sampler: c.nSampler, steps: +c.nSteps || 28, n_samples: 1, seed,
+    ucPreset: +c.nUcPreset || 0, qualityToggle: !!c.nQuality, autoSmea: false, dynamic_thresholding: false, controlnet_strength: 1, legacy: false,
+    add_original_image: true, cfg_rescale: 0, noise_schedule: "karras", legacy_v3_extend: false, skip_cfg_above_sigma: null, use_coords: false,
+    legacy_uc: false, normalize_reference_strength_multiple: true, deliberate_euler_ancestral_bug: false, prefer_brownian: true,
+    negative_prompt: p.negative || "",
+    characterPrompts: chars.map((x, i) => ({ prompt: x.tags, uc: "", center: centers[i] || {x:.5,y:.5}, enabled: true })),
+    v4_prompt: { caption: { base_caption: p.base, char_captions: chars.map((x, i) => ({ char_caption: x.tags, centers: [centers[i] || {x:.5,y:.5}] })) }, use_coords: false, use_order: true },
+    v4_negative_prompt: { caption: { base_caption: p.negative || "", char_captions: chars.map((x, i) => ({ char_caption: "", centers: [centers[i] || {x:.5,y:.5}] })) }, legacy_uc: false },
+  }};
+}
+async function unzipFirst(buf) {
+  const u8 = new Uint8Array(buf), dv = new DataView(buf);
+  if (u8[0] === 0x89 && u8[1] === 0x50) return new Blob([u8], {type:"image/png"});
+  if (!(u8[0] === 0x50 && u8[1] === 0x4b)) throw new Error("NAI 응답 형식을 알 수 없어요");
+  let e = -1; for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+  let method, csize, off;
+  if (e >= 0) { const cd = dv.getUint32(e + 16, true); method = dv.getUint16(cd + 10, true); csize = dv.getUint32(cd + 20, true); off = dv.getUint32(cd + 42, true); }
+  else { off = 0; method = dv.getUint16(8, true); csize = dv.getUint32(18, true); }
+  const start = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true);
+  const data = u8.slice(start, start + csize);
+  if (method === 0) return new Blob([data], {type:"image/png"});
+  if (method !== 8) throw new Error("지원하지 않는 압축 방식: " + method);
+  const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer();
+  return new Blob([out], {type:"image/png"});
+}
+async function callNAI(p) {
+  const c = cfg(); if (!c.nKey) throw new Error("설정에서 NovelAI 토큰을 넣어 주세요.");
+  let res; try { res = await fetch(proxied("https://image.novelai.net/ai/generate-image"), { method:"POST",
+    headers:{"content-type":"application/json","authorization":"Bearer " + cleanKey(c.nKey)}, body:JSON.stringify(naiBody(p)) }); }
+  catch (e) { throw new Error(netHint(e, "NovelAI")); }
+  if (!res.ok) throw new Error("NovelAI 오류 · " + await readErr(res));
+  return unzipFirst(await res.arrayBuffer());
+}
+const working = new Set();
+async function illustrate(chat, m, auto) {
+  if (working.has(m.id)) return; working.add(m.id); updateMsg(m);
+  try {
+    toast(auto ? "삽화 태그 작성 중…" : "태그 작성 중…");
+    const p = finalPrompt(await writeTags(chat, m));
+    m.lastPrompt = p; save();
+    if (cfg().nPreview && !auto) { working.delete(m.id); updateMsg(m); openPromptEditor(chat, m, p); return; }
+    await drawImage(chat, m, p);
+  } catch (e) { toast(e.message, 6000); }
+  finally { working.delete(m.id); updateMsg(m); }
+}
+async function drawImage(chat, m, p) {
+  working.add(m.id); updateMsg(m); toast("그림 생성 중…");
+  try {
+    const blob = await callNAI(p); const id = "img_" + uid();
+    await DB.set(id, blob, "img"); m.images = m.images || []; m.images.push(id); m.lastPrompt = p; save(); toast("삽화 완성");
+  } catch (e) { toast(e.message, 6000); }
+  finally { working.delete(m.id); updateMsg(m); }
+}
+function openPromptEditor(chat, m, p) {
+  const base = el("textarea", {class:"inp", rows:4}); base.value = p.base;
+  const neg = el("textarea", {class:"inp", rows:2, placeholder:"비워 두면 설정값 사용"}); neg.value = p.negative || "";
+  const charBoxes = p.chars.map(x => { const t = el("textarea", {class:"inp", rows:3}); t.value = x.tags; return {name:x.name, t}; });
+  const addBtn = el("button", {class:"btn", onclick:() => { const t = el("textarea", {class:"inp", rows:3}); const o = {name:"추가 인물", t}; charBoxes.push(o); wrap.insertBefore(field("추가 인물", t), addBtn); }}, "+ 인물 칸 추가");
+  const wrap = el("div", {}, el("p", {class:"hint"}, "그리기 전에 태그를 고칠 수 있어요. 인물 칸을 비우면 그 인물은 빠져요."), field("배경·구도 (base)", base),
+    ...charBoxes.map(o => field(`인물: ${o.name}`, o.t)), addBtn, field("네거티브 (추가)", neg));
+  openSheet("삽화 태그", wrap, [
+    el("button", {class:"btn", onclick:() => { closeSheet(); illustrate(chat, m, false); }}, "다시 작성"),
+    el("button", {class:"btn pri full", onclick:() => { const np = { base: joinTags(base.value), negative: neg.value.trim(), chars: charBoxes.map(o => ({name:o.name, tags: joinTags(o.t.value)})).filter(x => x.tags) };
+      closeSheet(); drawImage(chat, m, np); }}, "그리기")
+  ]);
+}
+
+/* ============ 렌더링 ============ */
+const urlCache = new Map();
+async function imgURL(id) { if (urlCache.has(id)) return urlCache.get(id); const b = await DB.get(id, "img"); if (!b) return null; const u = URL.createObjectURL(b); urlCache.set(id, u); return u; }
+function avatarEl(ch, cls = "avatar") { if (ch?.avatar) return el("img", {class:cls, src:ch.avatar, alt:""}); return el("div", {class:cls}, (ch?.name || "?").slice(0, 1)); }
+function renderHeader() {
+  const chat = curChat(), ch = charOf(chat), h = $("#hTitle"); h.innerHTML = "";
+  if (!ch) { h.append(el("b", {}, "아르곤 RP")); return; }
+  h.append(avatarEl(ch), el("div", {style:"min-width:0"}, el("b", {}, ch.name), el("small", {}, chat.title || "새 대화")));
+}
+function renderQuick() {
+  const q = $("#quick"); q.innerHTML = ""; const chat = curChat(); if (!chat || busy) return;
+  const last = [...chat.messages].reverse().find(m => m.role === "char" && !m.error);
+  if (last && last === chat.messages.at(-1)) {
+    q.append(el("button", {onclick:() => cont(chat, last)}, "이어쓰기"), el("button", {onclick:() => regen(chat, last)}, "다시 생성"), el("button", {onclick:() => illustrate(chat, last, false)}, "🎨 이 장면 그리기"));
+  }
+}
+function msgEl(chat, m) {
+  const ch = charOf(chat);
+  const wrap = el("div", {class:"msg " + (m.role === "user" ? "user" : "char"), "data-id":m.id});
+  wrap.append(el("div", {class:"name"}, m.role === "user" ? S.persona.name : (ch?.name || "")));
+  const b = el("div", {class:"bubble" + (m.error ? " err" : "")});
+  if (m.pending) b.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+  else b.innerHTML = fmt(macro(m.error ? "⚠ " + m.text : msgText(m), ch));
+  wrap.append(b);
+  if (m.images?.length) { const box = el("div", {class:"imgs"});
+    m.images.forEach(id => { const img = el("img", {alt:"삽화", loading:"lazy"}); imgURL(id).then(u => u && (img.src = u));
+      img.addEventListener("click", () => { const v = $("#viewer"); v.innerHTML = ""; v.append(el("img", {src:img.src})); v.classList.add("on"); });
+      box.append(el("figure", {}, img, el("button", {onclick:ev => { ev.stopPropagation(); imageMenu(chat, m, id); }}, "⋯"))); });
+    wrap.append(box); }
+  if (!m.pending) {
+    const tools = el("div", {class:"tools"});
+    if (m.error) tools.append(el("button", {onclick:() => { chat.messages = chat.messages.filter(x => x !== m); save(); renderMsgs(); send(); }}, "↻ 다시 시도"));
+    else {
+      if (m.alts && m.alts.length > 1) tools.append(el("button", {onclick:() => swipe(chat, m, -1), "aria-label":"이전 응답"}, "‹"), el("span", {class:"sw"}, `${m.idx + 1}/${m.alts.length}`), el("button", {onclick:() => swipe(chat, m, 1), "aria-label":"다음 응답"}, "›"));
+      if (m.role === "char") tools.append(el("button", {onclick:() => illustrate(chat, m, false)}, working.has(m.id) ? "🎨 작업 중…" : "🎨"));
+      tools.append(el("button", {onclick:() => editMsg(chat, m)}, "편집"), el("button", {onclick:() => msgMenu(chat, m)}, "⋯"));
+    }
+    wrap.append(tools);
+  }
+  return wrap;
+}
+function updateMsg(m) { const chat = curChat(); const old = document.querySelector(`.msg[data-id="${m.id}"]`); if (old && chat) old.replaceWith(msgEl(chat, m)); }
+function renderMsgs() {
+  const box = $("#msgs"); box.innerHTML = ""; const chat = curChat(); renderHeader();
+  if (!chat) {
+    box.append(el("div", {class:"empty"}, S.characters.length ? "왼쪽 위 ☰에서 대화를 고르거나 새로 시작하세요." : "아직 캐릭터가 없어요.", el("br"),
+      el("button", {class:"btn pri", onclick:() => S.characters.length ? openCharList() : editChar(null)}, S.characters.length ? "캐릭터 고르기" : "+ 캐릭터 만들기"),
+      !cfg().gKey ? el("div", {style:"margin-top:18px"}, el("button", {class:"btn", onclick:openSettings}, "API 키 설정")) : null));
+    renderQuick(); return; }
+  chat.messages.forEach(m => box.append(msgEl(chat, m)));
+  renderQuick();
+}
+function swipe(chat, m, d) {
+  if (busy) return;
+  const isLast = chat.messages.at(-1) === m;
+  if (d > 0 && m.idx === m.alts.length - 1 && isLast) { regen(chat, m); return; }
+  m.idx = Math.min(m.alts.length - 1, Math.max(0, m.idx + d)); save(); updateMsg(m);
+}
+
+/* ============ 시트·드로어 ============ */
+function openSheet(title, body, foot = []) { $("#toast").classList.remove("on"); $("#shTitle").textContent = title; const b = $("#shBody"); b.innerHTML = ""; b.append(body); const f = $("#shFoot"); f.innerHTML = ""; f.append(...foot); f.style.display = foot.length ? "" : "none"; $("#sheet").classList.add("on"); b.scrollTop = 0; }
+function closeSheet() { $("#sheet").classList.remove("on"); }
+function field(label, input, help) { return el("label", {class:"f"}, el("span", {}, label), input, help ? el("em", {}, help) : null); }
+function openDrawer() { renderDrawer(); $("#drawer").classList.add("on"); $("#scrim").classList.add("on"); }
+function closeDrawer() { $("#drawer").classList.remove("on"); $("#scrim").classList.remove("on"); }
+function renderDrawer() {
+  const d = $("#drawerBody"); d.innerHTML = "";
+  const chats = [...S.chats].sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  d.append(el("div", {class:"sec"}, "대화", el("button", {onclick:() => { closeDrawer(); openCharList(); }}, "+ 새 대화")));
+  if (!chats.length) d.append(el("div", {class:"hint", style:"padding:0 8px"}, "대화가 없어요."));
+  chats.forEach(c => { const ch = charOf(c);
+    d.append(el("button", {class:"row" + (c.id === S.currentChatId ? " on" : ""), onclick:() => { S.currentChatId = c.id; save(); closeDrawer(); renderMsgs(); scrollEnd(); }},
+      avatarEl(ch), el("div", {class:"t"}, el("b", {}, ch?.name || "(삭제된 캐릭터)"), el("small", {}, c.title || "새 대화")))); });
+  d.append(el("div", {class:"sec"}, "캐릭터", el("button", {onclick:() => { closeDrawer(); editChar(null); }}, "+ 만들기")));
+  S.characters.forEach(ch => d.append(el("button", {class:"row", onclick:() => { closeDrawer(); editChar(ch); }}, avatarEl(ch), el("div", {class:"t"}, el("b", {}, ch.name), el("small", {}, "편집")))));
+  d.append(el("button", {class:"row", onclick:() => { closeDrawer(); importCard(); }}, el("div", {class:"avatar"}, "⇪"), el("div", {class:"t"}, el("b", {}, "캐릭터 카드 가져오기"), el("small", {}, "PNG·JSON (Risu/Tavern)"))));
+  d.append(el("div", {class:"sec"}, "기타"));
+  [["🙂", "내 페르소나", editPersona], ["⚙", "설정 · API 키", openSettings], ["💾", "백업 · 복원", openBackup]].forEach(([i, t, f]) =>
+    d.append(el("button", {class:"row", onclick:() => { closeDrawer(); f(); }}, el("div", {class:"avatar"}, i), el("div", {class:"t"}, el("b", {}, t)))));
+}
+function openCharList() {
+  if (!S.characters.length) { editChar(null); return; }
+  const list = el("div", {}, ...S.characters.map(ch => el("button", {class:"row", onclick:() => { closeSheet(); newChat(ch); }}, avatarEl(ch), el("div", {class:"t"}, el("b", {}, ch.name), el("small", {}, (ch.desc || "").slice(0, 40))))));
+  openSheet("누구와 대화할까요?", list, [el("button", {class:"btn full", onclick:() => { closeSheet(); editChar(null); }}, "+ 새 캐릭터")]);
+}
+function newChat(ch) {
+  const chat = {id:uid(), charId:ch.id, title:"", memo:"", created:Date.now(), updated:Date.now(), messages:[]};
+  const greets = [ch.firstMes, ...(ch.altGreetings || [])].filter(Boolean);
+  if (greets.length) chat.messages.push({id:uid(), role:"char", alts:greets, idx:0, time:Date.now(), images:[]});
+  S.chats.push(chat); S.currentChatId = chat.id; save(); renderMsgs(); scrollEnd();
+}
+
+/* ============ 편집 화면 ============ */
+function editChar(ch) {
+  const isNew = !ch; const d = ch ? JSON.parse(JSON.stringify(ch)) : {id:uid(), name:"", avatar:"", desc:"", scenario:"", firstMes:"", examples:"", naiTags:"", extras:[]};
+  d.extras = d.extras || [];
+  const inp = (k, ph = "", rows = 0) => { const e = rows ? el("textarea", {class:"inp", rows, placeholder:ph}) : el("input", {class:"inp", placeholder:ph}); e.value = d[k] || ""; e.addEventListener("input", () => d[k] = e.value); return e; };
+  const av = el("div", {class:"av-edit"}); const drawAv = () => { av.innerHTML = ""; av.append(avatarEl(d), el("button", {class:"btn", onclick:() => pickFile("image/*", async f => { d.avatar = await shrinkImage(f, 256); drawAv(); })}, "사진 선택"), d.avatar ? el("button", {class:"btn dng", onclick:() => { d.avatar = ""; drawAv(); }}, "삭제") : null); }; drawAv();
+  const extrasBox = el("div"); const drawExtras = () => { extrasBox.innerHTML = "";
+    d.extras.forEach((x, i) => { const n = el("input", {class:"inp", placeholder:"이름"}); n.value = x.name; n.oninput = () => x.name = n.value;
+      const t = el("textarea", {class:"inp", rows:2, placeholder:"외형 태그"}); t.value = x.tags; t.oninput = () => x.tags = t.value;
+      extrasBox.append(el("div", {class:"grp"}, el("h4", {}, `조연 ${i + 1}`), field("이름", n), field("고정 외형 태그", t), el("button", {class:"btn dng", style:"margin-bottom:12px", onclick:() => { d.extras.splice(i, 1); drawExtras(); }}, "삭제"))); });
+    extrasBox.append(el("button", {class:"btn", onclick:() => { d.extras.push({name:"", tags:""}); drawExtras(); }}, "+ 조연 추가")); }; drawExtras();
+  const body = el("div", {}, av,
+    field("이름", inp("name", "캐릭터 이름")),
+    field("설정 (성격·외모·말투·배경)", inp("desc", "{{char}}, {{user}} 사용 가능", 8)),
+    field("시나리오 (선택)", inp("scenario", "지금 상황, 관계 등", 3)),
+    field("첫 메시지", inp("firstMes", "대화를 시작할 첫 장면", 5)),
+    field("예시 대화 (선택)", inp("examples", "말투 참고용", 4)),
+    el("div", {class:"grp"}, el("h4", {}, "삽화용 고정 외형 태그"),
+      field("NAI 외형 태그", inp("naiTags", "예: long hair, silver hair, red eyes, hair ribbon, black dress", 3), "머리·눈·체형·기본 의상을 영어 태그로. 삽화마다 이 태그가 그대로 들어가서 얼굴이 흔들리지 않아요. 'girl/boy'는 빼고 쓰세요."),
+      extrasBox));
+  const foot = [];
+  if (!isNew) foot.push(el("button", {class:"btn dng", onclick:() => { if (!confirm(`${d.name} 캐릭터를 지울까요? 대화는 남아요.`)) return; S.characters = S.characters.filter(c => c.id !== d.id); save(); closeSheet(); renderMsgs(); }}, "삭제"));
+  foot.push(el("button", {class:"btn pri full", onclick:() => {
+    if (!d.name.trim()) { toast("이름을 넣어 주세요"); return; }
+    d.extras = d.extras.filter(x => x.name.trim());
+    if (isNew) S.characters.push(d); else Object.assign(ch, d);
+    save(); closeSheet(); renderMsgs();
+    if (isNew && confirm(`${d.name}와(과) 새 대화를 시작할까요?`)) newChat(d);
+  }}, isNew ? "만들기" : "저장"));
+  openSheet(isNew ? "새 캐릭터" : "캐릭터 편집", body, foot);
+}
+function editPersona() {
+  const p = {...S.persona};
+  const n = el("input", {class:"inp"}); n.value = p.name; n.oninput = () => p.name = n.value;
+  const dsc = el("textarea", {class:"inp", rows:5, placeholder:"AI가 알아야 할 내 캐릭터 정보"}); dsc.value = p.desc; dsc.oninput = () => p.desc = dsc.value;
+  const t = el("textarea", {class:"inp", rows:2, placeholder:"예: short hair, black hair, brown eyes, school uniform"}); t.value = p.naiTags; t.oninput = () => p.naiTags = t.value;
+  openSheet("내 페르소나", el("div", {}, field("이름 ({{user}})", n), field("설명", dsc), field("삽화용 고정 외형 태그", t, "비워 두면 1인칭 시점(pov)으로 그려져요.")),
+    [el("button", {class:"btn pri full", onclick:() => { S.persona = {...p, name:p.name.trim() || "나"}; save(); closeSheet(); renderMsgs(); }}, "저장")]);
+}
+function editMsg(chat, m) {
+  const t = el("textarea", {class:"inp", rows:12}); t.value = msgText(m);
+  openSheet("메시지 편집", t, [el("button", {class:"btn pri full", onclick:() => { setMsgText(m, t.value); save(); closeSheet(); updateMsg(m); }}, "저장")]);
+}
+function msgMenu(chat, m) {
+  const i = chat.messages.indexOf(m);
+  const acts = [
+    ["복사", () => { navigator.clipboard?.writeText(msgText(m)).then(() => toast("복사했어요"), () => toast("복사 실패")); }],
+    ["여기서 다시 쓰기 (이후 메시지 삭제)", () => { if (!confirm("이 메시지 이후를 지울까요?")) return; chat.messages = chat.messages.slice(0, i + 1); save(); renderMsgs(); }],
+    m.lastPrompt ? ["마지막 삽화 태그 보기·다시 그리기", () => openPromptEditor(chat, m, m.lastPrompt)] : null,
+    ["메시지 삭제", () => { chat.messages.splice(i, 1); (m.images || []).forEach(id => DB.del(id, "img")); save(); renderMsgs(); }],
+  ].filter(Boolean);
+  openSheet("메시지", el("div", {}, ...acts.map(([t, f]) => el("button", {class:"row", onclick:() => { closeSheet(); f(); }}, el("div", {class:"t"}, el("b", {}, t))))));
+}
+function imageMenu(chat, m, id) {
+  openSheet("삽화", el("div", {},
+    el("button", {class:"row", onclick:async () => { closeSheet(); const u = await imgURL(id); const a = el("a", {href:u, download:`argon-${id}.png`}); document.body.append(a); a.click(); a.remove(); }}, el("div", {class:"t"}, el("b", {}, "이미지 저장"))),
+    el("button", {class:"row", onclick:() => { closeSheet(); m.images = m.images.filter(x => x !== id); DB.del(id, "img"); save(); updateMsg(m); }}, el("div", {class:"t"}, el("b", {style:"color:var(--danger)"}, "삭제")))));
+}
+function chatMenu() {
+  const chat = curChat(); if (!chat) { openDrawer(); return; }
+  const memo = el("textarea", {class:"inp", rows:7, placeholder:"오래된 사건, 관계 변화, 약속 등 AI가 잊으면 안 되는 것"}); memo.value = chat.memo || "";
+  const title = el("input", {class:"inp"}); title.value = chat.title || "";
+  openSheet("이 대화", el("div", {}, field("대화 제목", title), field("기억 메모", memo, "매번 시스템 프롬프트에 들어가요. 대화가 아주 길어지면 여기에 요약을 적어 두세요."),
+    el("button", {class:"row", onclick:() => { closeSheet(); exportChatText(chat); }}, el("div", {class:"t"}, el("b", {}, "대화를 텍스트로 내보내기"))),
+    el("button", {class:"row", onclick:() => { const ch = charOf(chat); if (ch) { closeSheet(); newChat(ch); } }}, el("div", {class:"t"}, el("b", {}, "같은 캐릭터로 새 대화"))),
+    el("button", {class:"row", onclick:() => { if (!confirm("이 대화를 지울까요?")) return; chat.messages.forEach(m => (m.images || []).forEach(id => DB.del(id, "img"))); S.chats = S.chats.filter(c => c !== chat); S.currentChatId = null; save(); closeSheet(); renderMsgs(); }}, el("div", {class:"t"}, el("b", {style:"color:var(--danger)"}, "대화 삭제")))),
+    [el("button", {class:"btn pri full", onclick:() => { chat.memo = memo.value; chat.title = title.value; save(); closeSheet(); renderHeader(); }}, "저장")]);
+}
+
+/* ============ 설정 ============ */
+const SETTINGS_SCHEMA = [
+  ["Gemini (본문)", [
+    ["gKey", "Gemini API 키", "password", "Google AI Studio에서 발급"],
+    ["gModel", "모델 ID", "text", "기본 gemini-4-argon"],
+    ["gThinking", "사고 수준", ["", "기본값", "low", "LOW", "medium", "MEDIUM", "high", "HIGH"], "높을수록 느리고 비싸요"],
+    ["gTemp", "온도 (비우면 기본값)", "text"],
+    ["gMaxTokens", "최대 출력 토큰", "number"],
+    ["gContext", "보낼 최근 메시지 수", "number", "많을수록 기억이 길지만 요금이 늘어요"],
+    ["gSafety", "Gemini 안전 필터", ["BLOCK_NONE", "끔 (BLOCK_NONE)", "BLOCK_ONLY_HIGH", "높음만 차단", "BLOCK_MEDIUM_AND_ABOVE", "중간 이상 차단"]],
+    ["gStream", "실시간으로 글자 보이기 (스트리밍)", "check"],
+    ["systemPrompt", "시스템 프롬프트", "area", "{{char}}, {{user}} 사용 가능"],
+  ]],
+  ["Claude (삽화 태그 작성)", [
+    ["cKey", "Anthropic API 키", "password", "platform.claude.com에서 발급 · Claude 앱 구독과 별도 요금"],
+    ["cModel", "모델 ID", "text", "기본 claude-sonnet-5-5 · 싸게: claude-haiku-5-5"],
+    ["tagEngine", "태그 작성 담당", ["claude", "Claude", "gemini", "Gemini (Claude 키 없을 때)"]],
+    ["tagExtra", "태그 작성 추가 지시 (선택)", "area", "예: 항상 cowboy shot 이상으로, 배경은 간단하게"],
+  ]],
+  ["NovelAI (그림)", [
+    ["nKey", "NovelAI 영구 API 토큰", "password", "NovelAI 계정 설정 → Get Persistent API Token"],
+    ["nModel", "모델", "text", "nai-diffusion-4-5-full / nai-diffusion-4-5-curated"],
+    ["nSize", "크기", ["portrait", "세로 832×1216", "landscape", "가로 1216×832", "square", "정사각 1024×1024"]],
+    ["nSteps", "스텝 (28 이하는 Opus 무료)", "number"],
+    ["nScale", "가이던스 (scale)", "number"],
+    ["nSampler", "샘플러", ["k_euler_ancestral", "Euler Ancestral", "k_euler", "Euler", "k_dpmpp_2s_ancestral", "DPM++ 2S Ancestral", "k_dpmpp_2m_sde", "DPM++ 2M SDE", "k_dpmpp_sde", "DPM++ SDE"]],
+    ["nQuality", "품질 태그 자동 추가 (NAI 기본)", "check"],
+    ["nUcPreset", "기본 네거티브 프리셋", ["0", "Heavy", "1", "Light", "2", "Human Focus", "3", "없음"]],
+    ["nPrefix", "앞에 붙일 태그 (선택)", "area", "예: very aesthetic, absurdres"],
+    ["nArtist", "화풍·작가 태그 (선택)", "area", "예: artist:xxx, flat color — 모든 삽화 끝에 붙어요"],
+    ["nNegative", "네거티브 태그 (선택)", "area"],
+    ["nPreview", "그리기 전에 태그 확인·수정", "check"],
+    ["nAuto", "응답마다 자동으로 삽화 생성", "check", "자동일 때는 확인 없이 바로 그려요"],
+  ]],
+  ["기타", [
+    ["corsProxy", "CORS 프록시 주소 (선택)", "text", "브라우저 연결이 막힐 때만. 주소 뒤에 원래 API 주소가 붙어요"],
+    ["fontSize", "글자 크기", "number"],
+  ]],
+];
+function openSettings() {
+  const c = {...cfg()}; const body = el("div");
+  for (const [gname, items] of SETTINGS_SCHEMA) {
+    const g = el("div", {class:"grp"}, el("h4", {}, gname));
+    for (const [k, label, type, help] of items) {
+      let input;
+      if (type === "check") { input = el("input", {type:"checkbox"}); input.checked = !!c[k]; input.onchange = () => c[k] = input.checked; g.append(el("label", {class:"chk"}, input, el("span", {}, label))); if (help) g.append(el("div", {class:"hint"}, help)); continue; }
+      if (Array.isArray(type)) { input = el("select", {class:"inp"}); for (let i = 0; i < type.length; i += 2) input.append(el("option", {value:type[i]}, type[i + 1])); input.value = String(c[k]); input.onchange = () => c[k] = input.value; }
+      else if (type === "area") { input = el("textarea", {class:"inp", rows: k === "systemPrompt" ? 9 : 3}); input.value = c[k] ?? ""; input.oninput = () => c[k] = input.value; }
+      else if (type === "password") {
+        input = el("input", {class:"inp secret", type:"text", name:"k_" + k + "_" + uid(), autocomplete:"off", autocapitalize:"off", autocorrect:"off", spellcheck:"false", inputmode:"text", "data-lpignore":"true", "data-1p-ignore":"true", "data-form-type":"other"});
+        input.value = c[k] ?? ""; const peek = el("div", {class:"hint"});
+        const upd = () => { c[k] = input.value; const v = cleanKey(input.value); peek.textContent = v ? "전송될 키: " + keyPeek(v) + keyWarn(k, v) : ""; };
+        input.oninput = upd; input.onchange = upd; upd();
+        const show = el("button", {class:"btn", type:"button", onclick:() => { input.classList.toggle("secret"); show.textContent = input.classList.contains("secret") ? "보기" : "숨기기"; }}, "보기");
+        g.append(el("label", {class:"f"}, el("span", {}, label), el("div", {style:"display:flex;gap:6px"}, input, show), peek, help ? el("em", {}, help) : null));
+        continue;
+      }
+      else { input = el("input", {class:"inp", type: type === "number" ? "number" : "text", autocomplete:"off", spellcheck:"false"}); input.value = c[k] ?? ""; input.oninput = () => c[k] = type === "number" ? (input.value === "" ? "" : +input.value) : input.value; }
+      g.append(field(label, input, help));
+    }
+    body.append(g);
+  }
+  body.append(el("button", {class:"btn", style:"margin:8px 0 4px", onclick:() => { if (confirm("시스템 프롬프트를 기본값으로 되돌릴까요?")) { c.systemPrompt = DEFAULT_SYSTEM; S.settings = {...c}; save(); openSettings(); } }}, "시스템 프롬프트 기본값으로"));
+  body.append(el("p", {class:"hint"}, "API 키는 이 기기 브라우저 안에만 저장돼요. 백업 파일에는 키를 뺄 수 있어요."));
+  openSheet("설정", body, [
+    el("button", {class:"btn", onclick:() => testKeys(c)}, "연결 테스트"),
+    el("button", {class:"btn pri full", onclick:() => { for (const k of ["gKey","cKey","nKey"]) c[k] = cleanKey(c[k]); S.settings = {...c}; document.documentElement.style.setProperty("--fs", (+c.fontSize || 16) + "px"); save(true); closeSheet(); renderMsgs(); toast("저장했어요"); }}, "저장")]);
+}
+async function testKeys(c) {
+  c = {...c}; for (const k of ["gKey","cKey","nKey"]) c[k] = cleanKey(c[k]);
+  const old = S.settings; S.settings = {...c}; const out = [];
+  const tag = k => `\n   보낸 키: ${keyPeek(c[k])}${keyWarn(k, c[k])}`;
+  try {
+    if (c.gKey) { try { const r = await callGemini({contents:[{role:"user", parts:[{text:"한 단어로 대답: 안녕"}]}], generationConfig:{maxOutputTokens:1024}}); out.push("Gemini ✓ " + (r.text || "(빈 응답)").slice(0, 20)); } catch (e) { out.push("Gemini ✗ " + e.message + tag("gKey")); } }
+    if (c.cKey) { try { const t = await callClaude("Reply with one word.", "hi", 1024); out.push("Claude ✓ " + t.slice(0, 20)); } catch (e) { out.push("Claude ✗ " + e.message + tag("cKey")); } }
+    if (c.nKey) { try {
+        // 일부러 빈 요청을 보낸다: 그림은 만들어지지 않고, 401이면 토큰 문제, 400이면 토큰은 통과·연결 정상.
+        const r = await fetch(proxied("https://image.novelai.net/ai/generate-image"), {method:"POST", headers:{"content-type":"application/json", authorization:"Bearer " + c.nKey}, body:"{}"});
+        if (r.status === 401 || r.status === 403) out.push("NovelAI ✗ 토큰 거부 · " + await readErr(r) + tag("nKey"));
+        else out.push("NovelAI ✓ 연결·토큰 확인 (HTTP " + r.status + ")");
+      } catch (e) { out.push("NovelAI ✗ " + netHint(e, "NovelAI")); } }
+  } finally { S.settings = old; }
+  alert(out.length ? out.join("\n\n") : "넣은 키가 없어요.");
+}
+
+/* ============ 파일·백업·카드 ============ */
+function pickFile(accept, cb) { const f = $("#filePick"); f.value = ""; f.accept = accept; f.onchange = () => f.files[0] && cb(f.files[0]); f.click(); }
+function shrinkImage(file, max) { return new Promise((res, rej) => { const img = new Image(); img.onload = () => { const s = Math.min(1, max / Math.max(img.width, img.height)); const cv = document.createElement("canvas"); cv.width = img.width * s; cv.height = img.height * s; cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(img.src); res(cv.toDataURL("image/jpeg", .85)); }; img.onerror = rej; img.src = URL.createObjectURL(file); }); }
+function download(name, blob) { const u = URL.createObjectURL(blob); const a = el("a", {href:u, download:name}); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000); }
+const blobToB64 = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
+function openBackup() {
+  const keys = el("input", {type:"checkbox"}); const imgs = el("input", {type:"checkbox"}); imgs.checked = true;
+  openSheet("백업 · 복원", el("div", {},
+    el("p", {class:"hint"}, "캐릭터, 대화, 설정을 파일 하나로 저장해요. 폰을 바꾸거나 브라우저 데이터를 지우기 전에 꼭 백업하세요."),
+    el("label", {class:"chk"}, imgs, el("span", {}, "삽화 포함 (파일이 커져요)")),
+    el("label", {class:"chk"}, keys, el("span", {}, "API 키 포함 (남에게 보내지 마세요)")),
+    el("button", {class:"btn pri", style:"width:100%;margin:6px 0 14px", onclick:async () => {
+      const data = JSON.parse(JSON.stringify(S)); if (!keys.checked) { data.settings.gKey = data.settings.cKey = data.settings.nKey = ""; }
+      data.images = {}; if (imgs.checked) for (const id of await DB.keys("img")) { const b = await DB.get(id, "img"); if (b) data.images[id] = await blobToB64(b); }
+      data.app = "argon-rp"; data.ver = 1;
+      download(`argon-rp-backup-${new Date().toISOString().slice(0, 10)}.json`, new Blob([JSON.stringify(data)], {type:"application/json"})); toast("백업 파일을 저장했어요"); }}, "백업 파일 만들기"),
+    el("button", {class:"btn", style:"width:100%", onclick:() => pickFile("application/json,.json", async f => {
+      try { const data = JSON.parse(await f.text()); if (data.app !== "argon-rp") throw new Error("아르곤 RP 백업 파일이 아니에요");
+        if (!confirm("지금 데이터를 백업 내용으로 바꿀까요? (되돌릴 수 없어요)")) return;
+        for (const [id, du] of Object.entries(data.images || {})) await DB.set(id, await (await fetch(du)).blob(), "img");
+        const keep = {gKey:S.settings.gKey, cKey:S.settings.cKey, nKey:S.settings.nKey};
+        delete data.images; delete data.app; delete data.ver; S = data; S.settings = Object.assign({}, DEFAULT_SETTINGS, S.settings);
+        for (const k of Object.keys(keep)) if (!S.settings[k]) S.settings[k] = keep[k];
+        await save(true); closeSheet(); renderMsgs(); toast("복원했어요");
+      } catch (e) { toast("복원 실패: " + e.message, 5000); } })}, "백업 파일에서 복원")));
+}
+function exportChatText(chat) {
+  const ch = charOf(chat);
+  const txt = chat.messages.filter(m => !m.error).map(m => `${m.role === "user" ? S.persona.name : ch?.name}:\n${macro(msgText(m), ch)}`).join("\n\n---\n\n");
+  download(`${ch?.name || "chat"}-${(chat.title || "대화").slice(0, 20)}.txt`, new Blob([txt], {type:"text/plain"}));
+}
+function b64ToUtf8(b64) { const bin = atob(b64.replace(/\s/g, "")); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new TextDecoder().decode(u); }
+async function readPngCard(buf) {
+  const u8 = new Uint8Array(buf), dv = new DataView(buf); let p = 8; const found = {};
+  while (p + 8 <= u8.length) { const len = dv.getUint32(p); const type = String.fromCharCode(...u8.slice(p + 4, p + 8));
+    if (type === "tEXt") { const d = u8.slice(p + 8, p + 8 + len); const z = d.indexOf(0); const key = new TextDecoder("latin1").decode(d.slice(0, z)); found[key] = new TextDecoder("latin1").decode(d.slice(z + 1)); }
+    if (type === "IEND") break; p += 12 + len; }
+  const raw = found.ccv3 || found.chara; if (!raw) throw new Error("PNG 안에 캐릭터 정보가 없어요");
+  return JSON.parse(b64ToUtf8(raw));
+}
+function cardToChar(j, avatar) {
+  const d = j.data || j;
+  const desc = [d.description, d.personality ? "성격: " + d.personality : ""].filter(Boolean).join("\n\n");
+  const conv = s => String(s || "").replace(/\{\{\s*char\s*\}\}|<BOT>/gi, "{{char}}").replace(/\{\{\s*user\s*\}\}|<USER>/gi, "{{user}}");
+  return { id:uid(), name: d.name || "이름 없음", avatar, desc: conv(desc), scenario: conv(d.scenario), firstMes: conv(d.first_mes), altGreetings: (d.alternate_greetings || []).map(conv), examples: conv(d.mes_example), naiTags:"", extras:[] };
+}
+function importCard() {
+  pickFile("image/png,application/json,.json,.png", async f => {
+    try { let j, avatar = "";
+      if (/\.png$/i.test(f.name) || f.type === "image/png") { j = await readPngCard(await f.arrayBuffer()); avatar = await shrinkImage(f, 256); }
+      else j = JSON.parse(await f.text());
+      const ch = cardToChar(j, avatar); S.characters.push(ch); save(); toast(`${ch.name} 가져왔어요. 삽화용 외형 태그를 채워 주세요.`, 4000); editChar(ch);
+    } catch (e) { toast("가져오기 실패: " + e.message, 5000); } });
+}
+
+/* ============ 입력·이벤트 ============ */
+function autosize() { const t = $("#inp"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, innerHeight * .4) + "px"; }
+$("#inp").addEventListener("input", autosize);
+$("#inp").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
+$("#bSend").addEventListener("click", send);
+$("#bMenu").addEventListener("click", openDrawer);
+$("#bCloseDrawer").addEventListener("click", closeDrawer);
+$("#scrim").addEventListener("click", closeDrawer);
+$("#bChatMenu").addEventListener("click", chatMenu);
+$("#bCloseSheet").addEventListener("click", closeSheet);
+$("#sheet").addEventListener("click", e => { if (e.target.id === "sheet") closeSheet(); });
+$("#viewer").addEventListener("click", () => $("#viewer").classList.remove("on"));
+window.addEventListener("beforeunload", () => { if (saveTimer) { clearTimeout(saveTimer); DB.set("state", JSON.parse(JSON.stringify(S))); } });
+document.addEventListener("visibilitychange", () => { if (document.hidden && S) save(true); });
+load().then(() => { renderMsgs(); scrollEnd(); if (navigator.storage?.persist) navigator.storage.persist().catch(() => {}); });
+</script>
+</body>
+</html>
