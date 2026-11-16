@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101214">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>돌려보기</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar"><h1>돌려보기</h1></header>
+
+<main id="stage">
+  <section id="empty">
+    <p class="lead">그림이나 사진을 고르면 입체로 돌려 볼 수 있음</p>
+    <label class="btn big">사진 고르기<input id="file" type="file" accept="image/*" hidden></label>
+    <p class="note">고른 사진은 이 폰 안에서만 처리됨. 어디에도 올라가지 않음.<br>
+    처음 한 번 깊이 모델(약 27MB)을 받음. 이후엔 저장돼 있음.</p>
+  </section>
+
+  <section id="view" hidden>
+    <div class="frame"><canvas id="gl" aria-label="입체로 돌려 보는 그림"></canvas></div>
+    <p id="msg" class="msg" role="status"></p>
+  </section>
+</main>
+
+<footer id="ctl" class="ctl" hidden>
+  <label class="slide">세기
+    <input id="amp" type="range" min="0.02" max="0.14" step="0.005" value="0.05">
+  </label>
+  <div class="row">
+    <button id="sensor" class="btn" type="button">기울여 보기</button>
+    <button id="depthview" class="btn" type="button" aria-pressed="false">깊이 보기</button>
+    <label class="btn">다른 사진<input id="file2" type="file" accept="image/*" hidden></label>
+  </div>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
