@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>NovelAI V4.5 키아나 스튜디오 V5 (리드보드 복구판)</title>
+<style>
+:root { --bg: #121212; --card: #1e1e1e; --accent: #f5c542; --blue: #3b82f6; --red: #ef4444; --green: #10b981; --purple: #8b5cf6; --text: #eee; }
+body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 10px; padding-bottom: 60px; }
+.header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 0 4px; }
+h2 { color: var(--accent); margin: 0; font-size: 17px; }
+.status-badge { font-size: 11px; padding: 4px 8px; border-radius: 12px; background: #2c2c2c; border: 1px solid #444; cursor: pointer; }
+.tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.tab-btn { flex: 1; padding: 9px 4px; background: #252525; color: #aaa; border: 1px solid #333; border-radius: 8px; font-weight: bold; font-size: 12px; cursor: pointer; }
+.tab-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.card { background: var(--card); border-radius: 10px; padding: 12px; margin-bottom: 10px; border: 1px solid #333; }
+.label { font-weight: bold; font-size: 13px; color: var(--accent); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+.btn-group { display: flex; flex-wrap: wrap; gap: 6px; }
+button { background: #2c2c2c; color: #fff; border: 1px solid #444; padding: 7px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+button.active { background: var(--accent); color: #000; font-weight: bold; border-color: var(--accent); }
+input[type="text"], textarea { width: 100%; box-sizing: border-box; background: #111; color: #fff; border: 1px solid #444; border-radius: 6px; padding: 8px; font-size: 12px; }
+textarea.out-box { color: #4ade80; height: 90px; font-family: monospace; }
+.copy-btn { width: 100%; background: var(--blue); color: #fff; font-weight: bold; padding: 10px; margin-top: 6px; border: none; font-size: 13px; border-radius: 6px; }
+.search-item { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2c2c2c; padding: 7px 0; font-size: 12px; }
+.search-tag { color: var(--accent); font-weight: bold; font-size: 13px; }
+.search-desc { color: #bbb; margin-top: 2px; }
+.add-btn { background: var(--green); border: none; padding: 6px 10px; font-weight: bold; white-space: nowrap; margin-left: 8px; }
+.chat-box { height: 200px; overflow-y: auto; background: #0d0d0d; border: 1px solid #333; border-radius: 6px; padding: 10px; margin-bottom: 8px; font-size: 12px; line-height: 1.4; }
+.msg-user { color: #60a5fa; margin-bottom: 8px; background: #172554; padding: 6px 8px; border-radius: 6px; }
+.msg-ai { color: #e5e7eb; margin-bottom: 10px; white-space: pre-wrap; background: #1f2937; padding: 8px; border-radius: 6px; border-left: 3px solid var(--accent); }
+.preview-img { max-height: 80px; border-radius: 6px; margin-top: 6px; display: none; border: 1px solid var(--accent); }
+.active-chip { background: #374151; padding: 5px 9px; border-radius: 14px; font-size: 11px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #4b5563; }
+</style>
+</head>
+<body>
+
+<div class="header-bar">
+<h2>👑 NovelAI V4.5 키아나 스튜디오</h2>
+<div id="conn-badge" class="status-badge" onclick="switchTab('tab-chat', document.querySelectorAll('.tab-btn')[0])">🟡 AI 컨트롤러 대기</div>
+</div>
+
+<div class="tabs">
+<button class="tab-btn active" onclick="switchTab('tab-chat', this)">💬 AI 대화</button>
+<button class="tab-btn" onclick="switchTab('tab-main', this)">🔍 태그검색</button>
+<button class="tab-btn" onclick="switchTab('tab-style', this)">🏆 화풍 리드보드</button>
+</div>
+
+<!-- [탭 1] 인앱 AI 대화 -->
+<div id="tab-chat" class="tab-content active">
+<div class="card">
+<span class="label">
+<span>🔌 Gemini 제어 권한 (선택 사항)</span>
+<button onclick="testConnection()" style="background:var(--green); border:none; padding:4px 8px; font-weight:bold;">⚡ 연결 테스트</button>
+</span>
+<input type="text" id="api-key" placeholder="Google AI Studio API 키 붙여넣기 (AQ. 또는 AIza...)" oninput="saveApiKey()" style="margin-bottom:6px;">
+<div id="conn-result" style="font-size:11px; color:#aaa;">💡 키가 없어도 아래 대화창에 한글로 요청하면 내장 엔진이 즉시 프롬프트를 바꿔줍니다.</div>
+</div>
+
+<div class="card">
+<span class="label">💬 인앱 컨트롤러 <button onclick="document.getElementById('chat-log').innerHTML=''" style="padding:2px 6px; font-size:10px;">대화 지우기</button></span>
+<div class="chat-box" id="chat-log">
+<div class="msg-ai">✅ <b>NovelAI V4.5 전용 마스터 컨트롤러 작동 중!</b>
+원하시는 요청(예: "공원에서 개한테 밟혀 헐떡이는 모습으로 바꿔줘", "2번 화풍으로 장착해 줘")을 적어주세요.</div>
+</div>
+
+<span class="label">🖼️ 예시 이미지 또는 참고 자료 첨부</span>
+<div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+<input type="file" id="example-img" accept="image/*" onchange="previewFile()" style="font-size:11px; flex:1;">
+<button onclick="clearImage()" style="padding:4px 8px; font-size:11px; background:#444;">사진 지우기</button>
+</div>
+<img id="img-preview" class="preview-img">
+
+<span class="label" style="margin-top:6px;">✏️ 내 요청사항 적는 곳</span>
+<textarea id="user-request" placeholder="예: 공원에서 대형견한테 깔려서 헐떡이고 침 흘리는 장면으로 싹 바꿔줘!" style="height:50px; margin-bottom:6px;"></textarea>
+<button class="copy-btn" style="background:var(--green); font-size:14px;" onclick="executeChatCommand()">🚀 요청 실행 (프롬프트 & 리드보드 즉시 반영)</button>
+</div>
+</div>
+
+<!-- [탭 2] 단부루 태그 검색 -->
+<div id="tab-main" class="tab-content">
+<div class="card">
+<span class="label">🔍 Danbooru 태그 검색 & 단어 정의</span>
+<div style="display:flex; gap:6px;">
+<input type="text" id="dict-search" placeholder="원하는 걸 한글로 (예: 비 맞으며 웅크림, 쇠사슬에 묶인 손목)" oninput="searchDict()" onkeydown="if(event.key==='Enter'){event.preventDefault();aiSearchDict();}" style="flex:1;">
+<button onclick="aiSearchDict()" style="background:var(--purple); border:none; font-weight:bold; white-space:nowrap;">🤖 AI</button>
+<button onclick="danbooruDirectSearch()" style="background:var(--blue); border:none; font-weight:bold; white-space:nowrap;">📚 단부루</button>
+</div>
+<div id="dict-status" style="font-size:11px; color:#aaa; margin-top:6px;">💡 입력하면 내 사전에서 바로 찾아요. 🤖 AI = 한글로 설명하면 Gemini가 찾고 단부루에서 실존 확인 · 📚 단부루 = 영어로 단부루 직접 검색(키 불필요)</div>
+<div id="dict-results" style="max-height: 260px; overflow-y: auto; margin-top: 6px;"></div>
+</div>
+
+<div class="card">
+<span class="label">⚡ 원클릭 상황 프리셋</span>
+<div class="btn-group" id="preset-buttons"></div>
+</div>
+</div>
+
+<!-- [탭 3] 화풍 리드보드 -->
+<div id="tab-style" class="tab-content">
+<div class="card">
+<span class="label">🏆 그림체(화풍) 리드보드 (터치하여 장착)</span>
+<div id="style-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+</div>
+
+<div class="card">
+<span class="label">➕ 새 그림체(화풍) 직접 추가</span>
+<input type="text" id="new-style-name" placeholder="화풍 이름 (예: 수채화풍)" style="margin-bottom:6px;">
+<textarea id="new-style-tags" placeholder="화풍 태그 (예: watercolor, soft lighting, )" style="height:45px; margin-bottom:6px;"></textarea>
+<button class="copy-btn" onclick="addNewStyleManual()">💾 리드보드에 새 화풍 저장</button>
+</div>
+</div>
+
+<!-- [하단 상시 노출] NAI 전용 프롬프트 출력 -->
+<div class="card" style="border-color: var(--accent);">
+<span class="label">
+<span>📌 현재 적용된 장면 태그 (터치해서 삭제 가능)</span>
+<button onclick="clearAddedTags()" style="padding:2px 8px; font-size:11px; background:var(--red); border:none;">장면 초기화</button>
+</span>
+<div id="added-tags-view" class="btn-group" style="margin-bottom:10px; min-height:22px; font-size:11px; color:#888;"></div>
+
+<span class="label">
+<span>① NovelAI V4.5 Prompt (Danbooru Tags)</span>
+<span id="current-style-badge" style="color:#4ade80; font-size:11px;">[화풍: 반실사]</span>
+</span>
+<textarea id="prompt-out" class="out-box"></textarea>
+<button class="copy-btn" onclick="copyText('prompt-out')">📋 ① Prompt 복사</button>
+
+<span class="label" style="margin-top:10px;">② NovelAI Undesired Content</span>
+<textarea id="undesired-out" class="out-box" style="color:#f87171; height:60px;"></textarea>
+<button class="copy-btn" style="background:var(--red);" onclick="copyText('undesired-out')">📋 ② Undesired 복사</button>
+</div>
+
+<script>
+// 앞에서부터 차례로 시도하고, 처음 성공한 모델을 기억해 계속 씁니다.
+// 3.5 우선. 3.5 Flash가 없으면 3.5 Flash-Lite, 그것도 안 되면 나머지로 넘어감.
+const GEMINI_MODELS = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-2.5-flash"];
+let workingModel = null;
+try { workingModel = localStorage.getItem('kiana_gemini_model_v35'); } catch (e) {}
+
+async function callGemini(key, body) {
+const order = workingModel ? [workingModel, ...GEMINI_MODELS.filter(m => m !== workingModel)] : GEMINI_MODELS;
+let lastErr = "응답 없음";
+for (const model of order) {
+const base = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+const send = async (useQuery) => {
+try {
+const res = await fetch(useQuery ? `${base}?key=${encodeURIComponent(key)}` : base, {
+method: 'POST',
+headers: useQuery ? { 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+body: JSON.stringify(body)
+});
+return await res.json();
+} catch (e) {
+throw new Error("네트워크 차단 또는 오프라인 (" + e.message + ")");
+}
+};
+let data = await send(false);
+// 키 인증 오류면 키를 주소에 넣는 옛 방식으로 한 번 더 시도
+const e1 = data.error || {};
+if ([400, 401, 403].includes(e1.code) && /key|token|auth|credential/i.test((e1.message || "") + (e1.status || ""))) {
+const retry = await send(true);
+if (retry.candidates || !retry.error || retry.error.code === 404) data = retry;
+}
+if (data.candidates) {
+workingModel = model;
+try { localStorage.setItem('kiana_gemini_model_v35', model); } catch (e) {}
+return { data, model };
+}
+if (data.promptFeedback && data.promptFeedback.blockReason) throw new Error(`[${model}] 요청이 안전 필터에 차단됨 (${data.promptFeedback.blockReason})`);
+const err = data.error || {};
+lastErr = `[${model}] ${err.status || ""} ${err.message || ""}`.trim();
+// 모델이 없거나 종료된 경우에만 다음 모델로 넘어가고, 키·할당량 문제는 바로 알려줌
+if (err.code !== 404 && err.status !== "NOT_FOUND") throw new Error(lastErr);
+if (workingModel === model) workingModel = null;
+}
+throw new Error(lastErr);
+}
+
+const danbooruDict = [
+{ tag: "{{1dog, large dog, doberman}}", kr: "개 강아지 대형견 도베르만", desc: "대형견 소환 태그. 개가 증발하는 현상을 막습니다.", noSolo: true },
+{ tag: "{{dog standing over 1girl}}", kr: "개위 위에서 군림 깔림", desc: "개 쓰러진 캐릭터 위에 우뚝 서서 내려다보는 구도입니다.", noSolo: true },
+{ tag: "{dog paw on chest}, pinned down, lying on back", kr: "가슴밟기 짓누름 누워", desc: "등을 대고 누워 개의 앞발에 가슴팍을 짓눌린 상태입니다.", noSolo: true },
+{ tag: "{dogeza}, kneeling, bowing, hands on ground", kr: "도게자 큰절 무릎 엎드려", desc: "최고 수준의 굴복 절 자세입니다." },
+{ tag: "{all fours}, {crawling}", kr: "네발기기 기어가기 동물처럼", desc: "두 손과 무릎을 바닥에 대고 기어가는 사육 포즈입니다." },
+{ tag: "{panting}, {gasping}, heavy breathing", kr: "헐떡임 숨차 거친호흡", desc: "지쳐서 가쁘게 숨을 몰아쉬는 표현입니다." },
+{ tag: "{drooling}, saliva", kr: "침 침흘림 타액", desc: "입가에서 침이 흘러내리는 연출입니다." },
+{ tag: "{eating from bowl}, {dog bowl}", kr: "밥그릇 개밥 사료 식사", desc: "개 밥그릇에 얼굴을 박고 먹는 굴욕 연출입니다." },
+{ tag: "{park}, paved path, trees, grass", kr: "공원 산책로 잔디 풀밭", desc: "야외 공원 산책로 배경입니다." }
+];
+
+const presets = [
+{ label: "🐕 대형견 군림", tags: "{{1dog, large dog, doberman}}, {{dog standing over 1girl}}, {dog paw on chest}, pinned down, lying on back", noSolo: true },
+{ label: "🙇‍♀️ 도게자 굴복", tags: "{dogeza}, kneeling, bowing, hands on ground", noSolo: false },
+{ label: "🐾 네발로 기기", tags: "{all fours}, {crawling}", noSolo: false },
+{ label: "🥣 개밥그릇 식사", tags: "{eating from bowl}, {dog bowl}, pet food", noSolo: false },
+{ label: "🥾 군화에 차임", tags: "{kicked}, {boot on body}, {stepped on}, {curled up}", noSolo: false }
+];
+
+// 🏆 화풍 리드보드 데이터
+let styleList = [
+{ name: "시네마틱 반실사(키아나 기본)", uses: 15, tags: "day, {dappled sunlight}, harsh sunlight, strong shadows, glossy skin, {painterly}, visible brushstrokes, film grain, warm highlights, teal shadows, cinematic lighting, depth of field, bokeh,", allowCel: false },
+{ name: "다크 판타지 꾸덕한 유화", uses: 8, tags: "dark atmosphere, {chiaroscuro}, dramatic shadows, dim lighting, {impasto}, thick paint, oil painting style, gritty texture, muted colors, rim lighting, depth of field,", allowCel: false },
+{ name: "고밀도 물광 일러스트", uses: 6, tags: "vibrant colors, {detailed light}, dramatic lighting, subsurface scattering, shiny skin, water droplets, detailed background, {illustration}, masterpiece digital art, bloom, lens flare,", allowCel: false },
+{ name: "깔끔한 고화질 애니풍", uses: 4, tags: "{anime coloring}, clean lineart, cel shading, crisp shadows, high contrast, anime screenshot, vivid lighting, glowing highlights,", allowCel: true }
+];
+
+let currentStyleIdx = 0;
+let sceneTags = ["{park}", "paved path", "trees", "grass"];
+let extraUndesired = [];
+let removeSoloFlag = false;
+let imageBase64 = null;
+let imageMime = "image/jpeg";
+
+function escapeHtml(s) {
+return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function switchTab(tabId, btn) {
+document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+document.getElementById(tabId).classList.add('active');
+if (btn) btn.classList.add('active');
+}
+
+function saveApiKey() {
+try { localStorage.setItem('kiana_api_key', document.getElementById('api-key').value.replace(/\s+/g, '')); } catch (e) {}
+}
+
+function hasKey(k) { return typeof k === 'string' && k.length >= 20; }
+
+function loadApiKey() {
+const typed = document.getElementById('api-key').value.replace(/\s+/g, '');
+if (typed) return typed;
+try { return localStorage.getItem('kiana_api_key') || ""; } catch (e) { return ""; }
+}
+
+async function testConnection() {
+const key = loadApiKey();
+const resBox = document.getElementById('conn-result');
+const badge = document.getElementById('conn-badge');
+if (!hasKey(key)) {
+resBox.innerHTML = "❌ API 키를 붙여넣어 주세요.";
+return;
+}
+resBox.innerHTML = "⏳ 통신 테스트 중...";
+try {
+const { model } = await callGemini(key, { contents: [{ parts: [{ text: "OK" }] }] });
+resBox.innerHTML = `✅ <span style='color:#4ade80;'>Gemini 연결 성공! (모델: ${escapeHtml(model)})</span>`;
+badge.innerText = "🟢 Gemini 연결됨";
+} catch (err) {
+resBox.innerHTML = `❌ 오류: ${escapeHtml(err.message)}`;
+badge.innerText = "🔴 연결 실패";
+}
+}
+
+function addTagsToState(tagString, forceNoSolo = false, skipRender = false) {
+const parts = tagString.split(',').map(s => s.trim()).filter(Boolean);
+parts.forEach(p => { if (!sceneTags.includes(p)) sceneTags.push(p); });
+if (forceNoSolo || tagString.toLowerCase().includes('dog')) removeSoloFlag = true;
+if (!skipRender) renderAll();
+}
+
+function removeSingleTag(idx) {
+sceneTags.splice(idx, 1);
+if (!sceneTags.some(t => t.toLowerCase().includes('dog'))) removeSoloFlag = false;
+renderAll();
+}
+
+function clearAddedTags() {
+sceneTags = [];
+extraUndesired = [];
+removeSoloFlag = false;
+renderAll();
+}
+
+// 실제로 바뀐 것만 정확히 보고
+function changeSummary(beforeCount, styleBefore) {
+const added = sceneTags.slice(beforeCount);
+const lines = [];
+lines.push(added.length ? `➕ 추가된 태그: ${escapeHtml(added.join(", "))}` : "➕ 추가된 태그: 없음 (이미 있던 태그거나 새로 고를 게 없었음)");
+if (currentStyleIdx !== styleBefore) lines.push(`🎨 화풍: ${escapeHtml(styleList[styleBefore].name)} → ${escapeHtml(styleList[currentStyleIdx].name)}`);
+return lines.join("\n");
+}
+
+async function executeChatCommand() {
+const req = document.getElementById('user-request').value.trim();
+const log = document.getElementById('chat-log');
+if (!req && !imageBase64) return alert("요청사항을 입력해 주세요!");
+
+log.innerHTML += `<div class="msg-user"><b>👤 내 요청:</b> ${escapeHtml(req || "(이미지만 첨부)")}</div>`;
+log.scrollTop = log.scrollHeight;
+
+const key = loadApiKey();
+if (hasKey(key)) {
+const loadId = "load-" + Date.now();
+log.innerHTML += `<div class="msg-ai" id="${loadId}">⏳ AI가 처리 중...</div>`;
+log.scrollTop = log.scrollHeight;
+try {
+const styleNames = styleList.map((s, i) => `${i}: ${s.name}`).join(", ");
+const instruction = `NovelAI V4.5 키아나 스튜디오 컨트롤러다. 요청("${req}") 분석 후 JSON으로만 답해라.
+화풍 목록: ${styleNames}
+형식: {"addSceneTags": ["Danbooru 태그"], "removeSolo": true/false, "selectStyleIndex": 0~${styleList.length - 1} 또는 -1(변경 없음), "explanation": "한국어 설명"}`;
+const parts = [{ text: instruction }];
+if (imageBase64) parts.push({ inline_data: { mime_type: imageMime, data: imageBase64 } });
+
+const { data } = await callGemini(key, { contents: [{ parts }], generationConfig: { responseMimeType: "application/json" } });
+document.getElementById(loadId).remove();
+const cand = data.candidates[0];
+const text = cand && cand.content && cand.content.parts && cand.content.parts[0] ? cand.content.parts[0].text : null;
+if (!text) throw new Error(`빈 응답 (finishReason: ${cand ? cand.finishReason : "없음"}${data.promptFeedback && data.promptFeedback.blockReason ? ", 차단: " + data.promptFeedback.blockReason : ""})`);
+
+const cmd = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+const before = sceneTags.length, styleBefore = currentStyleIdx;
+if (Array.isArray(cmd.addSceneTags)) cmd.addSceneTags.forEach(t => addTagsToState(String(t), !!cmd.removeSolo, true));
+if (typeof cmd.removeSolo === 'boolean') removeSoloFlag = cmd.removeSolo;
+if (Number.isInteger(cmd.selectStyleIndex) && cmd.selectStyleIndex >= 0 && cmd.selectStyleIndex < styleList.length) currentStyleIdx = cmd.selectStyleIndex;
+renderAll();
+log.innerHTML += `<div class="msg-ai">✅ <b>[Gemini · ${escapeHtml(workingModel || "")}]</b> ${escapeHtml(cmd.explanation || "")}\n${changeSummary(before, styleBefore)}</div>`;
+log.scrollTop = log.scrollHeight;
+document.getElementById('user-request').value = "";
+return;
+} catch (e) {
+const el = document.getElementById(loadId);
+if (el) el.remove();
+log.innerHTML += `<div class="msg-ai">⚠️ Gemini 처리 실패(${escapeHtml(e.message)}) — 내장 엔진으로 대신 처리합니다.</div>`;
+}
+}
+
+// 로컬 파서 (Gemini 없이 단어 맞추기만 함)
+const before = sceneTags.length, styleBefore = currentStyleIdx;
+const combined = req.toLowerCase();
+danbooruDict.forEach(item => {
+// AI가 저장한 항목은 2글자 이상 단어만 매칭 (한 글자 단어로 엉뚱한 태그가 붙는 것 방지)
+if (item.kr.split(" ").some(k => k && (!item.ai || k.length >= 2) && combined.includes(k))) {
+addTagsToState(item.tag, !!item.noSolo, true);
+}
+});
+if (combined.includes("2번") || combined.includes("유화")) currentStyleIdx = 1;
+if (combined.includes("3번") || combined.includes("물광")) currentStyleIdx = 2;
+if (combined.includes("4번") || combined.includes("애니")) currentStyleIdx = 3;
+if (combined.includes("1번") || combined.includes("반실사")) currentStyleIdx = 0;
+
+renderAll();
+const why = hasKey(key) ? "Gemini 실패" : "Gemini 키 없음";
+const changed = sceneTags.length !== before || currentStyleIdx !== styleBefore;
+log.innerHTML += changed
+? `<div class="msg-ai">⚙️ <b>[내장 엔진 · ${why}]</b> 사전 단어만 맞춰서 반영했어요.\n${changeSummary(before, styleBefore)}</div>`
+: `<div class="msg-ai">❌ <b>[내장 엔진 · ${why}]</b> 아무것도 바꾸지 못했어요. 내장 엔진은 사전에 있는 단어(개, 침, 도게자, 공원, 2번/유화 등)만 알아들어요. 문장을 이해하려면 Gemini 연결이 필요해요.</div>`;
+log.scrollTop = log.scrollHeight;
+document.getElementById('user-request').value = "";
+}
+
+function renderDictItems(items, box, isAi) {
+items.forEach(item => {
+const div = document.createElement('div');
+div.className = 'search-item';
+const badge = isAi || item.ai ? `<span style="color:var(--purple); font-size:10px; margin-left:4px;">AI</span>` : "";
+div.innerHTML = `<div><div class="search-tag">${escapeHtml(item.tag)}${badge}</div><div class="search-desc">${escapeHtml(item.desc)}</div>${verifyHtml(item)}</div>`;
+const btn = document.createElement('button');
+btn.className = 'add-btn';
+btn.innerText = "+ 추가";
+btn.onclick = () => { addTagsToState(item.tag, !!item.noSolo); btn.innerText = "✓ 추가됨"; btn.style.background = "#444"; };
+div.appendChild(btn);
+box.appendChild(div);
+});
+}
+
+function searchDict() {
+const q = document.getElementById('dict-search').value.trim().toLowerCase();
+const box = document.getElementById('dict-results');
+box.innerHTML = "";
+renderDictItems(danbooruDict.filter(item => !q || item.tag.toLowerCase().includes(q) || item.kr.includes(q)), box, false);
+}
+
+// AI가 찾아준 태그는 내 사전에 저장해 두고, 다음부터 키 없이도 검색·대화창에서 쓰임
+function loadAiDict() {
+try {
+const saved = JSON.parse(localStorage.getItem('kiana_ai_dict') || "[]");
+saved.forEach(it => { if (it && it.tag && !danbooruDict.some(d => d.tag === it.tag)) danbooruDict.push(it); });
+} catch (e) {}
+}
+function saveAiDict() {
+try { localStorage.setItem('kiana_ai_dict', JSON.stringify(danbooruDict.filter(d => d.ai))); } catch (e) {}
+}
+
+// ── 단부루 실제 조회 (공개 API, 태그 이름·사용량만 가져옴) ──
+const DANBOORU = "https://danbooru.donmai.us";
+const DB_CATEGORY = { 0: "일반", 1: "작가", 3: "작품", 4: "캐릭터", 5: "메타" };
+
+function formatCount(n) {
+if (n >= 10000) return (n / 10000).toFixed(n >= 100000 ? 0 : 1) + "만";
+return n.toLocaleString();
+}
+function toDbName(t) { return t.replace(/[{}\[\]]/g, "").trim().toLowerCase().replace(/\s+/g, "_"); }
+function toNaiName(n) { return n.replace(/_/g, " "); }
+
+async function fetchJson(url) {
+const ctrl = new AbortController();
+const timer = setTimeout(() => ctrl.abort(), 8000);
+try {
+const res = await fetch(url, { signal: ctrl.signal });
+if (!res.ok) throw new Error("단부루 응답 " + res.status);
+return await res.json();
+} catch (e) {
+if (e.name === "AbortError") throw new Error("시간 초과");
+if (e instanceof TypeError) throw new Error("네트워크 또는 앱이 접속을 막음");
+throw e;
+} finally { clearTimeout(timer); }
+}
+
+async function lookupTags(names) {
+const map = {};
+for (let i = 0; i < names.length; i += 50) {
+const chunk = names.slice(i, i + 50);
+const rows = await fetchJson(`${DANBOORU}/tags.json?search[name_comma]=${encodeURIComponent(chunk.join(","))}&only=name,post_count,category&limit=100`);
+rows.forEach(r => { map[r.name] = r; });
+}
+return map;
+}
+
+async function verifyWithDanbooru(results) {
+results.forEach(r => { r.parts = r.tag.split(",").map(s => s.trim()).filter(Boolean); });
+const names = [...new Set(results.flatMap(r => r.parts.map(toDbName)))];
+const found = await lookupTags(names);
+
+// 없는 태그는 별칭(옛 이름)인지 확인해서 정식 태그로 바꿔줌
+const missing = names.filter(n => !found[n] || found[n].post_count === 0);
+const alias = {};
+if (missing.length) {
+const rows = await fetchJson(`${DANBOORU}/tag_aliases.json?search[antecedent_name_comma]=${encodeURIComponent(missing.join(","))}&search[status]=active&only=antecedent_name,consequent_name&limit=100`);
+rows.forEach(a => { alias[a.antecedent_name] = a.consequent_name; });
+const canon = [...new Set(Object.values(alias))].filter(n => !found[n]);
+if (canon.length) Object.assign(found, await lookupTags(canon));
+}
+
+results.forEach(r => {
+r.verify = r.parts.map(p => {
+const n = toDbName(p);
+if (found[n] && found[n].post_count > 0) return { name: n, status: "ok", count: found[n].post_count, category: found[n].category };
+if (alias[n] && found[alias[n]]) return { name: n, status: "alias", canonical: alias[n], count: found[alias[n]].post_count, category: found[alias[n]].category };
+return { name: n, status: "missing" };
+});
+// 별칭은 정식 태그로 교체, 없는 태그는 조합에서 뺌 (전부 없으면 그대로 둠)
+const kept = r.verify.filter(v => v.status !== "missing");
+if (kept.length) r.tag = kept.map(v => toNaiName(v.canonical || v.name)).join(", ");
+delete r.parts;
+});
+}
+
+function verifyScore(r) {
+if (!r.verify) return 0;
+const ok = r.verify.filter(v => v.status !== "missing");
+return ok.length ? 1 + Math.log10(1 + Math.min(...ok.map(v => v.count))) : -1;
+}
+
+function verifyHtml(item) {
+if (!item.verify) return "";
+const chips = item.verify.map(v => {
+if (v.status === "ok") return `<span style="color:#4ade80;">✓ ${escapeHtml(toNaiName(v.name))} ${formatCount(v.count)}장</span>`;
+if (v.status === "alias") return `<span style="color:#fbbf24;">↪ ${escapeHtml(toNaiName(v.name))} → ${escapeHtml(toNaiName(v.canonical))} ${formatCount(v.count)}장</span>`;
+const allMissing = item.verify.every(x => x.status === "missing");
+return `<span style="color:#f87171;">✗ ${escapeHtml(toNaiName(v.name))} ${allMissing ? "단부루에 없음 (AI가 지어낸 태그일 수 있음)" : "없음 → 조합에서 뺌"}</span>`;
+}).join(" · ");
+const first = item.verify.find(v => v.status !== "missing");
+const wiki = first ? ` <a href="${DANBOORU}/wiki_pages/${encodeURIComponent(first.canonical || first.name)}" target="_blank" rel="noopener" style="color:#60a5fa; text-decoration:none;">📖위키</a>` : "";
+return `<div style="font-size:10px; margin-top:3px;">${chips}${wiki}</div>`;
+}
+
+// 영어로 단부루를 직접 검색 (키 필요 없음). 한글이면 AI 검색으로 넘김
+async function danbooruDirectSearch() {
+const q = document.getElementById('dict-search').value.trim();
+const status = document.getElementById('dict-status');
+const box = document.getElementById('dict-results');
+if (!q) { status.innerHTML = "✏️ 찾을 태그를 영어로 적어주세요. (예: chain, kneel)"; return; }
+if (/[ㄱ-ㅎ가-힣]/.test(q)) {
+if (hasKey(loadApiKey())) return aiSearchDict();
+status.innerHTML = "🔤 단부루 직접 검색은 영어만 돼요. 한글은 🤖 AI 검색(Gemini 키 필요)을 써주세요.";
+return;
+}
+status.innerHTML = "⏳ 단부루에서 검색 중...";
+try {
+const pattern = "*" + toDbName(q) + "*";
+const rows = await fetchJson(`${DANBOORU}/tags.json?search[name_matches]=${encodeURIComponent(pattern)}&search[order]=count&search[hide_empty]=true&only=name,post_count,category&limit=20`);
+if (!rows.length) { status.innerHTML = `🤔 단부루에 "${escapeHtml(q)}"가 들어간 태그가 없어요.`; box.innerHTML = ""; return; }
+const items = rows.map(r => ({
+tag: toNaiName(r.name),
+desc: `${DB_CATEGORY[r.category] || "기타"} 태그`,
+noSolo: false,
+verify: [{ name: r.name, status: "ok", count: r.post_count, category: r.category }]
+}));
+box.innerHTML = "";
+renderDictItems(items, box, false);
+status.innerHTML = `📚 단부루 "${escapeHtml(q)}" → 사용량 많은 순 ${rows.length}개`;
+} catch (e) {
+status.innerHTML = `⚠️ 단부루 검색 실패: ${escapeHtml(e.message)}`;
+}
+}
+
+async function aiSearchDict() {
+const q = document.getElementById('dict-search').value.trim();
+const status = document.getElementById('dict-status');
+const box = document.getElementById('dict-results');
+if (!q) { status.innerHTML = "✏️ 찾을 내용을 먼저 적어주세요."; return; }
+const key = loadApiKey();
+if (!hasKey(key)) {
+status.innerHTML = "🔌 AI 검색은 💬 AI 대화 탭에 Gemini 키를 넣어야 작동해요. 지금은 내 사전 결과만 보여드려요.";
+searchDict();
+return;
+}
+status.innerHTML = "⏳ Gemini가 단부루 태그를 찾는 중...";
+try {
+const instruction = `너는 Danbooru 태그 전문가다. NovelAI V4.5 이미지 프롬프트에 쓸 태그를 찾아라.
+검색어: "${q}"
+규칙:
+- Danbooru에 실제로 존재하는 태그만. 지어낸 태그 금지.
+- 밑줄 대신 띄어쓰기 (예: "hands on ground").
+- 가장 정확한 것부터 최대 8개. 하나의 결과에 쉼표로 묶은 2~4개 태그 조합도 가능.
+- desc는 한국어 한 문장: 무엇이 그려지는지, 쓸 때 주의점.
+- noSolo는 그 태그가 캐릭터 외에 동물·다른 인물을 화면에 추가하면 true.
+JSON으로만 답해라: {"results": [{"tag": "태그", "desc": "설명", "noSolo": false}]}`;
+const { data } = await callGemini(key, { contents: [{ parts: [{ text: instruction }] }], generationConfig: { responseMimeType: "application/json" } });
+const cand = data.candidates[0];
+const text = cand && cand.content && cand.content.parts && cand.content.parts[0] ? cand.content.parts[0].text : null;
+if (!text) throw new Error(`빈 응답 (finishReason: ${cand ? cand.finishReason : "없음"})`);
+const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+const results = (Array.isArray(parsed.results) ? parsed.results : [])
+.filter(r => r && typeof r.tag === "string" && r.tag.trim())
+.map(r => ({ tag: r.tag.trim().replace(/_/g, " ").replace(/,\s*$/, ""), desc: String(r.desc || ""), noSolo: !!r.noSolo, kr: q.toLowerCase(), ai: true }));
+if (results.length === 0) { status.innerHTML = "🤔 맞는 태그를 못 찾았어요. 다르게 표현해 보세요."; return; }
+
+status.innerHTML = `⏳ ${results.length}개 찾음 — 단부루에서 실제로 있는지 확인 중...`;
+let verifyNote = "";
+try {
+await verifyWithDanbooru(results);
+const bad = results.filter(r => r.verify.every(v => v.status === "missing")).length;
+verifyNote = bad ? ` · ${bad}개는 단부루에 없음` : " · 전부 단부루 확인됨";
+// 실제 있는 태그가 위로 오게 정렬
+results.sort((a, b) => verifyScore(b) - verifyScore(a));
+} catch (e) {
+verifyNote = ` · 단부루 확인 실패(${escapeHtml(e.message)})`;
+}
+
+results.filter(r => !r.verify || !r.verify.every(v => v.status === "missing")).forEach(r => {
+const existing = danbooruDict.find(d => d.tag === r.tag);
+if (existing) { if (existing.ai && !existing.kr.includes(r.kr)) existing.kr += " " + r.kr; }
+else danbooruDict.push(r);
+});
+saveAiDict();
+
+box.innerHTML = "";
+renderDictItems(results, box, true);
+status.innerHTML = `🤖 "${escapeHtml(q)}" → ${results.length}개 (모델: ${escapeHtml(workingModel || "")})${verifyNote}`;
+} catch (e) {
+status.innerHTML = `⚠️ AI 검색 실패: ${escapeHtml(e.message)} — 내 사전 결과로 대신 보여드려요.`;
+searchDict();
+}
+}
+
+function renderPresets() {
+const box = document.getElementById('preset-buttons');
+box.innerHTML = "";
+presets.forEach(p => {
+const btn = document.createElement('button');
+btn.innerText = p.label;
+btn.onclick = () => addTagsToState(p.tags, p.noSolo);
+box.appendChild(btn);
+});
+}
+
+// 🏆 리드보드 렌더링
+function renderStyles() {
+const box = document.getElementById('style-list');
+box.innerHTML = "";
+styleList.forEach((st, idx) => {
+const medal = idx === 0 ? "🥇 1위" : idx === 1 ? "🥈 2위" : idx === 2 ? "🥉 3위" : `${idx + 1}위`;
+const btn = document.createElement('button');
+btn.className = (idx === currentStyleIdx) ? 'active' : '';
+btn.style.textAlign = 'left';
+btn.innerHTML = `<b>${medal} · ${escapeHtml(st.name)}</b> (사용 ${st.uses}회)<br><span style="font-size:10px; opacity:0.7;">${escapeHtml(st.tags.substring(0, 55))}...</span>`;
+btn.onclick = () => { currentStyleIdx = idx; styleList[idx].uses++; renderAll(); };
+box.appendChild(btn);
+});
+document.getElementById('current-style-badge').innerText = `[화풍: ${styleList[currentStyleIdx].name}]`;
+}
+
+function addNewStyleManual() {
+const name = document.getElementById('new-style-name').value.trim();
+let tags = document.getElementById('new-style-tags').value.trim();
+if (!name || !tags) return alert("화풍 이름과 태그를 입력하세요.");
+styleList.push({ name, uses: 1, tags: tags.endsWith(',') ? tags : tags + ',', allowCel: tags.includes('cel shading') });
+currentStyleIdx = styleList.length - 1;
+document.getElementById('new-style-name').value = "";
+document.getElementById('new-style-tags').value = "";
+renderAll();
+alert("새 화풍 저장 및 장착 완료!");
+}
+
+function previewFile() {
+const file = document.getElementById('example-img').files[0];
+if (!file) return;
+imageMime = file.type || "image/jpeg";
+const reader = new FileReader();
+reader.onloadend = () => {
+document.getElementById('img-preview').src = reader.result;
+document.getElementById('img-preview').style.display = 'block';
+imageBase64 = reader.result.split(',')[1];
+};
+reader.readAsDataURL(file);
+}
+
+function clearImage() {
+document.getElementById('example-img').value = "";
+document.getElementById('img-preview').style.display = 'none';
+imageBase64 = null;
+}
+
+function renderAll() {
+const view = document.getElementById('added-tags-view');
+view.innerHTML = sceneTags.length === 0
+? "추가된 장면 태그 없음"
+: sceneTags.map((t, i) => `<span class="active-chip">${escapeHtml(t)} <b style="color:#f87171; cursor:pointer;" onclick="removeSingleTag(${i})">✕</b></span>`).join(" ");
+
+let frontTags = "", midTags = "";
+sceneTags.forEach(t => {
+let clean = t.trim();
+if (!clean.endsWith(',')) clean += ',';
+if (clean.toLowerCase().includes('dog')) { frontTags += clean + " "; removeSoloFlag = true; }
+else { midTags += clean + " "; }
+});
+
+const qual = removeSoloFlag
+? `masterpiece, best quality, absurdres, high complexity, highly detailed, ${frontTags}1girl, `
+: `masterpiece, best quality, absurdres, high complexity, highly detailed, 1girl, solo, `;
+const kiana = "{tanned skin}, {silver hair}, white hair, medium hair, wavy hair, messy hair, {blunt bangs}, {golden eyes}, {{half-closed eyes}}, red lips, beautiful face, gold choker, gold crescent earrings, gold armlet, gold bracelets, ";
+const baseScene = "{camera at floor level}, {from front}, face visible, looking at viewer, {youthful face}, {smooth skin}, sharp eyeliner, {empty eyes}, {humiliation}, {tears}, {blush}, {slave}, {metal collar}, {chain leash}, {shackles}, chained wrists, chains, {torn white dress}, gold trim, {torn clothes}, {exposed shoulders}, {bruises on arms}, ";
+
+document.getElementById('prompt-out').value = qual + kiana + midTags + baseScene + styleList[currentStyleIdx].tags;
+
+let und = "strapless, blurry, lowres, upscaled, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, halftone, multiple views, logo, too many watermarks, negative space, blank page, low quality, bad anatomy, bad hands, missing fingers, extra digits, deformed, ugly face, text, signature, watermark, multiple girls, child, pale skin, white skin, long hair, straight hair, wrinkles, aged, elf ears, hair bun, hair loops, upturned eyes, wide eyes, round eyes, chibi, 3d, 1boy, blood, gore, {{cleavage}}, {{large breasts}}, {{wrinkles}}, {{aged}}, {mature female}, {milf}, {old}, {facial lines}, {nasolabial folds}, {eye bags}, {sunken cheeks}, {thick lips}, {smile}, {happy}, grin, laughing, {{open mouth}}, teeth, screaming, standing, walking upright, from above, high angle, dirty face, {tilted head}, {chin up}, {wide face}, chubby face, face down, forehead on ground, cigarette, smoking, smoke, tobacco, shiny eyes, sparkling eyes, ";
+if (!styleList[currentStyleIdx].allowCel) und += "flat color, cel shading, ";
+if (extraUndesired.length > 0) und += extraUndesired.join(", ") + ", ";
+document.getElementById('undesired-out').value = und;
+
+renderPresets();
+renderStyles();
+}
+
+function copyText(id) {
+const el = document.getElementById(id);
+el.select();
+const done = () => alert("NovelAI용 프롬프트 복사 완료!");
+if (navigator.clipboard && window.isSecureContext) {
+navigator.clipboard.writeText(el.value).then(done).catch(() => { document.execCommand('copy'); done(); });
+} else {
+document.execCommand('copy');
+done();
+}
+}
+
+document.getElementById('api-key').value = loadApiKey();
+loadAiDict();
+searchDict();
+renderAll();
+</script>
+</body>
+</html>
