@@ -13,6 +13,8 @@ const MODELS = {
 };
 // 사용자가 직접 말한 취향(정장, 중국식 미인, 금발)을 태그로 옮긴 처음 값. art/취향.md의 '좋아하는 것'과 같아야 한다.
 const DEFAULT_SCENE = "1girl, solo, business suit, formal, blonde hair, long hair, east asian, mature female, elegant, looking at viewer, upper body";
+// 취향 프롬프트 처음 값: art/프롬프트/NAI.md에서 사용자가 "엄청 마음에 든다"고 확정한 키아나 그림체 블록. 취향뽑기 앱의 처음 값과 같다.
+const DEFAULT_STYLE = "{painterly}, visible brushstrokes, {dappled sunlight}, harsh sunlight, strong shadows, glossy skin, film grain, warm highlights, teal shadows, cinematic lighting, depth of field, bokeh";
 // NovelAI 문서(docs.novelai.net/en/image/undesiredcontent, 2026-11-15 확인)의 'Human Focus V5 Full'. V4.5 Full도 같은 글이다.
 const DEFAULT_NEG = "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page, @_@, mismatched pupils, glowing eyes, bad anatomy";
 // 처음 버전이 쓰던 값. 사용자가 손대지 않고 그대로 남아 있으면 새 값으로 바꾼다.
@@ -23,7 +25,7 @@ const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, s
 //   verdict: null(안 고름) | "keep"(보관) | "drop"(버림)
 const SHAPE = () => ({
   settings: { token: "", model: "nai-diffusion-5-full", customModel: "", size: "세로", steps: 28, scale: 5, quality: true },
-  taste: { style: "", negative: DEFAULT_NEG },
+  taste: { style: DEFAULT_STYLE, negative: DEFAULT_NEG, seeded: true },
   draft: { scene: DEFAULT_SCENE, seedLock: false, seed: null, seeded: true },
   log: [],
 });
@@ -47,6 +49,8 @@ function load() {
     if (!raw.draft?.seeded) { draft.seeded = true; if (!String(raw.draft?.scene || "").trim()) draft.scene = DEFAULT_SCENE; }
     const taste = { ...base.taste, ...(raw.taste || {}) };
     if (taste.negative === OLD_NEG) taste.negative = DEFAULT_NEG;
+    // 취향 처음 값이 생기기 전에 저장된 데이터: 비어 있으면 한 번만 채운다. 그 뒤에 사용자가 비우면 다시 채우지 않는다.
+    if (!raw.taste?.seeded) { taste.seeded = true; if (!String(raw.taste?.style || "").trim()) taste.style = DEFAULT_STYLE; }
     return {
       settings: { ...base.settings, ...(raw.settings || {}) },
       taste,
