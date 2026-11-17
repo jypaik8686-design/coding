@@ -100,7 +100,7 @@ def start():
             tools = sorted(p.name for p in (repo / "tools").glob("*") if p.is_file()) if (repo / "tools").is_dir() else []
             skills = sorted(p.name for p in (repo / ".claude" / "skills").glob("*") if p.is_dir()) if (repo / ".claude" / "skills").is_dir() else []
             print(f"\n{repo.name}의 도구: {', '.join(tools) or '없음'} / 스킬: {', '.join(skills) or '없음'}")
-            print("여기 없는 도구·스킬은 없는 것이다. Claude-가 안 붙어서 다른 저장소는 못 봄.")
+            print("여기 없는 저장소 도구·스킬은 없는 것이다. 다만 Claude-가 안 붙어서 다른 저장소의 도구, 기계에 깔린 것(ffmpeg 등), 연결은 못 봤다. 있는지 `which <이름>`과 `Claude-`의 연결목록.md로 먼저 찾는다.")
 
 
 def turn_of(path):
