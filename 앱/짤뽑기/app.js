@@ -13,7 +13,10 @@ const MODELS = {
 };
 // 사용자가 직접 말한 취향(정장, 중국식 미인, 금발)을 태그로 옮긴 처음 값. art/취향.md의 '좋아하는 것'과 같아야 한다.
 const DEFAULT_SCENE = "1girl, solo, business suit, formal, blonde hair, long hair, east asian, mature female, elegant, looking at viewer, upper body";
-const DEFAULT_NEG ="lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, signature, watermark, username, blurry";
+// NovelAI 문서(docs.novelai.net/en/image/undesiredcontent, 2026-11-15 확인)의 'Human Focus V5 Full'. V4.5 Full도 같은 글이다.
+const DEFAULT_NEG = "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page, @_@, mismatched pupils, glowing eyes, bad anatomy";
+// 처음 버전이 쓰던 값. 사용자가 손대지 않고 그대로 남아 있으면 새 값으로 바꾼다.
+const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, signature, watermark, username, blurry";
 
 // ── 데이터 모양 ──────────────────────────────────────────────
 // log 항목 하나: { id, scene, style, negative, seed, model, w, h, steps, scale, at, verdict }
@@ -42,9 +45,11 @@ function load() {
     const draft = { ...base.draft, ...(raw.draft || {}) };
     // 기본값이 생기기 전에 저장된 옛 데이터: 비어 있던 칸은 기본값으로 채우고, 직접 적은 것은 건드리지 않는다.
     if (!raw.draft?.seeded) { draft.seeded = true; if (!String(raw.draft?.scene || "").trim()) draft.scene = DEFAULT_SCENE; }
+    const taste = { ...base.taste, ...(raw.taste || {}) };
+    if (taste.negative === OLD_NEG) taste.negative = DEFAULT_NEG;
     return {
       settings: { ...base.settings, ...(raw.settings || {}) },
-      taste: { ...base.taste, ...(raw.taste || {}) },
+      taste,
       draft,
       log: Array.isArray(raw.log) ? raw.log.filter((r) => r && r.id) : [],
     };
