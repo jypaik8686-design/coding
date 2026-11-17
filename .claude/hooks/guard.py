@@ -3,6 +3,7 @@
 
   python3 .claude/hooks/guard.py start   # SessionStart: 규칙 세 줄 + 지금 상태 + 도구 지도를 맥락에 넣는다
   python3 .claude/hooks/guard.py stop    # Stop: 대답이 사실과 어긋나면 막고 고치게 한다
+  python3 .claude/hooks/guard.py prompt  # UserPromptSubmit: 요청마다 "도구부터 찾는다"와 찾기표에서 맞는 줄을 맥락에 넣는다
 
 stop이 막는 것:
   1. 병합 안 된 일이 남았는데 대답에 "병합해야 다음 세션에 보임"이 없다
@@ -103,6 +104,47 @@ def start():
             print("여기 없는 저장소 도구·스킬은 없는 것이다. 다만 Claude-가 안 붙어서 다른 저장소의 도구, 기계에 깔린 것(ffmpeg 등), 연결은 못 봤다. 있는지 `which <이름>`과 `Claude-`의 연결목록.md로 먼저 찾는다.")
 
 
+TOOL_FIRST = ("[도구 먼저] 요청을 바로 실행하지 않는다. 먼저 맞는 도구를 찾는다: "
+              "① 아래 찾기표 줄, Claude-의 할수있는일.md, `check_rules.py --길잡이` "
+              "② 설치된 스킬(Skill 도구)과 SearchSkills·SearchPlugins "
+              "③ 없으면 외부 스킬을 검색(firecrawl_developer_search의 skills:\"only\", 웹 검색)하되 참고용으로만 읽고 설치·실행하지 않는다. "
+              "고른 도구 이름을 대답 첫 줄에 밝히고 실행한다. 한두 줄짜리 질문·잡담은 건너뛴다.")
+def 찾기표(prompt, 최대=4):
+    """Claude-/할수있는일.md의 '요청별 찾기표'에서 요청에 찾는 말이 든 줄만 꺼낸다 (로컬에서만, 요청 글은 밖으로 안 나간다)."""
+    for repo in repos_here():
+        try:
+            lines = (repo / "할수있는일.md").read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        on, rows = False, []
+        for ln in lines:
+            if ln.startswith("## "):
+                on = ln.startswith("## 요청별 찾기표")
+                continue
+            if on and ln.startswith("|"):
+                c = [x.strip() for x in ln.strip().strip("|").split("|")]
+                if len(c) >= 2 and not set(c[0]) <= set("-: ") and c[0] != "찾는 말":
+                    keys = [k.strip() for k in c[0].split(",") if len(k.strip()) >= 2]
+                    if any(k in prompt for k in keys):
+                        rows.append(c[1])
+        return rows[:최대]
+    return []
+
+
+def prompt():
+    try:
+        data = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        data = {}
+    text = (data.get("prompt") or "").strip()
+    if len(text) < 6 or text.startswith("/"):
+        return  # 짧은 대꾸와 슬래시 명령에는 끼어들지 않는다
+    print(TOOL_FIRST)
+    rows = 찾기표(text)
+    if rows:
+        print("찾기표에서 맞는 줄 (놓칠 수 있다. 없으면 직접 찾는다): " + " | ".join(rows))
+
+
 def turn_of(path):
     """마지막 사용자 메시지 뒤의 (도구 호출 수, 마지막 대답 글)."""
     try:
@@ -162,7 +204,7 @@ def stop():
 
 if __name__ == "__main__":
     try:
-        {"start": start, "stop": stop}.get(sys.argv[1] if len(sys.argv) > 1 else "", lambda: None)()
+        {"start": start, "stop": stop, "prompt": prompt}.get(sys.argv[1] if len(sys.argv) > 1 else "", lambda: None)()
     except Exception:  # 훅이 세션을 깨면 안 된다
         pass
     sys.exit(0)
