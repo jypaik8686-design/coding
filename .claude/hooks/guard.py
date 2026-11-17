@@ -109,6 +109,11 @@ TOOL_FIRST = ("[도구 먼저] 요청을 바로 실행하지 않는다. 먼저 �
               "② 설치된 스킬(Skill 도구)과 SearchSkills·SearchPlugins "
               "③ 없으면 외부 스킬을 검색(firecrawl_developer_search의 skills:\"only\", 웹 검색)하되 참고용으로만 읽고 설치·실행하지 않는다. "
               "고른 도구 이름을 대답 첫 줄에 밝히고 실행한다. 한두 줄짜리 질문·잡담은 건너뛴다.")
+만들기말 = ("만들", "써 줘", "써줘", "써 봐", "작성", "초안", "원고", "문구", "카피", "가사", "소개글", "보고서", "정리해서", "다듬", "그려", "그림")
+NO_AI_TELL = ("[AI 티] 만드는 글·문서는 쓴 뒤 `anthropic-skills:korean-ai-tone-remover`(한국어)나 `anti-ai-writing:anti-ai-writing`(영어 등) 규칙으로 고쳐 낸다. "
+              "상투어·번역투·과장·맺음 요약·줄표·습관적 3개 나열·불릿 남발 금지. 그림은 art의 '사람이 만든 것처럼 보이게'. 코드·설정·표·사용자가 정한 형식은 예외.")
+
+
 def 찾기표(prompt, 최대=4):
     """Claude-/할수있는일.md의 '요청별 찾기표'에서 요청에 찾는 말이 든 줄만 꺼낸다 (로컬에서만, 요청 글은 밖으로 안 나간다)."""
     for repo in repos_here():
@@ -140,6 +145,8 @@ def prompt():
     if len(text) < 6 or text.startswith("/"):
         return  # 짧은 대꾸와 슬래시 명령에는 끼어들지 않는다
     print(TOOL_FIRST)
+    if any(k in text for k in 만들기말):
+        print(NO_AI_TELL)
     rows = 찾기표(text)
     if rows:
         print("찾기표에서 맞는 줄 (놓칠 수 있다. 없으면 직접 찾는다): " + " | ".join(rows))
