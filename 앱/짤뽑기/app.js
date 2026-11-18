@@ -530,11 +530,20 @@ async function judge(verdict) {
     rec.verdict = "keep";
     now.rec.verdict = "keep";
   } else {
-    // 버려도 그림은 이번에 뽑은 목록(hist)에 남는다. 알림의 ‘되돌리기’나 목록에서 눌러 다시 볼 수 있다.
-    const entry = now, before = rec.verdict;
+    // 버림은 완전히 버리는 것: 목록에서 빼고, 보관한 그림이었다면 보관함 저장분도 지운다. 실수를 위해 9초 동안만 알림의 ‘되돌리기’로 살릴 수 있다.
+    const entry = now, before = rec.verdict, idx = hist.indexOf(entry);
     rec.verdict = "drop";
+    if (idx >= 0) hist.splice(idx, 1);
     now = null;
-    toast("버림", () => { rec.verdict = before; now = entry; store.save(); });
+    let row = null;
+    if (before === "keep") { row = await imgGet(rec.id).catch(() => null); await imgDel(rec.id).catch(() => {}); }
+    toast("버렸음", async () => {
+      rec.verdict = before;
+      hist.splice(Math.min(Math.max(idx, 0), hist.length), 0, entry);
+      now = entry;
+      if (row) await imgPut(row).catch(() => {});
+      store.save();
+    }, () => URL.revokeObjectURL(entry.url));
   }
   store.save();
 }
@@ -543,7 +552,8 @@ async function removeKept(id) {
   await imgDel(id).catch(() => {});
   const rec = store.data.log.find((r) => r.id === id);
   if (rec) rec.verdict = "drop";
-  if (now?.rec.id === id) now.rec.verdict = "drop";
+  const hi = hist.findIndex((h) => h.rec.id === id);
+  if (hi >= 0) { const [h] = hist.splice(hi, 1); if (now === h) now = null; URL.revokeObjectURL(h.url); }
   store.persist();
   location.hash = "#/keep";
 }
@@ -1103,8 +1113,8 @@ function personaEditor() {
 // 이번에 뽑은 그림 목록. 눌러서 크게 다시 본다 (새로 뽑거나 버린 그림을 되돌리는 길).
 function histStrip() {
   if (!hist.length || (hist.length === 1 && hist[0] === now)) return "";
-  const items = [...hist].reverse().map((h) => `<button type="button" class="hthumb ${h === now ? "on" : ""} ${h.rec.verdict === "drop" ? "dropped" : ""} ${h.rec.verdict === "keep" ? "kept" : ""}" data-hist="${esc(h.rec.id)}" aria-label="시드 ${h.rec.seed} 그림 다시 보기"><img src="${h.url}" alt=""></button>`).join("");
-  return `<div class="hist"><p class="hint">이번에 뽑은 그림 ${hist.length}장 — 눌러서 다시 봄. 흐리게 보이는 것은 버린 것. 새로 고치면 사라지니 남길 것은 ♥ 보관.</p><div class="hstrip">${items}</div></div>`;
+  const items = [...hist].reverse().map((h) => `<button type="button" class="hthumb ${h === now ? "on" : ""} ${h.rec.verdict === "keep" ? "kept" : ""}" data-hist="${esc(h.rec.id)}" aria-label="시드 ${h.rec.seed} 그림 다시 보기"><img src="${h.url}" alt=""></button>`).join("");
+  return `<div class="hist"><p class="hint">이번에 뽑은 그림 ${hist.length}장 — 눌러서 다시 봄. 새로 고치면 사라지니 남길 것은 ♥ 보관.</p><div class="hstrip">${items}</div></div>`;
 }
 
 const SCREENS = {
@@ -1284,19 +1294,25 @@ const on = (id, ev, fn) => $(id)?.addEventListener(ev, fn);
 
 // 눌러서 바꾼 것을 알리는 한 줄. 화면이 바뀌어도 남도록 본문 밖에 띄운다.
 // undo가 있으면 ‘되돌리기’ 버튼을 달고 조금 더 오래 둔다.
-function toast(msg, undo) {
+// expire: 되돌리기 없이 알림이 사라지거나 다른 알림이 덮을 때 한 번 불린다 (버린 그림의 마무리 정리용).
+let toastTimer = null, toastExpire = null;
+function toastDone() { const f = toastExpire; toastExpire = null; f?.(); }
+function toast(msg, undo, expire) {
+  clearTimeout(toastTimer);
+  toastDone();
   document.querySelector(".toast")?.remove();
   const t = document.createElement("div");
   t.className = "toast"; t.setAttribute("role", "status");
   const m = document.createElement("span"); m.textContent = msg; t.appendChild(m);
+  toastExpire = expire || null;
   if (undo) {
     const b = document.createElement("button");
     b.type = "button"; b.className = "undo"; b.textContent = "되돌리기";
-    b.addEventListener("click", () => { undo(); t.remove(); });
+    b.addEventListener("click", () => { clearTimeout(toastTimer); toastExpire = null; t.remove(); undo(); });
     t.appendChild(b);
   }
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), undo ? 9000 : 4500);
+  toastTimer = setTimeout(() => { t.remove(); toastDone(); }, undo ? 9000 : 4500);
 }
 
 function savePreset(to) {
