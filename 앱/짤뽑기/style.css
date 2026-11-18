@@ -261,3 +261,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 .preset.dim { opacity: .6; }
 .pform label { display: block; margin: 10px 0 4px; }
 .pform textarea, .pform input[type="text"], .pform select { margin-top: 4px; }
+.toast { display: flex; align-items: center; gap: 12px; }
+.toast .undo { flex: none; min-height: 36px; padding: 0 14px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: inherit; font-size: 14px; font-weight: 650; }
+.pput label { display: block; margin: 10px 0 4px; }
+.pput textarea { margin-top: 4px; }

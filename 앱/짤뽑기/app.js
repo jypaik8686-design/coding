@@ -807,7 +807,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 
 // ── 뽑기 화면 조각들 ─────────────────────────────────────────
 // 접었다 펴는 칸. 화면이 다시 그려져도 펼친 상태를 기억하려고 ui.open에 둔다 (새로 고치면 처음으로).
-const ui = { open: {}, withImg: false, presetKind: "인물", pedit: null, showHidden: false };
+const ui = { open: {}, withImg: false, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "" };
 const sec = (k, title, hint, inner) =>
   `<details class="sec" data-sec="${k}" ${ui.open[k] ? "open" : ""}><summary>${title}${hint ? ` <small>${esc(hint)}</small>` : ""}</summary><div class="secbody">${inner}</div></details>`;
 
@@ -943,14 +943,45 @@ function presetEntries(kind) {
   for (const p of d.presets) if (p.kind === kind) out.push({ key: `own:${p.id}`, p, own: true, hidden: false, edited: false });
   return out;
 }
+// 칸을 바꾸는 것(이번 그림·취향 그림체·빼는 것)을 넣기 전 값으로 기억해 두고, 넣은 뒤 ‘되돌리기’를 단다.
+function applyPreset(p, mode) {
+  const d = store.data;
+  const snap = { scene: d.draft.scene, seedLock: d.draft.seedLock, style: d.taste.style, negative: d.taste.negative };
+  const msg = usePreset(p, mode);
+  const changed = snap.scene !== d.draft.scene || snap.style !== d.taste.style || snap.negative !== d.taste.negative;
+  toast(msg, changed ? () => {
+    d.draft.scene = snap.scene; d.draft.seedLock = snap.seedLock; d.taste.style = snap.style; d.taste.negative = snap.negative;
+    store.save();
+  } : null);
+  store.save();
+}
+const targetNow = (p) => tidy(p.to === "scene" ? store.data.draft.scene : p.to === "style" ? store.data.taste.style : store.data.taste.negative);
 const presetByKey = (key) => {
   if (key.startsWith("own:")) return store.data.presets.find((p) => p.id === key.slice(4));
   const m = key.match(/^b:([^:]+):/);
   return m ? presetEntries(m[1]).find((e) => e.key === key)?.p : null;
 };
 
+// ‘바꾸기’를 누르면 곧바로 덮어쓰지 않고, 넣을 글을 여기서 고친 뒤 넣는다. 여기서 고친 글은 이번에만 쓰이고 프리셋 자체는 ‘고치기’로 바꾼다.
+function presetPut(e) {
+  const { p, key } = e, cur = targetNow(p);
+  return `
+    <div class="preset pput" data-pput="${esc(key)}">
+      <div class="phead"><b>${esc(p.name) || "이름 없음"}</b><span class="tag">넣기 전에 고치기</span></div>
+      <label>넣을 글 <span class="hint">여기서 고친 것은 이번에만 쓰임</span>
+        <textarea data-pputtext rows="6" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(ui.pputText)}</textarea></label>
+      <p class="hint">지금 ${TARGET[p.to]} 칸: ${cur ? esc(cur.length > 160 ? cur.slice(0, 160) + "…" : cur) : "(비어 있음)"}<br>‘바꿔 넣기’는 이 칸을 위 글로 통째로 바꿈. 넣은 뒤 ‘되돌리기’로 돌릴 수 있음.</p>
+      <div class="acts2">
+        <button type="button" data-pputgo="replace">바꿔 넣기</button>
+        <button type="button" class="ghost" data-pputgo="add">더하기</button>
+        <button type="button" class="ghost" data-pputcancel>취소</button>
+      </div>
+    </div>`;
+}
+
 function presetCard(e) {
   const { p, key } = e;
+  if (ui.pput === key) return presetPut(e);
   const badge = e.own ? TARGET[p.to] : e.edited ? "고침" : p.ok ? "확정" : "가안";
   if (e.hidden) return `<div class="preset dim"><div class="phead"><b>${esc(p.name)}</b><span class="tag">숨김</span></div><div class="acts2"><button type="button" class="ghost" data-punhide="${esc(key)}">숨김 풀기</button></div></div>`;
   return `
@@ -1230,12 +1261,20 @@ const $ = (id) => document.getElementById(id);
 const on = (id, ev, fn) => $(id)?.addEventListener(ev, fn);
 
 // 눌러서 바꾼 것을 알리는 한 줄. 화면이 바뀌어도 남도록 본문 밖에 띄운다.
-function toast(msg) {
+// undo가 있으면 ‘되돌리기’ 버튼을 달고 조금 더 오래 둔다.
+function toast(msg, undo) {
   document.querySelector(".toast")?.remove();
   const t = document.createElement("div");
-  t.className = "toast"; t.setAttribute("role", "status"); t.textContent = msg;
+  t.className = "toast"; t.setAttribute("role", "status");
+  const m = document.createElement("span"); m.textContent = msg; t.appendChild(m);
+  if (undo) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "undo"; b.textContent = "되돌리기";
+    b.addEventListener("click", () => { undo(); t.remove(); });
+    t.appendChild(b);
+  }
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 4500);
+  setTimeout(() => t.remove(), undo ? 9000 : 4500);
 }
 
 function savePreset(to) {
@@ -1434,19 +1473,32 @@ function wire(name, arg, seq) {
     on("variety", "change", (e) => { d.settings.variety = e.target.checked; store.save(); });
 
     // 프리셋
-    document.querySelectorAll("[data-pkind]").forEach((b) => b.addEventListener("click", () => { ui.presetKind = b.dataset.pkind; ui.pedit = null; ui.open.preset = true; render(); }));
+    document.querySelectorAll("[data-pkind]").forEach((b) => b.addEventListener("click", () => { ui.presetKind = b.dataset.pkind; ui.pedit = null; ui.pput = null; ui.open.preset = true; render(); }));
     document.querySelectorAll("[data-pset]").forEach((b) => b.addEventListener("click", () => {
       const p = presetByKey(b.dataset.pset); if (!p) return;
-      toast(usePreset(p, b.dataset.pmode));
-      store.save();
+      if (b.dataset.pmode === "replace") {
+        if (!tidy(p.text || "")) return toast("내용이 비어 있음. ‘고치기’에서 채우기");
+        ui.pput = b.dataset.pset; ui.pputText = p.text; ui.pedit = null; ui.open.preset = true;
+        return render();
+      }
+      applyPreset(p, b.dataset.pmode);
     }));
+    document.querySelectorAll("[data-pputtext]").forEach((el) => el.addEventListener("input", () => { ui.pputText = el.value; }));
+    document.querySelectorAll("[data-pputgo]").forEach((b) => b.addEventListener("click", () => {
+      const key = b.closest("[data-pput]")?.dataset.pput, p = key && presetByKey(key);
+      if (!p) return;
+      if (!tidy(ui.pputText)) return toast("넣을 글이 비어 있음");
+      ui.pput = null;
+      applyPreset({ ...p, text: ui.pputText }, b.dataset.pputgo);
+    }));
+    document.querySelectorAll("[data-pputcancel]").forEach((b) => b.addEventListener("click", () => { ui.pput = null; render(); }));
     document.querySelectorAll("[data-pdel]").forEach((b) => b.addEventListener("click", () => {
       const p = d.presets.find((x) => x.id === b.dataset.pdel);
       if (!p || !confirm(`‘${p.name || "이름 없음"}’ 프리셋을 지움.`)) return;
       d.presets = d.presets.filter((x) => x !== p); ui.pedit = null; store.save();
     }));
     // 프리셋 고치기·더하기
-    document.querySelectorAll("[data-pedit]").forEach((b) => b.addEventListener("click", () => { ui.pedit = b.dataset.pedit; ui.open.preset = true; render(); }));
+    document.querySelectorAll("[data-pedit]").forEach((b) => b.addEventListener("click", () => { ui.pedit = b.dataset.pedit; ui.pput = null; ui.open.preset = true; render(); }));
     document.querySelectorAll("[data-pdone]").forEach((b) => b.addEventListener("click", () => { ui.pedit = null; render(); }));
     document.querySelectorAll("[data-padd]").forEach((b) => b.addEventListener("click", () => {
       const kind = ui.presetKind;
