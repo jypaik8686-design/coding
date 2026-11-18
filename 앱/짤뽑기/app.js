@@ -697,7 +697,8 @@ function stateText() {
   const [w, h] = sizeOf(s);
   const chars = draft.chars.filter((c) => tidy(c.text)).map((c, i) => `  ${i + 1}. ${tidy(c.text)}${Number.isInteger(c.pos) ? ` (위치 칸 ${c.pos + 1}번/25)` : ""}`).join("\n");
   const plan = refPlan(s);
-  return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 이번 그림 칸: ${tidy(draft.scene) || "(비어 있음)"}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 취향 프롬프트: ${tidy(taste.style) || "(비어 있음)"}\n- 빼는 것: ${tidy(taste.negative) || "(비어 있음)"}\n- 품질 태그 자동: ${s.quality ? "켜짐" : "꺼짐"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}`;
+  const presetLine = PRESET_KINDS.map((k) => { const names = presetEntries(k).filter((e) => !e.hidden && e.p.name).map((e) => e.p.name); return names.length ? `${k}[${names.join(", ")}]` : ""; }).filter(Boolean).join(" / ");
+  return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 이번 그림 칸: ${tidy(draft.scene) || "(비어 있음)"}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 취향 프롬프트: ${tidy(taste.style) || "(비어 있음)"}\n- 빼는 것: ${tidy(taste.negative) || "(비어 있음)"}\n- 품질 태그 자동: ${s.quality ? "켜짐" : "꺼짐"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}\n- 프리셋(사용자가 눌러 쓰는 것): ${presetLine || "없음"}`;
 }
 
 // 제미니에 보내는 지시문 전체: 켠 조각들(+내 조각) + (켰다면) 앱 상태. 사전 후보는 질문마다 달라서 질문 쪽에 붙는다.
@@ -803,6 +804,19 @@ function applyChar(text) {
   }
   c.text = tidy(body.join("\n"));
   return c.text ? c : null;
+}
+
+// 블록을 넣기 전 값을 통째로 기억해 두고 ‘되돌리기’로 돌린다. 블록이 건드리는 것: 이번 그림, 취향 그림체, 빼는 것, 인물 칸, 생성 설정.
+const SETTING_KEYS = ["sampler", "steps", "scale", "cfgRescale", "noise", "variety", "size"];
+function snapBlocks() {
+  const d = store.data;
+  return JSON.stringify({ scene: d.draft.scene, lock: d.draft.seedLock, chars: d.draft.chars, style: d.taste.style, neg: d.taste.negative, set: Object.fromEntries(SETTING_KEYS.map((k) => [k, d.settings[k]])) });
+}
+function restoreBlocks(json) {
+  const d = store.data, o = JSON.parse(json);
+  d.draft.scene = o.scene; d.draft.seedLock = o.lock; d.draft.chars = o.chars; d.taste.style = o.style; d.taste.negative = o.neg;
+  Object.assign(d.settings, o.set);
+  store.save();
 }
 
 // kind, 블록 글을 칸에 넣는다. 돌려주는 것은 사용자에게 알릴 한 줄 (null이면 아무것도 안 함)
@@ -1438,9 +1452,10 @@ function wireAsk() {
   const blockOf = (id) => { const [i, j] = id.split(":").map(Number); return parseBlocks(d.chat[i]?.text || "")[j]?.v; };
   document.querySelectorAll("[data-blk]").forEach((el) => el.addEventListener("click", () => {
     const v = blockOf(el.dataset.blk); if (!v) return;
+    const before = snapBlocks();
     const msg = applyBlock(el.dataset.kind, v);
     if (msg == null) return;
-    toast(msg);
+    toast(msg, snapBlocks() !== before ? () => restoreBlocks(before) : null);
     store.persist();
     if (el.dataset.kind === "scene" && route()[0] === "ai") location.hash = "#/gen"; else render();
   }));
