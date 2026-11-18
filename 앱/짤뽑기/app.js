@@ -1,7 +1,7 @@
 // 짤뽑기 — 취향 프롬프트를 늘 붙여 NovelAI로 한 장씩 뽑고, 고른 것과 버린 것에서 취향을 쌓는다.
 // 화면 넷: 뽑기 / 비서 / 보관함 / 취향. 글자 데이터는 localStorage, 그림(보관한 것, 참고 그림)은 IndexedDB.
 
-import { PERSONA, MODEL_CHOICES } from "./assistant.js";
+import { PERSONA_PARTS, partState, buildPersona, MODEL_CHOICES } from "./assistant.js";
 import { PRESETS } from "./presets.js";
 
 const KEY = "짤뽑기/v1";
@@ -42,6 +42,8 @@ const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, s
 // settings 새 칸: sampler / noise(스케줄) / cfgRescale / variety / customW·customH(size가 "직접"일 때) / refMode("vibe"|"precise")
 // draft 새 칸: chars [{id, text, neg, pos}] 인물별 프롬프트(pos: null=AI가 정함, 0~24=5x5 칸 번호), i2i {on, strength, noise} (원본 그림은 IndexedDB "src")
 // presets 항목: { id, name, text, to: "scene"|"style"|"neg" } 사용자가 저장한 프롬프트
+// persona: 비서 지시문을 사용자가 고친 것. sections { <조각 id>: { text?, on? } }는 기본 조각을 덮어쓴 것만 담고, extra [{id, name, text, on}]는 사용자가 더한 조각,
+//   auto { state, cand }는 앱이 지시문 뒤에 자동으로 붙이는 ‘앱 상태’와 ‘사전 후보’를 켜는지. 옛 데이터에는 없다 (normPersona가 메운다).
 // log 새 칸: sampler / noise / cr / vb / chars / i2i / mode. 옛 항목에는 없다 (없으면 처음 값으로 읽는다).
 const SHAPE = () => ({
   settings: {
@@ -54,16 +56,40 @@ const SHAPE = () => ({
   log: [],
   chat: [],
   presets: [],
+  persona: { sections: {}, extra: [], auto: { state: true, cand: true } },
 });
 
+let saveFail = false; // 마지막 저장이 실패했는지 (화면 맨 위 경고)
 const store = {
   data: load(),
   persist() {
-    try { localStorage.setItem(KEY, JSON.stringify(this.data)); return true; }
-    catch (e) { console.warn("저장 실패", e); return false; }
+    try { localStorage.setItem(KEY, JSON.stringify(this.data)); if (saveFail) { saveFail = false; render(); } return true; }
+    catch (e) {
+      console.warn("저장 실패", e);
+      // 조용히 넘기면 사용자는 저장된 줄 안다. 처음 실패할 때 화면 맨 위에 띄운다 (타이핑 중이라 매번 다시 그리지는 않는다).
+      if (!saveFail) { saveFail = true; toast("저장 실패 — 이 기기 저장 공간이 찼음"); render(); }
+      return false;
+    }
   },
   save() { this.persist(); render(); },
 };
+
+// 옛 데이터·깨진 값이 와도 항상 같은 꼴로 돌려준다. 항목 안쪽 칸은 펼치기가 메워 주지 않아서 여기서 하나씩 본다.
+function normPersona(raw) {
+  const out = { sections: {}, extra: [], auto: { state: true, cand: true } };
+  if (!raw || typeof raw !== "object") return out;
+  for (const p of PERSONA_PARTS) {
+    const o = raw.sections?.[p.id];
+    if (!o || typeof o !== "object") continue;
+    const e = {};
+    if (typeof o.text === "string" && o.text !== p.text) e.text = o.text;
+    if (o.on === false) e.on = false;
+    if (Object.keys(e).length) out.sections[p.id] = e;
+  }
+  if (Array.isArray(raw.extra)) out.extra = raw.extra.filter((e) => e && e.id && typeof e.text === "string").map((e) => ({ id: String(e.id), name: String(e.name || "").slice(0, 30), text: e.text, on: e.on !== false })).slice(0, 20);
+  out.auto = { state: raw.auto?.state !== false, cand: raw.auto?.cand !== false };
+  return out;
+}
 
 function load() {
   const base = SHAPE();
@@ -87,6 +113,7 @@ function load() {
       presets: Array.isArray(raw.presets) ? raw.presets.filter((p) => p && p.id && typeof p.text === "string") : [],
       log: Array.isArray(raw.log) ? raw.log.filter((r) => r && r.id) : [],
       chat: Array.isArray(raw.chat) ? raw.chat.filter((m) => m && (m.role === "user" || m.role === "model") && typeof m.text === "string") : [],
+      persona: normPersona(raw.persona),
     };
   } catch { return base; }
 }
@@ -589,6 +616,12 @@ function stateText() {
   return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 이번 그림 칸: ${tidy(draft.scene) || "(비어 있음)"}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 취향 프롬프트: ${tidy(taste.style) || "(비어 있음)"}\n- 빼는 것: ${tidy(taste.negative) || "(비어 있음)"}\n- 품질 태그 자동: ${s.quality ? "켜짐" : "꺼짐"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}`;
 }
 
+// 제미니에 보내는 지시문 전체: 켠 조각들(+내 조각) + (켰다면) 앱 상태. 사전 후보는 질문마다 달라서 질문 쪽에 붙는다.
+function fullPersona() {
+  const d = store.data;
+  return buildPersona(d.persona) + (d.persona.auto.state ? stateText() : "");
+}
+
 async function geminiFail(res) {
   let said = "";
   try { said = (JSON.parse(await res.text()).error?.message ?? "").slice(0, 200); } catch { /* 본문 없음 */ }
@@ -619,7 +652,7 @@ async function ask(text, opts = {}) {
     await loadTags();
     let hist = d.chat.slice(-20);
     while (hist.length && hist[0].role !== "user") hist.shift(); // 제미니는 사용자 말로 시작해야 한다
-    const cand = candidates(text);
+    const cand = d.persona.auto.cand ? candidates(text) : [];
     const img = withImage ? await shrinkJpeg(now.blob) : null;
     const contents = hist.map((m, i) => {
       const last = i === hist.length - 1;
@@ -630,7 +663,7 @@ async function ask(text, opts = {}) {
     const res = await fetch(`${GEMINI}${encodeURIComponent(model)}:generateContent`, {
       method: "POST", signal: asking.signal,
       headers: { "Content-Type": "application/json", "x-goog-api-key": s.aiKey.trim() },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: PERSONA + stateText() }] }, contents, generationConfig: { temperature: 0.8 } }),
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: fullPersona() }] }, contents, generationConfig: { temperature: 0.8 } }),
     });
     if (!res.ok) throw new Error(await geminiFail(res));
     const j = await res.json();
@@ -774,7 +807,8 @@ function aiPanel() {
     ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
     <textarea id="ask" rows="3" placeholder="예: 팔짱 끼고 내려다보게, 표정은 더 차갑게" autocomplete="off">${esc(askDraft)}</textarea>
     ${now ? `<label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> 방금 뽑은 그림도 같이 보여 주기 <span class="hint">체크하면 이 그림이 구글로 감</span></label>` : ""}
-    ${asking ? `<button type="button" id="stopAsk" class="ghost">눌러서 취소</button>` : `<button type="button" id="send">AI에게 부탁</button>`}`;
+    ${asking ? `<button type="button" id="stopAsk" class="ghost">눌러서 취소</button>` : `<button type="button" id="send">AI에게 부탁</button>`}
+    <p class="hint"><a href="#/ai">‘비서’ 탭</a> 맨 아래에서 비서 지시문을 고칠 수 있음.</p>`;
   return sec("ai", "AI 도우미", "자세·그림체·수정·설정", body);
 }
 
@@ -912,6 +946,37 @@ const presetByKey = (key) => {
   return PRESETS[kind]?.[+i];
 };
 
+// ── 비서 지시문 고치기 ───────────────────────────────────────
+// 기본 조각(assistant.js)은 바꾸지 않고, 고친 것만 store.data.persona에 덮어쓴다. 되돌리면 기본 글이 다시 나온다.
+function personaEditor() {
+  const pc = store.data.persona;
+  const part = (p) => {
+    const st = partState(pc, p);
+    return sec(`pp:${p.id}`, esc(p.name), [st.on ? "" : "꺼짐", st.edited ? "고침" : ""].filter(Boolean).join(" · "), `
+      <label class="line"><input type="checkbox" data-pon="${p.id}" ${st.on ? "checked" : ""}> 이 조각 쓰기</label>
+      <textarea data-ptext="${p.id}" rows="9" spellcheck="false" autocomplete="off">${esc(st.text)}</textarea>
+      <button type="button" class="ghost sm" data-prev="${p.id}" ${st.edited ? "" : "disabled"}>이 조각 기본값으로</button>`);
+  };
+  const extra = (e) => sec(`pe:${e.id}`, esc(e.name || "내 조각"), e.on ? "" : "꺼짐", `
+      <label class="line"><input type="checkbox" data-eon="${e.id}" ${e.on ? "checked" : ""}> 이 조각 쓰기</label>
+      <label>이름<input type="text" data-ename="${e.id}" maxlength="30" autocomplete="off" value="${esc(e.name)}"></label>
+      <textarea data-etext="${e.id}" rows="6" spellcheck="false" autocomplete="off" placeholder="비서가 늘 지킬 말을 적기">${esc(e.text)}</textarea>
+      <button type="button" class="ghost sm" data-edel="${e.id}">이 조각 지우기</button>`);
+  const full = fullPersona();
+  const body = `
+    <p class="hint">여기 글이 그대로 제미니의 지시문이 됨. 조각마다 끄거나 고칠 수 있고, 고친 조각은 ‘기본값으로’ 되돌림. 코드 블록 형식(scene·style 등)을 지운 조각을 끄면 답의 ‘넣기’ 버튼이 안 나올 수 있음.</p>
+    ${PERSONA_PARTS.map(part).join("")}
+    <h2>내 조각</h2>
+    ${pc.extra.length ? pc.extra.map(extra).join("") : `<p class="hint">더한 것이 아직 없음. 말투·금지어·늘 넣을 태그 같은 것을 조각으로 따로 두면 기본 조각을 안 건드려도 됨.</p>`}
+    <button type="button" class="ghost" id="addPiece" ${pc.extra.length >= 20 ? "disabled" : ""}>＋ 내 조각 더하기</button>
+    <h2>앱이 자동으로 붙이는 것</h2>
+    <label class="line"><input type="checkbox" id="autoState" ${pc.auto.state ? "checked" : ""}> 앱 상태 <span class="hint">지금 모델·크기·칸 내용</span></label>
+    <label class="line"><input type="checkbox" id="autoCand" ${pc.auto.cand ? "checked" : ""}> 사전 후보 <span class="hint">한국어 낱말 → 단부루 태그</span></label>
+    ${sec("pprev", "보내는 지시문 미리 보기", "", `<p class="hint" id="pcount">${full.length}자</p><pre class="pprev" id="pprevtxt">${esc(full)}</pre><p class="hint">사전 후보는 질문마다 달라서 여기엔 안 보임.</p>`)}
+    <button type="button" class="ghost" id="pReset">지시문 전부 기본값으로</button>`;
+  return sec("persona", "비서 지시문 고치기", "조각을 끄고 켜고 고침", body);
+}
+
 const SCREENS = {
   gen() {
     const { settings: s, taste, draft } = store.data;
@@ -977,6 +1042,7 @@ const SCREENS = {
         ? `<button type="button" id="stopAsk" class="ghost big">눌러서 취소</button>`
         : `<button type="button" id="send" class="big">보내기</button>`}
       ${chat.length ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
+      ${personaEditor()}
       <p class="hint">대답은 제미니(${esc(s.aiModel === "custom" ? s.aiCustom : s.aiModel)})가 하고, 태그는 같이 실린 단부루 사전에서 맞춰 봄. 제미니 말은 틀릴 수 있어서 넣은 뒤 직접 한 번 읽기.</p>`;
   },
 
@@ -1069,7 +1135,7 @@ function render() {
   const seq = ++renderSeq;
   thumbUrls.forEach((u) => URL.revokeObjectURL(u));
   thumbUrls = [];
-  document.getElementById("screen").innerHTML = SCREENS[name](arg);
+  document.getElementById("screen").innerHTML = (saveFail ? `<p class="error" role="alert">저장이 안 되고 있음. 이 기기 저장 공간이 참. 지금 고친 것은 새로 고치면 사라짐. ‘취향’ 탭에서 기록을 내보낸 뒤 오래된 대화나 기록을 지우기.</p>` : "") + SCREENS[name](arg);
   document.getElementById("title").textContent = TITLES[name];
   const kept = store.data.log.filter((r) => r.verdict === "keep").length;
   document.getElementById("count").textContent = name === "keep" && kept ? `${kept}장` : "";
@@ -1138,6 +1204,55 @@ function wireAsk() {
   }));
   if (scrollAi && route()[0] === "ai") { scrollAi = false; scrollTo({ top: document.body.scrollHeight }); }
   else scrollAi = false;
+}
+
+function wirePersona() {
+  const d = store.data, pc = d.persona;
+  document.querySelectorAll("details[data-sec]").forEach((el) => el.addEventListener("toggle", () => { ui.open[el.dataset.sec] = el.open; }));
+  const refresh = () => {
+    const t = fullPersona();
+    const a = $("pprevtxt"), c = $("pcount");
+    if (a) a.textContent = t;
+    if (c) c.textContent = `${t.length}자`;
+  };
+  // 고친 조각만 남긴다: 기본과 같아지면 덮어쓴 것을 지워 기본 글이 따라오게 한다.
+  const setSec = (id, patch) => {
+    const o = { ...(pc.sections[id] || {}), ...patch };
+    if (o.text === undefined) delete o.text;
+    if (o.on !== false) delete o.on;
+    if (Object.keys(o).length) pc.sections[id] = o; else delete pc.sections[id];
+  };
+  document.querySelectorAll("[data-ptext]").forEach((el) => el.addEventListener("input", () => {
+    const id = el.dataset.ptext, base = PERSONA_PARTS.find((p) => p.id === id);
+    if (!base) return;
+    setSec(id, { text: el.value === base.text ? undefined : el.value });
+    const b = document.querySelector(`[data-prev="${id}"]`);
+    if (b) b.disabled = el.value === base.text;
+    store.persist(); refresh();
+  }));
+  document.querySelectorAll("[data-prev]").forEach((el) => el.addEventListener("click", () => { setSec(el.dataset.prev, { text: undefined }); store.save(); }));
+  document.querySelectorAll("[data-pon]").forEach((el) => el.addEventListener("change", () => { setSec(el.dataset.pon, { on: el.checked }); store.save(); }));
+  const extraOf = (el, k) => pc.extra.find((e) => e.id === el.dataset[k]);
+  on("addPiece", "click", () => {
+    if (pc.extra.length >= 20) return;
+    const e = { id: crypto.randomUUID(), name: "새 조각", text: "", on: true };
+    pc.extra.push(e); ui.open.persona = true; ui.open[`pe:${e.id}`] = true;
+    store.save();
+  });
+  document.querySelectorAll("[data-ename]").forEach((el) => el.addEventListener("input", () => { const e = extraOf(el, "ename"); if (e) { e.name = el.value; store.persist(); refresh(); } }));
+  document.querySelectorAll("[data-etext]").forEach((el) => el.addEventListener("input", () => { const e = extraOf(el, "etext"); if (e) { e.text = el.value; store.persist(); refresh(); } }));
+  document.querySelectorAll("[data-eon]").forEach((el) => el.addEventListener("change", () => { const e = extraOf(el, "eon"); if (e) { e.on = el.checked; store.save(); } }));
+  document.querySelectorAll("[data-edel]").forEach((el) => el.addEventListener("click", () => {
+    const e = extraOf(el, "edel");
+    if (!e || !confirm(`‘${e.name || "내 조각"}’ 조각을 지움.`)) return;
+    pc.extra = pc.extra.filter((x) => x !== e); store.save();
+  }));
+  on("autoState", "change", (e) => { pc.auto.state = e.target.checked; store.persist(); refresh(); });
+  on("autoCand", "change", (e) => { pc.auto.cand = e.target.checked; store.persist(); });
+  on("pReset", "click", () => {
+    if (!confirm("고친 조각, 내 조각, 켜고 끈 것을 전부 지우고 기본 지시문으로 돌림.")) return;
+    d.persona = normPersona(null); store.save();
+  });
 }
 
 function wire(name, arg, seq) {
@@ -1248,7 +1363,7 @@ function wire(name, arg, seq) {
     document.querySelectorAll("[data-pdel]").forEach((b) => b.addEventListener("click", () => { d.presets = d.presets.filter((p) => p.id !== b.dataset.pdel); store.save(); }));
     document.querySelectorAll("[data-psave]").forEach((b) => b.addEventListener("click", () => savePreset(b.dataset.psave)));
   }
-  if (name === "ai") wireAsk();
+  if (name === "ai") { wireAsk(); wirePersona(); }
   if (name === "keep" && !arg) {
     document.querySelectorAll("[data-thumb]").forEach(async (a) => {
       const row = await imgGet(a.dataset.thumb).catch(() => null);

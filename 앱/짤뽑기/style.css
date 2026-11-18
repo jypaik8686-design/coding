@@ -251,3 +251,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
   padding: 12px 14px; border-radius: var(--radius); font-size: 14px; overflow-wrap: anywhere;
   color: var(--bg); background: var(--ink); box-shadow: 0 4px 16px rgba(0,0,0,.25);
 }
+
+/* 비서 지시문 미리 보기 */
+.pprev { margin: 8px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+.secbody .sec { background: var(--bg); }
+.secbody h2 { margin: 18px 0 0; font-size: 15px; }

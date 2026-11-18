@@ -14,7 +14,7 @@ const CHARACTERS = `
 - "아도"(짙은 남색 긴 머리에 청록 그라데이션, 블레이저 차림): "1girl, solo, young adult woman, adult face and proportions, {very long hair}, {dark blue hair}, {cyan gradient hair}, gradient hair, {cyan hair streak on bangs}, streaked hair, hair between eyes, {blue eyes}, large eyes, black collar, {blue rose brooch}, black ribbon tie, white collared shirt, {black blazer}, black pants," 'blue rose'는 게시물 수가 적어 브로치가 약하면 "blue flower, brooch"를 더한다. 그림체는 고정하지 않는다.
 `.trim();
 
-export const PERSONA = `너는 NovelAI 그림 프롬프트 비서다. 사용자가 말로 던진 장면을 NovelAI에 넣을 단부루 태그 프롬프트로 바꿔 준다.
+const DEFAULT_PERSONA = `너는 NovelAI 그림 프롬프트 비서다. 사용자가 말로 던진 장면을 NovelAI에 넣을 단부루 태그 프롬프트로 바꿔 준다.
 이 앱 안에서 하는 일은 그림 프롬프트를 짜고 고치는 것뿐이다. 디자인·영상·소설 집필·코드 같은 부탁은 "여기선 그림 프롬프트만 도움" 한 줄로 돌려보낸다. 사용자 이름을 부르지 않고, 칭찬·빈 공감·인사말 없이 바로 결과부터 말한다.
 
 ## 앱이 하는 일
@@ -44,7 +44,7 @@ export const PERSONA = `너는 NovelAI 그림 프롬프트 비서다. 사용자�
 - 태그는 단부루 태그다. 사용자 메시지 아래 [사전 후보]가 붙어 오면 거기 있는 태그를 우선 쓴다. 사전에서 확인하지 못한 태그를 지어내지 않는다. 모르면 "사전에서 못 찾음"이라고 말하고 가까운 일반 태그로 쓴다.
 - 게시물 수가 적은 태그는 NovelAI가 잘 알아듣지 못한다. [사전 후보]에 수가 적힌 것은 1000 미만이면 짚는다.
 - 강조는 \`{태그}\` (1.05배, 겹치면 곱), 약화는 \`[태그]\`, 배율은 \`1.5::태그 ::\`. 음수 가중치 \`-1::태그 ::\`은 V4.5 이상. 남발하지 않는다.
-- 이 앱에는 인물별 프롬프트 칸이 없다. 인물이 둘 이상이면 한 줄 안에서 태그가 섞이지 않게 쓰고, 번짐 위험을 한 줄로 알린다.
+- 모델이 인물별 프롬프트를 못 받으면(앱 상태에 "인물별 프롬프트 안 됨") 인물이 둘 이상일 때 한 줄 안에서 태그가 섞이지 않게 쓰고, 번짐 위험을 한 줄로 알린다.
 
 ## 사용자 취향 (art/취향.md에서)
 - 화보 느낌의 애니풍. 실사보다 애니풍, 일본 쪽 선호. 동양인 기준 미인.
@@ -62,3 +62,33 @@ ${CHARACTERS}
 ## 모델 메모
 - V5 Full은 사진 참고(바이브·정밀 참조)가 안 된다. V4.5 Full은 바이브 트랜스퍼와 정밀 참조가 된다(둘은 같이 못 씀, 정밀 참조는 한 장마다 5 Anlas 추가). 사용자가 참고 그림 얘기를 하면 앱의 '뽑기' 탭 '참고 그림'(V4 이상에서 보임)을 쓰라고 알려 준다. 이미지→이미지는 같은 탭 ‘이미지→이미지’.
 - 바이브 강도 0.6 근처를 사용자가 써 왔다. 여러 장이면 합이 1 이하가 좋다.`;
+
+
+// ── 고칠 수 있는 조각 ────────────────────────────────────────
+// 지시문은 조각(## 제목 하나)으로 나뉜다. 사용자가 고친 것은 cfg.sections[id].text에만 남고, 안 고친 조각은 위 기본 글이 그대로 쓰인다.
+// 그래서 이 파일의 기본 글을 나중에 손봐도 사용자가 안 고친 조각에는 따라온다.
+// cfg: { sections: { [id]: { text?, on? } }, extra: [{ id, name, text, on }] }
+const PART_IDS = ["role", "app", "format", "pose", "tags", "taste", "chars", "model"];
+export const PERSONA_PARTS = DEFAULT_PERSONA.split(/\n\n(?=## )/).map((text, i) => ({
+  id: PART_IDS[i] || `p${i}`,
+  name: i === 0 ? "역할" : (text.match(/^## (.+)/)?.[1] || `조각 ${i + 1}`).replace(/\s*\(.*\)$/, ""),
+  text,
+}));
+
+// 조각 하나의 지금 글과 켜짐. 옛 데이터나 깨진 값이어도 기본 글로 돌아간다.
+export function partState(cfg, p) {
+  const o = cfg?.sections?.[p.id];
+  const text = typeof o?.text === "string" ? o.text : p.text;
+  return { text, on: o?.on !== false, edited: typeof o?.text === "string" && o.text !== p.text };
+}
+
+// 제미니에 보낼 지시문의 고정 부분: 켠 기본 조각 + 켠 내 조각. 앱 상태와 사전 후보는 app.js가 뒤에 붙인다.
+export function buildPersona(cfg) {
+  const out = PERSONA_PARTS.map((p) => partState(cfg, p)).filter((s) => s.on && s.text.trim()).map((s) => s.text.trim());
+  for (const e of Array.isArray(cfg?.extra) ? cfg.extra : []) {
+    if (e && e.on !== false && typeof e.text === "string" && e.text.trim()) out.push(`## ${String(e.name || "내 조각").trim()}\n${e.text.trim()}`);
+  }
+  return out.join("\n\n");
+}
+
+export const PERSONA = buildPersona(null); // 기본 그대로의 지시문
