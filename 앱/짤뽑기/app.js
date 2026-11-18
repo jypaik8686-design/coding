@@ -1,5 +1,7 @@
 // 짤뽑기 — 취향 프롬프트를 늘 붙여 NovelAI로 한 장씩 뽑고, 고른 것과 버린 것에서 취향을 쌓는다.
-// 화면 셋: 뽑기 / 보관함 / 취향. 글자 데이터는 localStorage, 그림은 IndexedDB.
+// 화면 넷: 뽑기 / 비서 / 보관함 / 취향. 글자 데이터는 localStorage, 그림(보관한 것, 참고 그림)은 IndexedDB.
+
+import { PERSONA, MODEL_CHOICES } from "./assistant.js";
 
 const KEY = "짤뽑기/v1";
 const API = "https://image.novelai.net/ai/generate-image";
@@ -21,13 +23,19 @@ const DEFAULT_NEG = "lowres, artistic error, film grain, scan artifacts, worst q
 const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, signature, watermark, username, blurry";
 
 // ── 데이터 모양 ──────────────────────────────────────────────
-// log 항목 하나: { id, scene, style, negative, seed, model, w, h, steps, scale, at, verdict }
+// log 항목 하나: { id, scene, style, negative, seed, model, w, h, steps, scale, at, verdict, refs? }
 //   verdict: null(안 고름) | "keep"(보관) | "drop"(버림)
+//   refs: 이 그림에 쓴 참고 그림 [{s: 강도, i: 정보량}]. 옛 항목에는 없다 (없으면 0장).
+// chat 항목 하나: { role: "user" | "model", text, at }. 비서 대화. 40개를 넘으면 앞에서부터 버린다.
 const SHAPE = () => ({
-  settings: { token: "", model: "nai-diffusion-5-full", customModel: "", size: "세로", steps: 28, scale: 5, quality: true },
+  settings: {
+    token: "", model: "nai-diffusion-5-full", customModel: "", size: "세로", steps: 28, scale: 5, quality: true,
+    aiKey: "", aiModel: MODEL_CHOICES[0], aiCustom: "",
+  },
   taste: { style: DEFAULT_STYLE, negative: DEFAULT_NEG, seeded: true },
   draft: { scene: DEFAULT_SCENE, seedLock: false, seed: null, seeded: true },
   log: [],
+  chat: [],
 });
 
 const store = {
@@ -56,6 +64,7 @@ function load() {
       taste,
       draft,
       log: Array.isArray(raw.log) ? raw.log.filter((r) => r && r.id) : [],
+      chat: Array.isArray(raw.chat) ? raw.chat.filter((m) => m && (m.role === "user" || m.role === "model") && typeof m.text === "string") : [],
     };
   } catch { return base; }
 }
@@ -64,18 +73,21 @@ function load() {
 let dbp = null;
 function db() {
   dbp ??= new Promise((ok, no) => {
-    const q = indexedDB.open("짤뽑기", 1);
-    q.onupgradeneeded = () => q.result.createObjectStore("img", { keyPath: "id" });
+    // 2: 참고 그림 창고 "ref"를 더했다. 옛 "img"(보관한 그림)는 그대로 둔다.
+    const q = indexedDB.open("짤뽑기", 2);
+    q.onupgradeneeded = () => {
+      for (const n of ["img", "ref"]) if (!q.result.objectStoreNames.contains(n)) q.result.createObjectStore(n, { keyPath: "id" });
+    };
     q.onsuccess = () => ok(q.result);
     q.onerror = () => no(q.error);
   });
   return dbp;
 }
-async function idb(mode, fn) {
+async function idb(mode, fn, name = "img") {
   const d = await db();
   return new Promise((ok, no) => {
-    const tx = d.transaction("img", mode);
-    const q = fn(tx.objectStore("img"));
+    const tx = d.transaction(name, mode);
+    const q = fn(tx.objectStore(name));
     tx.oncomplete = () => ok(q?.result);
     tx.onerror = tx.onabort = () => no(tx.error);
   });
@@ -84,6 +96,10 @@ const imgPut = (row) => idb("readwrite", (s) => s.put(row));
 const imgGet = (id) => idb("readonly", (s) => s.get(id));
 const imgDel = (id) => idb("readwrite", (s) => s.delete(id));
 const imgClear = () => idb("readwrite", (s) => s.clear());
+const refPut = (row) => idb("readwrite", (s) => s.put(row), "ref");
+const refDel = (id) => idb("readwrite", (s) => s.delete(id), "ref");
+const refAll = () => idb("readonly", (s) => s.getAll(), "ref");
+const refClear = () => idb("readwrite", (s) => s.clear(), "ref");
 
 async function thumbOf(blob) {
   const bmp = await createImageBitmap(blob);
@@ -105,8 +121,87 @@ function compose(scene, style, s) {
   return s.quality ? body + q : body;
 }
 
+// ── 참고 그림 (V4.5 바이브 트랜스퍼) ─────────────────────────
+// 그림은 IndexedDB "ref"에 둔다. 한 줄: { id, name, at, on, strength, info, full(PNG, 긴 변 1024 이하), thumb, enc }
+// enc: { "<모델>|<정보량>": 인코딩 결과(base64) }. 인코딩은 NovelAI 서버가 해 주고 2 Anlas가 든다(문서). 같은 그림·모델·정보량이면 다시 안 한다.
+const VIBE_API = "https://image.novelai.net/ai/encode-vibe";
+const MAX_REFS = 4; // 이 앱이 정한 한도. NovelAI의 한도는 확인하지 못했다.
+const supportsVibe = (s) => /^nai-diffusion-4/.test(modelId(s)); // V5는 400으로 거절됨 (art 확인 2026-11-17)
+let refs = [];       // 메모리에 올린 참고 그림들 (+ url)
+let phase = "";      // 뽑는 중 단계 글
+
+const rowOf = ({ url, ...row }) => row;
+async function loadRefs() {
+  try {
+    refs.forEach((r) => URL.revokeObjectURL(r.url));
+    refs = (await refAll()).sort((a, b) => a.at - b.at).map((r) => ({ ...r, url: URL.createObjectURL(r.thumb || r.full) }));
+  } catch (e) { console.warn("참고 그림 읽기 실패", e); refs = []; }
+}
+
+const bufB64 = (buf) => {
+  const u = new Uint8Array(buf);
+  let s = "";
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+
+async function prepRef(file) {
+  const bmp = await createImageBitmap(file);
+  const k = Math.min(1, 1024 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close?.();
+  const full = await new Promise((ok) => c.toBlob(ok, "image/png"));
+  if (!full) throw new Error("PNG로 바꾸지 못함");
+  return { full, thumb: await thumbOf(full) };
+}
+
+async function addRefs(files) {
+  errMsg = "";
+  for (const f of files) {
+    if (refs.length >= MAX_REFS) { errMsg = `참고 그림은 ${MAX_REFS}장까지.`; break; }
+    try {
+      const { full, thumb } = await prepRef(f);
+      const row = { id: crypto.randomUUID(), name: (f.name || "그림").slice(0, 40), at: Date.now(), on: true, strength: 0.6, info: 1, full, thumb, enc: {} };
+      await refPut(row);
+      refs.push({ ...row, url: URL.createObjectURL(thumb) });
+    } catch (e) {
+      errMsg = `‘${f.name || "그림"}’을 읽지 못함 (${e?.message || e}). 다른 파일로 시도.`;
+    }
+  }
+  render();
+}
+
+async function failText(res) {
+  let said = "";
+  try { const t = await res.text(); said = (JSON.parse(t).message ?? t).toString().slice(0, 200); } catch { /* 본문 없음 */ }
+  const hint = res.status === 401 ? "토큰이 틀렸거나 만료됨. ‘취향’ 탭에서 다시 넣기."
+    : res.status === 429 ? "요청이 너무 잦거나 다른 생성이 돌고 있음. 잠시 뒤 직접 다시 누르기."
+    : "";
+  return `${hint} (서버 ${res.status}${said ? `: ${said}` : ""})`.trim();
+}
+
+// 이 그림·모델·정보량의 인코딩이 없으면 서버에서 받아 저장해 둔다. 응답은 이진 파일이다.
+async function encodeRef(r, model, token, signal) {
+  const k = `${model}|${r.info}`;
+  if (r.enc?.[k]) return r.enc[k];
+  phase = `참고 그림 인코딩 중 (${refs.filter((x) => x.on).indexOf(r) + 1}/${refs.filter((x) => x.on).length})…`;
+  render();
+  const res = await fetch(VIBE_API, {
+    method: "POST", signal,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ image: bufB64(await r.full.arrayBuffer()), information_extracted: r.info, model }),
+  });
+  if (!res.ok) throw new Error(`참고 그림 인코딩 실패. ${await failText(res)}`);
+  r.enc = { ...(r.enc || {}), [k]: bufB64(await res.arrayBuffer()) };
+  await refPut(rowOf(r)).catch(() => {}); // 못 남겨도 이번 뽑기는 계속 (다음에 다시 인코딩)
+  return r.enc[k];
+}
+
 // 요청 몸통은 V5에서 200이 확인된 꼴 그대로 (명세.md '밖에 나가는 것' 참고). v4_prompt 둘을 빼면 500이 난다.
-function requestBody(prompt, negative, rec) {
+// 참고 그림이 있으면 reference_*_multiple 세 줄에 인코딩 결과·정보량·강도를 같은 순서로 넣는다 (V4.5, 2026-11-18 200 확인).
+function requestBody(prompt, negative, rec, used = [], vibes = []) {
   const cap = (t) => ({ use_coords: false, use_order: false, caption: { base_caption: t, char_captions: [] } });
   return {
     input: prompt, model: rec.model, action: "generate",
@@ -116,7 +211,7 @@ function requestBody(prompt, negative, rec) {
       sm: false, sm_dyn: false, dynamic_thresholding: false, controlnet_strength: 1,
       legacy: false, add_original_image: false, cfg_rescale: 0, noise_schedule: "karras",
       legacy_v3_extend: false, uncond_scale: 1, negative_prompt: negative, prompt,
-      reference_image_multiple: [], reference_information_extracted_multiple: [], reference_strength_multiple: [],
+      reference_image_multiple: vibes, reference_information_extracted_multiple: used.map((r) => r.info), reference_strength_multiple: used.map((r) => r.strength),
       extra_noise_seed: rec.seed,
       v4_prompt: cap(prompt), v4_negative_prompt: cap(negative),
     },
@@ -163,23 +258,23 @@ async function generate() {
     seed, model: modelId(s), w, h, steps: clamp(s.steps, 1, 28, 28), scale: clamp(s.scale, 0, 10, 5), at: Date.now(), verdict: null,
   };
   const prompt = compose(rec.scene, rec.style, s);
+  const used = supportsVibe(s) ? refs.filter((r) => r.on) : []; // V5에서는 붙여 둔 그림이 있어도 안 보낸다
+  if (used.length) rec.refs = used.map((r) => ({ s: r.strength, i: r.info }));
 
   busy = new AbortController();
+  phase = "";
   render();
   try {
+    const vibes = [];
+    for (const r of used) vibes.push(await encodeRef(r, rec.model, s.token.trim(), busy.signal)); // 한 장씩, 자동 재시도 없음
+    phase = "";
+    render();
     const res = await fetch(API, {
       method: "POST", signal: busy.signal,
       headers: { Authorization: `Bearer ${s.token.trim()}`, "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody(prompt, rec.negative, rec)),
+      body: JSON.stringify(requestBody(prompt, rec.negative, rec, used, vibes)),
     });
-    if (!res.ok) {
-      let said = "";
-      try { const t = await res.text(); said = (JSON.parse(t).message ?? t).toString().slice(0, 200); } catch { /* 본문 없음 */ }
-      const hint = res.status === 401 ? "토큰이 틀렸거나 만료됨. ‘취향’ 탭에서 다시 넣기."
-        : res.status === 429 ? "요청이 너무 잦거나 다른 생성이 돌고 있음. 잠시 뒤 직접 다시 누르기."
-        : "";
-      throw new Error(`${hint} (서버 ${res.status}${said ? `: ${said}` : ""})`.trim());
-    }
+    if (!res.ok) throw new Error(await failText(res));
     const png = await pngFromResponse(await res.arrayBuffer());
     const blob = new Blob([png], { type: "image/png" });
     if (now) URL.revokeObjectURL(now.url);
@@ -194,6 +289,7 @@ async function generate() {
     else errMsg = e.message || String(e);
   } finally {
     busy = null;
+    phase = "";
     render();
   }
 }
@@ -272,9 +368,171 @@ function tagStats() {
   };
 }
 
+// ── 프롬프트 비서 (제미니) ───────────────────────────────────
+// 폰에서 구글 서버(generativelanguage.googleapis.com)로 직접 부른다. 키는 이 폰에만 있다.
+// 사전 요청에서 이 서버가 브라우저 호출을 허용하는 것은 확인했다 (2026-11-18, curl OPTIONS).
+const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models/";
+const CHAT_MAX = 40;
+const RARE = 1000; // 단부루 게시물 수가 이보다 적은 태그는 NovelAI가 잘 못 알아듣는다 (art/태그사전/README.md)
+let tags = null;        // tags.json: { ko: {한국어: [태그…]}, n: {태그: 게시물 수} }
+let tagsState = "";     // "" | "loading" | "ok" | "fail"
+let asking = null;      // AbortController
+let askErr = "";
+let askDraft = "";      // 쓰는 중인 질문. 화면이 다시 그려져도 남긴다
+let scrollAi = false;
+
+async function loadTags() {
+  if (tags || tagsState === "loading") return;
+  tagsState = "loading";
+  try {
+    const r = await fetch("tags.json");
+    if (!r.ok) throw new Error(String(r.status));
+    tags = await r.json();
+    tagsState = "ok";
+  } catch { tagsState = "fail"; }
+}
+
+// 사용자가 쓴 한국어 낱말에서 사전 후보를 뽑는다. 비서가 태그를 지어내지 않게 근거로 붙인다.
+function candidates(text) {
+  if (!tags) return [];
+  const out = [], seen = new Set();
+  const keys = Object.keys(tags.ko).filter((k) => k.length >= 2 && text.includes(k)).sort((a, b) => b.length - a.length);
+  for (const k of keys) {
+    for (const t of tags.ko[k].slice(0, 2)) {
+      if (seen.has(t)) continue;
+      seen.add(t);
+      out.push(`${k} → ${t} (게시물 ${tags.n[t] ?? "수 없음"})`);
+    }
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+function plainTags(t) {
+  return t.replace(/-?\d*\.?\d+::|::/g, ",").replace(/[{}\[\]()]/g, "").split(/[,\n]/)
+    .map((x) => x.trim().toLowerCase()).filter((x) => x && !x.includes(":") && !x.includes("@"));
+}
+// scene 블록의 태그를 사전과 맞춰 본다. 일반 태그만 사전에 있어서 캐릭터·작가 이름은 '사전에 없음'으로 나올 수 있다.
+function checkTags(text) {
+  if (!tags) return null;
+  const missing = [], rare = [];
+  for (const t of new Set(plainTags(text))) {
+    const n = tags.n[t];
+    if (n === undefined) missing.push(t);
+    else if (n < RARE) rare.push(`${t}(${n})`);
+  }
+  return { missing, rare };
+}
+
+function parseBlocks(text) {
+  const out = [], re = /```([a-z]*)\n?([\s\S]*?)```/gi;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push({ t: "text", v: text.slice(last, m.index) });
+    out.push({ t: "code", lang: m[1].toLowerCase(), v: m[2].trim() });
+    last = re.lastIndex;
+  }
+  if (last < text.length) out.push({ t: "text", v: text.slice(last) });
+  return out;
+}
+
+function stateText() {
+  const { settings: s, taste, draft } = store.data;
+  return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (${supportsVibe(s) ? "참고 그림 됨" : "참고 그림 안 됨"})\n- 이번 그림 칸: ${tidy(draft.scene) || "(비어 있음)"}\n- 취향 프롬프트: ${tidy(taste.style) || "(비어 있음)"}\n- 빼는 것: ${tidy(taste.negative) || "(비어 있음)"}\n- 품질 태그 자동: ${s.quality ? "켜짐" : "꺼짐"}\n- 붙여 둔 참고 그림: ${refs.filter((r) => r.on).length}장`;
+}
+
+async function geminiFail(res) {
+  let said = "";
+  try { said = (JSON.parse(await res.text()).error?.message ?? "").slice(0, 200); } catch { /* 본문 없음 */ }
+  const hint = res.status === 400 && /api key/i.test(said) ? "키가 틀림. ‘취향’ 탭에서 다시 넣기."
+    : res.status === 403 ? "키 권한이 없거나 막힘."
+    : res.status === 404 ? "모델 이름이 없음. ‘취향’ 탭에서 모델 고르기."
+    : res.status === 429 ? "한도 초과. 잠시 뒤 직접 다시 보내기."
+    : "";
+  return `${hint} (제미니 ${res.status}${said ? `: ${said}` : ""})`.trim();
+}
+
+async function ask(text) {
+  const d = store.data, s = d.settings;
+  askErr = "";
+  const model = (s.aiModel === "custom" ? s.aiCustom : s.aiModel).trim().replace(/^models\//, "");
+  if (!s.aiKey.trim()) { askErr = "제미니 키가 없음. ‘취향’ 탭 맨 아래에서 넣기."; return render(); }
+  if (!model) { askErr = "제미니 모델 이름이 비어 있음. ‘취향’ 탭에서 고르기."; return render(); }
+  askDraft = "";
+  d.chat.push({ role: "user", text, at: Date.now() });
+  while (d.chat.length > CHAT_MAX) d.chat.shift();
+  store.persist();
+  asking = new AbortController();
+  scrollAi = true;
+  render();
+  try {
+    await loadTags();
+    let hist = d.chat.slice(-20);
+    while (hist.length && hist[0].role !== "user") hist.shift(); // 제미니는 사용자 말로 시작해야 한다
+    const cand = candidates(text);
+    const contents = hist.map((m, i) => ({
+      role: m.role,
+      parts: [{ text: i === hist.length - 1 && cand.length ? `${m.text}\n\n[사전 후보]\n${cand.join("\n")}` : m.text }],
+    }));
+    const res = await fetch(`${GEMINI}${encodeURIComponent(model)}:generateContent`, {
+      method: "POST", signal: asking.signal,
+      headers: { "Content-Type": "application/json", "x-goog-api-key": s.aiKey.trim() },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: PERSONA + stateText() }] }, contents, generationConfig: { temperature: 0.8 } }),
+    });
+    if (!res.ok) throw new Error(await geminiFail(res));
+    const j = await res.json();
+    const c = j.candidates?.[0];
+    const out = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("").trim();
+    if (!out) throw new Error(`빈 답이 옴 (${c?.finishReason || j.promptFeedback?.blockReason || "이유 모름"}). 말을 바꿔 다시 보내기.`);
+    d.chat.push({ role: "model", text: out, at: Date.now() });
+    while (d.chat.length > CHAT_MAX) d.chat.shift();
+    store.persist();
+  } catch (e) {
+    // 답이 없는 질문은 대화에서 빼고 입력칸에 되돌려 놓는다 (사용자 말을 잃지 않게)
+    let i = d.chat.length - 1;
+    while (i >= 0 && !(d.chat[i].role === "user" && d.chat[i].text === text)) i--;
+    if (i >= 0) d.chat.splice(i, 1);
+    askDraft = text;
+    store.persist();
+    if (e.name === "AbortError") askErr = "취소함.";
+    else if (e instanceof TypeError) askErr = "구글 서버에 닿지 못함. 망이 끊겼는지 보기.";
+    else askErr = e.message || String(e);
+  } finally {
+    asking = null;
+    render();
+  }
+}
+
 // ── 화면 ────────────────────────────────────────────────────
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// 뽑기 화면의 참고 그림 칸. V5이면 안 되는 이유만 보이고, V4.5 계열이면 그림 목록과 붙이기 버튼이 보인다.
+function refBlock() {
+  const s = store.data.settings;
+  if (!supportsVibe(s)) {
+    return `<p class="hint">참고 그림은 V4.5 Full에서만 됨. V5는 서버가 거절함(2026-11-17 확인). ${refs.length ? `붙여 둔 ${refs.length}장은 V5에서는 안 보냄. ` : ""}‘취향’ 탭에서 모델을 V4.5 Full로 바꾸면 여기에 나옴.</p>`;
+  }
+  const key = (r) => `${modelId(s)}|${r.info}`;
+  const sum = refs.filter((r) => r.on).reduce((a, r) => a + r.strength, 0);
+  return `
+    <h2>참고 그림 <span class="hint">V4.5 바이브 · 화풍·색·분위기를 따라 함</span></h2>
+    ${refs.length ? `<ul class="refs">${refs.map((r) => `
+      <li class="ref">
+        <img src="${r.url}" alt="${esc(r.name)}">
+        <div class="refbody">
+          <label class="line"><input type="checkbox" data-ron="${r.id}" ${r.on ? "checked" : ""}> 쓰기 <span class="hint">${esc(r.name)}</span></label>
+          <label>강도 <output id="rs-${r.id}">${r.strength}</output><input type="range" min="0" max="1" step="0.05" value="${r.strength}" data-rstr="${r.id}"></label>
+          <label>정보량 <span class="hint">0~1, 바꾸면 다시 인코딩</span><input type="number" inputmode="decimal" min="0" max="1" step="0.1" value="${r.info}" data-rinfo="${r.id}"></label>
+          <p class="hint">${r.enc?.[key(r)] ? "인코딩 있음 (다시 안 함)" : "다음 뽑기에서 인코딩 — 문서 기준 2 Anlas"}</p>
+          <button type="button" class="ghost" data-rdel="${r.id}">빼기</button>
+        </div>
+      </li>`).join("")}</ul>` : ""}
+    <input id="refFile" type="file" accept="image/*" multiple hidden>
+    <button type="button" class="ghost" id="addRef" ${refs.length >= MAX_REFS ? "disabled" : ""}>＋ 그림 붙이기 (${refs.length}/${MAX_REFS})</button>
+    ${sum > 1 ? `<p class="hint warn">켜 둔 강도 합이 ${sum.toFixed(2)}임. 1을 넘으면 프롬프트를 덜 듣는 경향이 있음(문서).</p>` : ""}
+    <p class="hint">긴 변 1024px로 줄여 쓰고 이 폰에만 저장됨. 뽑을 때 NovelAI 서버로 같이 감.</p>`;
+}
 
 const SCREENS = {
   gen() {
@@ -285,20 +543,21 @@ const SCREENS = {
       <label for="scene">이번 그림 <span class="hint">영어 태그, 쉼표로</span></label>
       <textarea id="scene" rows="4" autocapitalize="off" autocomplete="off" spellcheck="false"
         placeholder="1girl, silver hair, looking at viewer, upper body">${esc(draft.scene)}</textarea>
-      <p class="hint">${styleLen ? `여기에 취향 프롬프트(${styleLen}자)` : `취향 프롬프트는 아직 비어 있고,`}${s.quality ? " 품질 태그가" : ""} 뒤에 붙음.</p>
+      <p class="hint">${styleLen ? `여기에 취향 프롬프트(${styleLen}자)` : `취향 프롬프트는 아직 비어 있고,`}${s.quality ? " 품질 태그가" : ""} 뒤에 붙음. 태그가 막막하면 <a href="#/ai">비서</a>에게.</p>
+      ${refBlock()}
       <div class="seg" role="group" aria-label="크기">
         ${Object.keys(SIZES).map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${SIZES[k].join("×")}</small></button>`).join("")}
       </div>
       <label class="line"><input type="checkbox" id="seedLock" ${draft.seedLock ? "checked" : ""}>
         같은 시드로 다시 <span class="hint">${Number.isInteger(draft.seed) ? `시드 ${draft.seed}` : "아직 뽑은 적 없음"}</span></label>
       ${busy
-        ? `<button type="button" id="stop" class="ghost big">뽑는 중… 눌러서 취소</button>`
+        ? `<button type="button" id="stop" class="ghost big">${esc(phase || "뽑는 중…")} 눌러서 취소</button>`
         : `<button type="button" id="go" class="big">뽑기</button>`}
       ${errMsg ? `<p class="error" role="alert">${esc(errMsg)}</p>` : ""}
       ${now ? `
         <figure class="result">
           <img src="${now.url}" alt="방금 뽑은 그림" width="${now.rec.w}" height="${now.rec.h}">
-          <figcaption class="hint">시드 ${now.rec.seed} · ${now.rec.w}×${now.rec.h} · ${esc(now.rec.model)}</figcaption>
+          <figcaption class="hint">시드 ${now.rec.seed} · ${now.rec.w}×${now.rec.h} · ${esc(now.rec.model)}${now.rec.refs?.length ? ` · 참고 ${now.rec.refs.length}장` : ""}</figcaption>
         </figure>
         <div class="acts">
           ${now.rec.verdict === "keep"
@@ -310,8 +569,41 @@ const SCREENS = {
         <p class="hint">보관과 버림이 쌓이면 ‘취향’ 탭에 자주 고른 태그가 나옴. 안 고른 그림은 새로 고치면 사라짐.</p>` : ""}`;
   },
 
+  ai() {
+    const { settings: s, chat } = store.data;
+    const bubbles = chat.map((m, i) => {
+      if (m.role === "user") return `<div class="msg me">${esc(m.text)}</div>`;
+      const parts = parseBlocks(m.text).map((b, j) => {
+        if (b.t === "text") return b.v.trim() ? `<p class="mt">${esc(b.v.trim())}</p>` : "";
+        const id = `${i}:${j}`;
+        const btns = b.lang === "scene" ? `<button type="button" data-put="${id}">이번 그림에 넣기</button>`
+          : b.lang === "negative" ? `<button type="button" data-neg="${id}">빼는 것에 더하기</button>` : "";
+        let check = "";
+        if (b.lang === "scene") {
+          const c = checkTags(b.v);
+          if (c && (c.missing.length || c.rare.length)) {
+            check = `<p class="hint">${c.missing.length ? `사전(일반 태그)에 없음: ${esc(c.missing.join(", "))}. 자연어 문구나 캐릭터 이름일 수 있음. ` : ""}${c.rare.length ? `게시물 ${RARE}개 미만이라 약할 수 있음: ${esc(c.rare.join(", "))}` : ""}</p>`;
+          } else if (!c) check = `<p class="hint">태그 사전을 못 불러와 검사를 못 함.</p>`;
+        }
+        return `<div class="code"><pre>${esc(b.v)}</pre><div class="acts2">${btns}<button type="button" class="ghost" data-copy="${id}">복사</button></div>${check}</div>`;
+      }).join("");
+      return `<div class="msg ai">${parts || esc(m.text)}</div>`;
+    }).join("");
+    return `
+      ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/taste">‘취향’ 탭 맨 아래</a>에서 넣어야 대답함.</p>`}
+      ${chat.length ? "" : `<p class="empty">그리고 싶은 장면을 말로 던지면<br>NovelAI 태그 프롬프트로 바꿔 줌.<br><small>예: 금발 정장 입은 중국식 미인, 로우앵글로 내려다보는 오만한 느낌</small></p>`}
+      <div class="chat">${bubbles}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>
+      ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
+      <textarea id="ask" rows="3" placeholder="장면, 인물, 분위기를 한국어로" autocomplete="off">${esc(askDraft)}</textarea>
+      ${asking
+        ? `<button type="button" id="stopAsk" class="ghost big">눌러서 취소</button>`
+        : `<button type="button" id="send" class="big">보내기</button>`}
+      ${chat.length ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
+      <p class="hint">대답은 제미니(${esc(s.aiModel === "custom" ? s.aiCustom : s.aiModel)})가 하고, 태그는 같이 실린 단부루 사전에서 맞춰 봄. 제미니 말은 틀릴 수 있어서 ‘이번 그림에 넣기’ 뒤 직접 한 번 읽기.</p>`;
+  },
+
   keep(id) {
-    const kept = store.data.log.filter((r) => r.verdict === "keep");
+    const kept =store.data.log.filter((r) => r.verdict === "keep");
     if (id) {
       const r = kept.find((x) => x.id === id);
       if (!r) return `<p class="empty">없는 그림.<br><a href="#/keep">보관함으로</a></p>`;
@@ -327,7 +619,7 @@ const SCREENS = {
           <dt>그림</dt><dd>${esc(r.scene) || "—"}</dd>
           <dt>취향</dt><dd>${esc(r.style) || "—"}</dd>
           <dt>빼는 것</dt><dd>${esc(r.negative) || "—"}</dd>
-          <dt>값</dt><dd>시드 ${r.seed} · ${r.w}×${r.h} · ${r.steps}스텝 · 강도 ${r.scale} · ${esc(r.model)}</dd>
+          <dt>값</dt><dd>시드 ${r.seed} · ${r.w}×${r.h} · ${r.steps}스텝 · 강도 ${r.scale} · ${esc(r.model)}${r.refs?.length ? ` · 참고 그림 ${r.refs.length}장(강도 ${r.refs.map((x) => x.s).join("·")}, 다시 뽑기에는 안 따라옴)` : ""}</dd>
         </dl>`;
     }
     if (!kept.length) return `<p class="empty">아직 없음.<br>뽑은 그림에서 ‘♥ 보관’을 누르면 여기 모임.</p>`;
@@ -369,7 +661,19 @@ const SCREENS = {
         <label>스텝 <span class="hint">1~28</span><input id="steps" type="number" inputmode="numeric" min="1" max="28" value="${esc(s.steps)}"></label>
         <label>프롬프트 강도 <span class="hint">0~10</span><input id="scale" type="number" inputmode="decimal" min="0" max="10" step="0.5" value="${esc(s.scale)}"></label>
       </div>
-      <p class="hint">한 번에 한 장, 28스텝 이하, 위 세 크기만 씀. 이 범위를 Opus 구독은 Anlas 없이 뽑고, 다른 구독은 Anlas가 듦.</p>
+      <p class="hint">한 번에 한 장, 28스텝 이하, 위 세 크기만 씀. 이 범위를 Opus 구독은 Anlas 없이 뽑고, 다른 구독은 Anlas가 듦. 참고 그림(바이브)은 V4.5 Full에서만 보임.</p>
+
+      <h2>비서 (제미니)</h2>
+      <label for="aiKey">제미니 API 키</label>
+      <input id="aiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"
+        placeholder="AIza…" value="${esc(s.aiKey)}">
+      <p class="hint">aistudio.google.com에서 발급. 이 폰에만 저장되고 구글 서버로만 나감. 비서에게 보낸 말과 취향 프롬프트가 구글로 감.</p>
+      <label for="aiModel">모델</label>
+      <select id="aiModel">
+        ${MODEL_CHOICES.map((m) => `<option value="${m}" ${s.aiModel === m ? "selected" : ""}>${m}</option>`).join("")}
+        <option value="custom" ${s.aiModel === "custom" ? "selected" : ""}>직접 입력</option>
+      </select>
+      ${s.aiModel === "custom" ? `<input id="aiCustom" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="gemini-…" value="${esc(s.aiCustom)}">` : ""}
 
       <h2>데이터</h2>
       <p class="hint">기록 ${log.length}건, 보관 ${log.filter((r) => r.verdict === "keep").length}장이 이 기기에만 있음.</p>
@@ -379,7 +683,7 @@ const SCREENS = {
 };
 
 // ── 라우터 ──────────────────────────────────────────────────
-const TITLES = { gen: "짤뽑기", keep: "보관함", taste: "취향" };
+const TITLES = { gen: "짤뽑기", ai: "비서", keep: "보관함", taste: "취향" };
 const route = () => (location.hash.replace(/^#\/?/, "") || "gen").split("/");
 let thumbUrls = [];
 let renderSeq = 0;
@@ -415,6 +719,58 @@ function wire(name, arg, seq) {
     on("keep", "click", () => judge("keep"));
     on("drop", "click", () => judge("drop"));
     on("share", "click", () => now && shareImage(now.blob, now.rec));
+
+    // 참고 그림
+    const saveRef = (r) => refPut(rowOf(r)).catch((e) => { errMsg = `참고 그림 설정을 저장하지 못함 (${e?.name || e}).`; render(); });
+    const byId = (el, k) => refs.find((x) => x.id === el.dataset[k]);
+    on("addRef", "click", () => $("refFile").click());
+    on("refFile", "change", (e) => { const f = [...e.target.files]; e.target.value = ""; addRefs(f); });
+    document.querySelectorAll("[data-ron]").forEach((el) => el.addEventListener("change", () => {
+      const r = byId(el, "ron"); if (!r) return;
+      r.on = el.checked; saveRef(r); render();
+    }));
+    document.querySelectorAll("[data-rstr]").forEach((el) => {
+      const r = byId(el, "rstr");
+      el.addEventListener("input", () => { if (r) { r.strength = clamp(el.value, 0, 1, 0.6); const o = $(`rs-${r.id}`); if (o) o.textContent = r.strength; } });
+      el.addEventListener("change", () => { if (r) { saveRef(r); render(); } });
+    });
+    document.querySelectorAll("[data-rinfo]").forEach((el) => el.addEventListener("change", () => {
+      const r = byId(el, "rinfo"); if (!r) return;
+      r.info = clamp(el.value, 0, 1, 1); saveRef(r); render();
+    }));
+    document.querySelectorAll("[data-rdel]").forEach((el) => el.addEventListener("click", async () => {
+      const r = byId(el, "rdel"); if (!r) return;
+      await refDel(r.id).catch(() => {});
+      URL.revokeObjectURL(r.url);
+      refs = refs.filter((x) => x !== r);
+      render();
+    }));
+  }
+  if (name === "ai") {
+    const d2 = store.data;
+    on("ask", "input", (e) => { askDraft = e.target.value; });
+    on("send", "click", () => { const t = askDraft.trim(); if (t) ask(t); });
+    on("stopAsk", "click", () => asking?.abort());
+    on("clearChat", "click", () => { if (confirm("비서와 한 대화를 지움.")) { d2.chat = []; store.save(); } });
+    const blockOf = (id) => { const [i, j] = id.split(":").map(Number); return parseBlocks(d2.chat[i]?.text || "")[j]?.v; };
+    document.querySelectorAll("[data-put]").forEach((el) => el.addEventListener("click", () => {
+      const v = blockOf(el.dataset.put); if (!v) return;
+      d2.draft.scene = tidy(v); d2.draft.seedLock = false; store.persist();
+      location.hash = "#/gen";
+    }));
+    document.querySelectorAll("[data-neg]").forEach((el) => el.addEventListener("click", () => {
+      const v = blockOf(el.dataset.neg); if (!v) return;
+      if (!confirm("‘취향’ 탭의 빼는 것 뒤에 붙임. 앞으로 모든 그림에 적용됨.")) return;
+      d2.taste.negative = [tidy(d2.taste.negative), tidy(v)].filter(Boolean).join(", ");
+      store.save();
+      el.textContent = "더했음"; el.disabled = true;
+    }));
+    document.querySelectorAll("[data-copy]").forEach((el) => el.addEventListener("click", async () => {
+      const v = blockOf(el.dataset.copy); if (!v) return;
+      try { await navigator.clipboard.writeText(v); el.textContent = "복사함"; }
+      catch { el.textContent = "복사 못 함 — 길게 눌러 직접 복사"; }
+    }));
+    if (scrollAi) { scrollAi = false; scrollTo({ top: document.body.scrollHeight }); }
   }
   if (name === "keep" && !arg) {
     document.querySelectorAll("[data-thumb]").forEach(async (a) => {
@@ -452,6 +808,9 @@ function wire(name, arg, seq) {
     on("token", "input", (e) => { d.settings.token = e.target.value.trim(); store.persist(); });
     on("model", "change", (e) => { d.settings.model = e.target.value; store.save(); });
     on("customModel", "input", (e) => { d.settings.customModel = e.target.value.trim(); store.persist(); });
+    on("aiKey", "input", (e) => { d.settings.aiKey = e.target.value.trim(); store.persist(); });
+    on("aiModel", "change", (e) => { d.settings.aiModel = e.target.value; store.save(); });
+    on("aiCustom", "input", (e) => { d.settings.aiCustom = e.target.value.trim(); store.persist(); });
     on("steps", "change", (e) => { d.settings.steps = clamp(e.target.value, 1, 28, 28); e.target.value = d.settings.steps; store.persist(); });
     on("scale", "change", (e) => { d.settings.scale = clamp(e.target.value, 0, 10, 5); e.target.value = d.settings.scale; store.persist(); });
     document.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", () => {
@@ -459,7 +818,7 @@ function wire(name, arg, seq) {
       store.save();
     }));
     on("export", "click", () => {
-      const out = { ...d, settings: { ...d.settings, token: "" } };
+      const out = { ...d, settings: { ...d.settings, token: "", aiKey: "" } };
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: "application/json" }));
       a.download = "짤뽑기.json";
@@ -467,8 +826,11 @@ function wire(name, arg, seq) {
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     });
     on("reset", "click", async () => {
-      if (!confirm("취향, 기록, 보관한 그림, 토큰을 전부 지움. 되돌릴 수 없음.")) return;
+      if (!confirm("취향, 기록, 보관한 그림, 참고 그림, 대화, 토큰과 키를 전부 지움. 되돌릴 수 없음.")) return;
       await imgClear().catch(() => {});
+      await refClear().catch(() => {});
+      refs.forEach((r) => URL.revokeObjectURL(r.url));
+      refs = [];
       if (now) { URL.revokeObjectURL(now.url); now = null; }
       store.data = SHAPE();
       store.save();
@@ -476,8 +838,9 @@ function wire(name, arg, seq) {
   }
 }
 
-addEventListener("hashchange", () => { errMsg = ""; render(); });
+addEventListener("hashchange", () => { errMsg = ""; askErr = ""; render(); });
 render();
+loadRefs().then(render); // 참고 그림은 IndexedDB에서 읽어 와야 해서 한 박자 늦게 그린다
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));

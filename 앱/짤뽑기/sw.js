@@ -1,7 +1,7 @@
 // 망 먼저, 끊기면 저장해 둔 것. 온라인이면 고친 파일이 바로 보이고, 오프라인이면 마지막으로 받은 것이 뜬다.
 // 대가: 망이 아주 느리면 첫 화면도 그만큼 느리다. 그게 문제가 되면 그때 캐시 먼저로 바꾸고 VERSION을 올려 가며 쓴다.
-const VERSION = "짤뽑기-v1";
-const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icon.svg"];
+const VERSION = "짤뽑기-v2";
+const SHELL = ["./", "index.html", "style.css", "app.js", "assistant.js", "manifest.webmanifest", "icon.svg"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
