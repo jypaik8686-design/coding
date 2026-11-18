@@ -281,3 +281,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 .drow { margin: 10px 0 0; }
 .drow small { color: var(--dim); font-weight: 400; }
 .secbody input[type="search"] { background: var(--bg); }
+
+/* 비서에게 그림 보여 주기 */
+.attach { margin-top: 8px; }
+.attach > .hint { margin: 6px 0; }
+.attach > button { margin-top: 8px; }

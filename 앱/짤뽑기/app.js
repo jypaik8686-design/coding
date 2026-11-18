@@ -361,7 +361,9 @@ async function padPrecise(blob) {
 }
 // 제미니에 보여 줄 그림: 긴 변 768px JPEG
 async function shrinkJpeg(blob) {
-  const bmp = await createImageBitmap(blob);
+  let bmp;
+  try { bmp = await createImageBitmap(blob); }
+  catch (e) { throw new Error(`그림을 읽지 못함 (${e?.message || e}). 다른 파일로 시도하거나 JPEG·PNG로 바꿔서 올리기.`); }
   const k = Math.min(1, 768 / Math.max(bmp.width, bmp.height));
   const c = document.createElement("canvas");
   c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
@@ -698,7 +700,7 @@ function stateText() {
   const chars = draft.chars.filter((c) => tidy(c.text)).map((c, i) => `  ${i + 1}. ${tidy(c.text)}${Number.isInteger(c.pos) ? ` (위치 칸 ${c.pos + 1}번/25)` : ""}`).join("\n");
   const plan = refPlan(s);
   const presetLine = PRESET_KINDS.map((k) => { const names = presetEntries(k).filter((e) => !e.hidden && e.p.name).map((e) => e.p.name); return names.length ? `${k}[${names.join(", ")}]` : ""; }).filter(Boolean).join(" / ");
-  return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 이번 그림 칸: ${tidy(draft.scene) || "(비어 있음)"}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 취향 프롬프트: ${tidy(taste.style) || "(비어 있음)"}\n- 빼는 것: ${tidy(taste.negative) || "(비어 있음)"}\n- 품질 태그 자동: ${s.quality ? "켜짐" : "꺼짐"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}\n- 프리셋(사용자가 눌러 쓰는 것): ${presetLine || "없음"}`;
+  return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 이번 그림 칸: ${tidy(draft.scene) || "(비어 있음)"}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 취향 프롬프트: ${tidy(taste.style) || "(비어 있음)"}\n- 빼는 것: ${tidy(taste.negative) || "(비어 있음)"}\n- 품질 태그 자동: ${s.quality ? "켜짐" : "꺼짐"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg && !ui.attachFile ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}${ui.attachFile ? "\n- 첨부: 사용자가 고른 사진 한 장을 이 메시지에 붙임" : ""}\n- 프리셋(사용자가 눌러 쓰는 것): ${presetLine || "없음"}`;
 }
 
 // 제미니에 보내는 지시문 전체: 켠 조각들(+내 조각) + (켰다면) 앱 상태. 사전 후보는 질문마다 달라서 질문 쪽에 붙는다.
@@ -725,9 +727,12 @@ async function ask(text, opts = {}) {
   const model = (s.aiModel === "custom" ? s.aiCustom : s.aiModel).trim().replace(/^models\//, "");
   if (!s.aiKey.trim()) { askErr = "제미니 키가 없음. ‘취향’ 탭 맨 아래에서 넣기."; return render(); }
   if (!model) { askErr = "제미니 모델 이름이 비어 있음. ‘취향’ 탭에서 고르기."; return render(); }
-  const withImage = !!(opts.image && now);
+  // 보여 줄 그림: 사용자가 고른 사진이 있으면 그것, 없으면 체크했을 때의 방금 뽑은 그림. 한 번에 한 장.
+  const fileImg = ui.attachFile?.blob || null;
+  const nowImg = !fileImg && opts.image && now ? now.blob : null;
+  const imgBlob = fileImg || nowImg, imgKind = fileImg ? "file" : nowImg ? "now" : null;
   askDraft = "";
-  d.chat.push({ role: "user", text, at: Date.now(), ...(withImage ? { img: true } : {}) });
+  d.chat.push({ role: "user", text, at: Date.now(), ...(imgKind ? { img: imgKind } : {}) });
   while (d.chat.length > CHAT_MAX) d.chat.shift();
   store.persist();
   asking = new AbortController();
@@ -738,7 +743,7 @@ async function ask(text, opts = {}) {
     let hist = d.chat.slice(-20);
     while (hist.length && hist[0].role !== "user") hist.shift(); // 제미니는 사용자 말로 시작해야 한다
     const cand = d.persona.auto.cand ? candidates(text) : [];
-    const img = withImage ? await shrinkJpeg(now.blob) : null;
+    const img = imgBlob ? await shrinkJpeg(imgBlob) : null;
     const contents = hist.map((m, i) => {
       const last = i === hist.length - 1;
       const parts = [{ text: last && cand.length ? `${m.text}\n\n[사전 후보]\n${cand.join("\n")}` : m.text }];
@@ -756,6 +761,7 @@ async function ask(text, opts = {}) {
     const out = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("").trim();
     if (!out) throw new Error(`빈 답이 옴 (${c?.finishReason || j.promptFeedback?.blockReason || "이유 모름"}). 말을 바꿔 다시 보내기.`);
     d.chat.push({ role: "model", text: out, at: Date.now() });
+    if (fileImg) clearAttach(); // 사진은 보낸 한 번만. 실패하면 남겨 두어 다시 보낼 수 있다
     while (d.chat.length > CHAT_MAX) d.chat.shift();
     store.persist();
   } catch (e) {
@@ -852,7 +858,7 @@ function applyBlock(kind, v) {
 
 // 비서 한 메시지를 HTML로. i는 chat 안의 번호. 블록 버튼의 data-blk는 "i:j"
 function msgHtml(m, i) {
-  if (m.role === "user") return `<div class="msg me">${esc(m.text)}${m.img ? `<small class="att">방금 그림 첨부</small>` : ""}</div>`;
+  if (m.role === "user") return `<div class="msg me">${esc(m.text)}${m.img ? `<small class="att">${m.img === "file" ? "사진 첨부" : "방금 그림 첨부"}</small>` : ""}</div>`;
   const parts = parseBlocks(m.text).map((b, j) => {
     if (b.t === "text") return b.v.trim() ? `<p class="mt">${esc(b.v.trim())}</p>` : "";
     const id = `${i}:${j}`;
@@ -875,7 +881,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 
 // ── 뽑기 화면 조각들 ─────────────────────────────────────────
 // 접었다 펴는 칸. 화면이 다시 그려져도 펼친 상태를 기억하려고 ui.open에 둔다 (새로 고치면 처음으로).
-const ui = { open: {}, withImg: false, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "", dq: "" };
+const ui = { open: {}, withImg: false, attachFile: null, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "", dq: "" };
 const sec = (k, title, hint, inner) =>
   `<details class="sec" data-sec="${k}" ${ui.open[k] ? "open" : ""}><summary>${title}${hint ? ` <small>${esc(hint)}</small>` : ""}</summary><div class="secbody">${inner}</div></details>`;
 
@@ -885,6 +891,22 @@ const QUICK = {
   tidy: "이번 그림 칸 프롬프트를 정리해 줘. 겹치는 태그, 서로 부딪치는 태그, 반영이 약한 태그를 고쳐서 scene 블록 전체로. 바뀐 점은 한 줄.",
   params: "이 장면에 맞는 생성 설정을 params 블록 JSON으로 추천해 줘. Anlas가 안 드는 범위(스텝 28 이하, 일반 크기)에서. 이유 한 줄.",
 };
+
+// 비서에게 그림 보여 주기. 뽑기 화면의 AI 도우미와 ‘비서’ 탭이 같이 쓴다.
+// 방금 뽑은 그림(체크)과 내가 고른 사진(한 번만) 둘 중 하나를 이 질문에 붙여 구글로 보낸다. 그림이 없을 때도 이유를 보여 준다.
+function attachBar() {
+  const f = ui.attachFile;
+  return `
+    <div class="attach">
+      ${now
+        ? `<label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> 방금 뽑은 그림도 같이 보여 주기 <span class="hint">체크하면 이 그림이 구글로 감</span></label>`
+        : `<p class="hint">방금 뽑은 그림이 없어서 ‘방금 그림 보여 주기’는 꺼져 있음. 새로 고쳤거나 버린 뒤에는 없어짐. 뽑으면 체크칸이 생김.</p>`}
+      ${f ? `<div class="srcrow"><img src="${f.url}" alt="고른 사진"><div><span class="hint">${esc(f.name)} — 다음 질문에 한 번 보냄 (구글로 감)</span><button type="button" class="ghost sm" id="askUnpick">빼기</button></div></div>` : ""}
+      <input id="askFile" type="file" accept="image/*" hidden>
+      <button type="button" class="ghost sm" id="askPick">${f ? "다른 사진 고르기" : "사진 골라서 보여 주기"}</button>
+    </div>`;
+}
+function clearAttach() { if (ui.attachFile) { URL.revokeObjectURL(ui.attachFile.url); ui.attachFile = null; } }
 
 function aiPanel() {
   const { settings: s, chat } = store.data;
@@ -904,7 +926,7 @@ function aiPanel() {
     ${shown.length ? `<div class="chat">${shown.map((i) => msgHtml(chat[i], i)).join("")}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>` : (asking ? `<div class="msg ai dim">생각 중…</div>` : "")}
     ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
     <textarea id="ask" rows="3" placeholder="예: 팔짱 끼고 내려다보게, 표정은 더 차갑게" autocomplete="off">${esc(askDraft)}</textarea>
-    ${now ? `<label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> 방금 뽑은 그림도 같이 보여 주기 <span class="hint">체크하면 이 그림이 구글로 감</span></label>` : ""}
+    ${attachBar()}
     ${asking ? `<button type="button" id="stopAsk" class="ghost">눌러서 취소</button>` : `<button type="button" id="send">AI에게 부탁</button>`}
     <p class="hint"><a href="#/ai">‘비서’ 탭</a> 맨 아래에서 비서 지시문을 고칠 수 있음.</p>`;
   return sec("ai", "AI 도우미", "자세·그림체·수정·설정", body);
@@ -1282,6 +1304,7 @@ const SCREENS = {
       <div class="chat">${bubbles}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>
       ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
       <textarea id="ask" rows="3" placeholder="장면, 인물, 분위기를 한국어로" autocomplete="off">${esc(askDraft)}</textarea>
+      ${attachBar()}
       ${asking
         ? `<button type="button" id="stopAsk" class="ghost big">눌러서 취소</button>`
         : `<button type="button" id="send" class="big">보내기</button>`}
@@ -1436,6 +1459,17 @@ function wireAsk() {
   const d = store.data;
   on("ask", "input", (e) => { askDraft = e.target.value; });
   on("withImg", "change", (e) => { ui.withImg = e.target.checked; });
+  on("askPick", "click", () => $("askFile").click());
+  on("askFile", "change", (e) => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    if (!/^image\//.test(f.type) && !/\.(jpe?g|png|webp|gif|heic|heif|avif)$/i.test(f.name)) { askErr = "그림 파일이 아님."; return render(); }
+    clearAttach();
+    ui.attachFile = { blob: f, name: (f.name || "사진").slice(0, 40), url: URL.createObjectURL(f) };
+    askErr = "";
+    render();
+  });
+  on("askUnpick", "click", () => { clearAttach(); render(); });
   on("send", "click", () => { const t = askDraft.trim(); if (t) ask(t, { image: ui.withImg && !!now }); });
   on("stopAsk", "click", () => asking?.abort());
   on("clearChat", "click", () => { if (confirm("비서와 한 대화를 지움.")) { d.chat = []; store.save(); } });
@@ -1793,7 +1827,7 @@ function wire(name, arg, seq) {
       if (src) { URL.revokeObjectURL(src.url); src = null; }
       refs.forEach((r) => URL.revokeObjectURL(r.url));
       refs = [];
-      histClear();
+      histClear(); clearAttach();
       store.data = SHAPE();
       store.save();
     });
