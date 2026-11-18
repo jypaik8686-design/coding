@@ -428,7 +428,19 @@ async function pngFromResponse(buf) {
 }
 
 // 지금 화면에 떠 있는 한 장. 새로 고치면 사라진다 (보관한 것만 남는다).
-let now = null;      // { rec, blob, url }
+let now = null;      // 지금 크게 보이는 한 장: hist 안의 항목 하나 { rec, blob, url }. 버림을 누르면 null
+// 이번에 뽑은 그림들(오래된 것이 앞). 새로 뽑아도 버림을 눌러도 여기 남아 있어서 눌러 다시 볼 수 있다. 메모리에만 있어서 새로 고치면 사라지고, 보관한 것만 IndexedDB에 남는다.
+const HIST_MAX = 12;
+let hist = [];
+function histAdd(entry) {
+  hist.push(entry);
+  while (hist.length > HIST_MAX) {
+    const i = hist.findIndex((h) => h !== now) ; // 지금 보는 것은 밀어내지 않는다
+    const [old] = hist.splice(i < 0 ? 0 : i, 1);
+    URL.revokeObjectURL(old.url);
+  }
+}
+function histClear() { hist.forEach((h) => URL.revokeObjectURL(h.url)); hist = []; now = null; }
 let busy = null;     // AbortController
 let errMsg = "";
 
@@ -479,8 +491,8 @@ async function generate() {
     if (!res.ok) throw new Error(await failText(res));
     const png = await pngFromResponse(await res.arrayBuffer());
     const blob = new Blob([png], { type: "image/png" });
-    if (now) URL.revokeObjectURL(now.url);
     now = { rec, blob, url: URL.createObjectURL(blob) };
+    histAdd(now);
     d.draft.seed = seed;
     d.log.unshift(rec);
     trimLog();
@@ -518,9 +530,11 @@ async function judge(verdict) {
     rec.verdict = "keep";
     now.rec.verdict = "keep";
   } else {
+    // 버려도 그림은 이번에 뽑은 목록(hist)에 남는다. 알림의 ‘되돌리기’나 목록에서 눌러 다시 볼 수 있다.
+    const entry = now, before = rec.verdict;
     rec.verdict = "drop";
-    URL.revokeObjectURL(now.url);
     now = null;
+    toast("버림", () => { rec.verdict = before; now = entry; store.save(); });
   }
   store.save();
 }
@@ -1086,6 +1100,13 @@ function personaEditor() {
   return sec("persona", "비서 지시문 고치기", "조각을 끄고 켜고 고침", body);
 }
 
+// 이번에 뽑은 그림 목록. 눌러서 크게 다시 본다 (새로 뽑거나 버린 그림을 되돌리는 길).
+function histStrip() {
+  if (!hist.length || (hist.length === 1 && hist[0] === now)) return "";
+  const items = [...hist].reverse().map((h) => `<button type="button" class="hthumb ${h === now ? "on" : ""} ${h.rec.verdict === "drop" ? "dropped" : ""} ${h.rec.verdict === "keep" ? "kept" : ""}" data-hist="${esc(h.rec.id)}" aria-label="시드 ${h.rec.seed} 그림 다시 보기"><img src="${h.url}" alt=""></button>`).join("");
+  return `<div class="hist"><p class="hint">이번에 뽑은 그림 ${hist.length}장 — 눌러서 다시 봄. 흐리게 보이는 것은 버린 것. 새로 고치면 사라지니 남길 것은 ♥ 보관.</p><div class="hstrip">${items}</div></div>`;
+}
+
 const SCREENS = {
   gen() {
     const { settings: s, taste, draft } = store.data;
@@ -1131,6 +1152,7 @@ const SCREENS = {
           <button type="button" id="toI2i" class="ghost">이 그림으로 변형</button>
         </div>
         <p class="hint">보관과 버림이 쌓이면 ‘취향’ 탭에 자주 고른 태그가 나옴. 안 고른 그림은 새로 고치면 사라짐.</p>` : ""}
+      ${histStrip()}
       ${sec("chars", "인물별 프롬프트", nChars ? `${nChars}명` : "", charsInner())}
       ${sec("ref", "참고 그림", nRefs ? `${s.refMode === "precise" ? "정밀 참조" : "바이브"} ${nRefs}장` : "", refInner())}
       ${sec("i2i", "이미지→이미지", draft.i2i.on && src ? "켬" : "", i2iInner())}
@@ -1398,6 +1420,13 @@ function wire(name, arg, seq) {
     on("share", "click", () => now && shareImage(now.blob, now.rec));
     on("useSeed", "click", () => { if (!now) return; d.draft.seed = now.rec.seed; d.draft.seedLock = true; toast(`시드 ${now.rec.seed}로 고정함`); store.save(); });
     on("saveScene", "click", () => savePreset("scene"));
+    document.querySelectorAll("[data-hist]").forEach((b) => b.addEventListener("click", () => {
+      const h = hist.find((x) => x.rec.id === b.dataset.hist);
+      if (!h) return;
+      now = h;
+      render();
+      document.querySelector("figure.result")?.scrollIntoView({ block: "nearest" });
+    }));
 
     // 인물별 프롬프트
     const charOf = (el, k) => d.draft.chars.find((c) => c.id === el.dataset[k]);
@@ -1604,7 +1633,7 @@ function wire(name, arg, seq) {
       if (src) { URL.revokeObjectURL(src.url); src = null; }
       refs.forEach((r) => URL.revokeObjectURL(r.url));
       refs = [];
-      if (now) { URL.revokeObjectURL(now.url); now = null; }
+      histClear();
       store.data = SHAPE();
       store.save();
     });
