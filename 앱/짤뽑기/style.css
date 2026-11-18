@@ -56,7 +56,7 @@ main {
 /* 하단 탭 — 손가락 닿는 높이 44px 이상 */
 .tabs {
   position: fixed; inset: auto 0 0 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: repeat(4, 1fr);
   padding-bottom: env(safe-area-inset-bottom);
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: blur(12px);
@@ -158,3 +158,32 @@ button.big { min-height: 54px; font-size: 17px; }
 .chip small { color: var(--dim); font-weight: 400; }
 .chip[disabled] { opacity: .7; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* 참고 그림 */
+.refs { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.ref { display: grid; grid-template-columns: 84px 1fr; gap: 12px; padding: 12px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+.ref img { width: 84px; height: 112px; object-fit: cover; border-radius: 10px; background: var(--line); }
+.refbody { min-width: 0; }
+.refbody label { margin: 0 0 6px; font-size: 13px; }
+.refbody .line { margin: 0 0 4px; min-height: 36px; }
+.refbody input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+.refbody input[type="number"] { padding: 8px 10px; }
+.refbody output { font-variant-numeric: tabular-nums; margin-left: 6px; color: var(--dim); font-weight: 400; }
+.refbody button { min-height: 40px; margin-top: 6px; padding: 0 14px; font-size: 14px; }
+.hint.warn { color: var(--danger); }
+#addRef { margin-top: 10px; }
+
+/* 비서 */
+.chat { display: grid; gap: 10px; margin-bottom: 12px; }
+.msg { max-width: 92%; padding: 10px 13px; border-radius: var(--radius); overflow-wrap: anywhere; white-space: pre-wrap; font-size: 15px; }
+.msg.me { justify-self: end; color: #fff; background: var(--accent); }
+.msg.ai { justify-self: start; background: var(--card); border: 1px solid var(--line); width: 92%; }
+.msg.dim { color: var(--dim); width: auto; }
+.msg .mt { margin: 0 0 8px; }
+.msg .mt:last-child { margin-bottom: 0; }
+.code { margin: 8px 0 0; }
+.code pre { margin: 0; padding: 10px 12px; font: 13px/1.45 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+.acts2 { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.acts2 button { min-height: 44px; padding: 0 14px; font-size: 14px; }
+.msg .hint { white-space: normal; margin-top: 6px; }
+.empty small { color: var(--dim); }
