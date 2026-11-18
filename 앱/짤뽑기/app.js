@@ -1,7 +1,7 @@
 // 짤뽑기 — 취향 프롬프트를 늘 붙여 NovelAI로 한 장씩 뽑고, 고른 것과 버린 것에서 취향을 쌓는다.
 // 화면 넷: 뽑기 / 비서 / 보관함 / 취향. 글자 데이터는 localStorage, 그림(보관한 것, 참고 그림)은 IndexedDB.
 
-import { PERSONA, MODEL_CHOICES } from "./assistant.js";
+import { PERSONA_PARTS, partState, buildPersona, MODEL_CHOICES } from "./assistant.js";
 import { PRESETS } from "./presets.js";
 
 const KEY = "짤뽑기/v1";
@@ -42,6 +42,10 @@ const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, s
 // settings 새 칸: sampler / noise(스케줄) / cfgRescale / variety / customW·customH(size가 "직접"일 때) / refMode("vibe"|"precise")
 // draft 새 칸: chars [{id, text, neg, pos}] 인물별 프롬프트(pos: null=AI가 정함, 0~24=5x5 칸 번호), i2i {on, strength, noise} (원본 그림은 IndexedDB "src")
 // presets 항목: { id, name, text, to: "scene"|"style"|"neg" } 사용자가 저장한 프롬프트
+// presets 새 칸(옛 항목에는 없음, normPresets가 메움): kind("인물"|"그림체"|"자세·구도"|"빼는 것"|"내 것", 없으면 "내 것") / neg / note / at("front")
+// presetEdits: 내장 프리셋(presets.js)을 고친 것. { "b:<종류>:<기본 이름>": { name?, text?, neg?, note?, hidden? } }. 기본과 같아진 칸은 지워서 기본 글이 따라오게 한다.
+// persona: 비서 지시문을 사용자가 고친 것. sections { <조각 id>: { text?, on? } }는 기본 조각을 덮어쓴 것만 담고, extra [{id, name, text, on}]는 사용자가 더한 조각,
+//   auto { state, cand }는 앱이 지시문 뒤에 자동으로 붙이는 ‘앱 상태’와 ‘사전 후보’를 켜는지. 옛 데이터에는 없다 (normPersona가 메운다).
 // log 새 칸: sampler / noise / cr / vb / chars / i2i / mode. 옛 항목에는 없다 (없으면 처음 값으로 읽는다).
 const SHAPE = () => ({
   settings: {
@@ -54,16 +58,67 @@ const SHAPE = () => ({
   log: [],
   chat: [],
   presets: [],
+  persona: { sections: {}, extra: [], auto: { state: true, cand: true } },
+  presetEdits: {},
 });
 
+const PRESET_KINDS = ["인물", "그림체", "자세·구도", "빼는 것", "내 것"];
+const str = (v, max) => (typeof v === "string" ? v.slice(0, max) : "");
+let saveFail = false; // 마지막 저장이 실패했는지 (화면 맨 위 경고)
 const store = {
   data: load(),
   persist() {
-    try { localStorage.setItem(KEY, JSON.stringify(this.data)); return true; }
-    catch (e) { console.warn("저장 실패", e); return false; }
+    try { localStorage.setItem(KEY, JSON.stringify(this.data)); if (saveFail) { saveFail = false; render(); } return true; }
+    catch (e) {
+      console.warn("저장 실패", e);
+      // 조용히 넘기면 사용자는 저장된 줄 안다. 처음 실패할 때 화면 맨 위에 띄운다 (타이핑 중이라 매번 다시 그리지는 않는다).
+      if (!saveFail) { saveFail = true; toast("저장 실패 — 이 기기 저장 공간이 찼음"); render(); }
+      return false;
+    }
   },
   save() { this.persist(); render(); },
 };
+
+function normPresets(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((p) => p && p.id && typeof p.text === "string").map((p) => {
+    const o = { id: String(p.id), name: str(p.name, 60), text: p.text.slice(0, 4000), to: ["scene", "style", "neg"].includes(p.to) ? p.to : "scene", kind: PRESET_KINDS.includes(p.kind) ? p.kind : "내 것" };
+    if (typeof p.neg === "string" && p.neg) o.neg = p.neg.slice(0, 4000);
+    if (typeof p.note === "string" && p.note) o.note = p.note.slice(0, 300);
+    if (p.at === "front" && o.to === "scene") o.at = "front";
+    return o;
+  });
+}
+function normPresetEdits(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const kind of Object.keys(PRESETS)) for (const b of PRESETS[kind]) {
+    const k = `b:${kind}:${b.name}`, o = raw[k];
+    if (!o || typeof o !== "object") continue;
+    const e = {};
+    for (const f of ["name", "text", "neg", "note"]) if (typeof o[f] === "string" && o[f] !== (b[f] ?? "")) e[f] = o[f].slice(0, 4000);
+    if (o.hidden === true) e.hidden = true;
+    if (Object.keys(e).length) out[k] = e;
+  }
+  return out;
+}
+
+// 옛 데이터·깨진 값이 와도 항상 같은 꼴로 돌려준다. 항목 안쪽 칸은 펼치기가 메워 주지 않아서 여기서 하나씩 본다.
+function normPersona(raw) {
+  const out = { sections: {}, extra: [], auto: { state: true, cand: true } };
+  if (!raw || typeof raw !== "object") return out;
+  for (const p of PERSONA_PARTS) {
+    const o = raw.sections?.[p.id];
+    if (!o || typeof o !== "object") continue;
+    const e = {};
+    if (typeof o.text === "string" && o.text !== p.text) e.text = o.text;
+    if (o.on === false) e.on = false;
+    if (Object.keys(e).length) out.sections[p.id] = e;
+  }
+  if (Array.isArray(raw.extra)) out.extra = raw.extra.filter((e) => e && e.id && typeof e.text === "string").map((e) => ({ id: String(e.id), name: String(e.name || "").slice(0, 30), text: e.text, on: e.on !== false })).slice(0, 20);
+  out.auto = { state: raw.auto?.state !== false, cand: raw.auto?.cand !== false };
+  return out;
+}
 
 function load() {
   const base = SHAPE();
@@ -84,9 +139,11 @@ function load() {
       settings: { ...base.settings, ...(raw.settings || {}) },
       taste,
       draft,
-      presets: Array.isArray(raw.presets) ? raw.presets.filter((p) => p && p.id && typeof p.text === "string") : [],
+      presets: normPresets(raw.presets),
+      presetEdits: normPresetEdits(raw.presetEdits),
       log: Array.isArray(raw.log) ? raw.log.filter((r) => r && r.id) : [],
       chat: Array.isArray(raw.chat) ? raw.chat.filter((m) => m && (m.role === "user" || m.role === "model") && typeof m.text === "string") : [],
+      persona: normPersona(raw.persona),
     };
   } catch { return base; }
 }
@@ -371,7 +428,19 @@ async function pngFromResponse(buf) {
 }
 
 // 지금 화면에 떠 있는 한 장. 새로 고치면 사라진다 (보관한 것만 남는다).
-let now = null;      // { rec, blob, url }
+let now = null;      // 지금 크게 보이는 한 장: hist 안의 항목 하나 { rec, blob, url }. 버림을 누르면 null
+// 이번에 뽑은 그림들(오래된 것이 앞). 새로 뽑아도 버림을 눌러도 여기 남아 있어서 눌러 다시 볼 수 있다. 메모리에만 있어서 새로 고치면 사라지고, 보관한 것만 IndexedDB에 남는다.
+const HIST_MAX = 12;
+let hist = [];
+function histAdd(entry) {
+  hist.push(entry);
+  while (hist.length > HIST_MAX) {
+    const i = hist.findIndex((h) => h !== now) ; // 지금 보는 것은 밀어내지 않는다
+    const [old] = hist.splice(i < 0 ? 0 : i, 1);
+    URL.revokeObjectURL(old.url);
+  }
+}
+function histClear() { hist.forEach((h) => URL.revokeObjectURL(h.url)); hist = []; now = null; }
 let busy = null;     // AbortController
 let errMsg = "";
 
@@ -422,8 +491,8 @@ async function generate() {
     if (!res.ok) throw new Error(await failText(res));
     const png = await pngFromResponse(await res.arrayBuffer());
     const blob = new Blob([png], { type: "image/png" });
-    if (now) URL.revokeObjectURL(now.url);
     now = { rec, blob, url: URL.createObjectURL(blob) };
+    histAdd(now);
     d.draft.seed = seed;
     d.log.unshift(rec);
     trimLog();
@@ -461,9 +530,20 @@ async function judge(verdict) {
     rec.verdict = "keep";
     now.rec.verdict = "keep";
   } else {
+    // 버림은 완전히 버리는 것: 목록에서 빼고, 보관한 그림이었다면 보관함 저장분도 지운다. 실수를 위해 9초 동안만 알림의 ‘되돌리기’로 살릴 수 있다.
+    const entry = now, before = rec.verdict, idx = hist.indexOf(entry);
     rec.verdict = "drop";
-    URL.revokeObjectURL(now.url);
+    if (idx >= 0) hist.splice(idx, 1);
     now = null;
+    let row = null;
+    if (before === "keep") { row = await imgGet(rec.id).catch(() => null); await imgDel(rec.id).catch(() => {}); }
+    toast("버렸음", async () => {
+      rec.verdict = before;
+      hist.splice(Math.min(Math.max(idx, 0), hist.length), 0, entry);
+      now = entry;
+      if (row) await imgPut(row).catch(() => {});
+      store.save();
+    }, () => URL.revokeObjectURL(entry.url));
   }
   store.save();
 }
@@ -472,7 +552,8 @@ async function removeKept(id) {
   await imgDel(id).catch(() => {});
   const rec = store.data.log.find((r) => r.id === id);
   if (rec) rec.verdict = "drop";
-  if (now?.rec.id === id) now.rec.verdict = "drop";
+  const hi = hist.findIndex((h) => h.rec.id === id);
+  if (hi >= 0) { const [h] = hist.splice(hi, 1); if (now === h) now = null; URL.revokeObjectURL(h.url); }
   store.persist();
   location.hash = "#/keep";
 }
@@ -589,6 +670,12 @@ function stateText() {
   return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 이번 그림 칸: ${tidy(draft.scene) || "(비어 있음)"}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 취향 프롬프트: ${tidy(taste.style) || "(비어 있음)"}\n- 빼는 것: ${tidy(taste.negative) || "(비어 있음)"}\n- 품질 태그 자동: ${s.quality ? "켜짐" : "꺼짐"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}`;
 }
 
+// 제미니에 보내는 지시문 전체: 켠 조각들(+내 조각) + (켰다면) 앱 상태. 사전 후보는 질문마다 달라서 질문 쪽에 붙는다.
+function fullPersona() {
+  const d = store.data;
+  return buildPersona(d.persona) + (d.persona.auto.state ? stateText() : "");
+}
+
 async function geminiFail(res) {
   let said = "";
   try { said = (JSON.parse(await res.text()).error?.message ?? "").slice(0, 200); } catch { /* 본문 없음 */ }
@@ -619,7 +706,7 @@ async function ask(text, opts = {}) {
     await loadTags();
     let hist = d.chat.slice(-20);
     while (hist.length && hist[0].role !== "user") hist.shift(); // 제미니는 사용자 말로 시작해야 한다
-    const cand = candidates(text);
+    const cand = d.persona.auto.cand ? candidates(text) : [];
     const img = withImage ? await shrinkJpeg(now.blob) : null;
     const contents = hist.map((m, i) => {
       const last = i === hist.length - 1;
@@ -630,7 +717,7 @@ async function ask(text, opts = {}) {
     const res = await fetch(`${GEMINI}${encodeURIComponent(model)}:generateContent`, {
       method: "POST", signal: asking.signal,
       headers: { "Content-Type": "application/json", "x-goog-api-key": s.aiKey.trim() },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: PERSONA + stateText() }] }, contents, generationConfig: { temperature: 0.8 } }),
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: fullPersona() }] }, contents, generationConfig: { temperature: 0.8 } }),
     });
     if (!res.ok) throw new Error(await geminiFail(res));
     const j = await res.json();
@@ -744,7 +831,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 
 // ── 뽑기 화면 조각들 ─────────────────────────────────────────
 // 접었다 펴는 칸. 화면이 다시 그려져도 펼친 상태를 기억하려고 ui.open에 둔다 (새로 고치면 처음으로).
-const ui = { open: {}, withImg: false, presetKind: "인물" };
+const ui = { open: {}, withImg: false, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "" };
 const sec = (k, title, hint, inner) =>
   `<details class="sec" data-sec="${k}" ${ui.open[k] ? "open" : ""}><summary>${title}${hint ? ` <small>${esc(hint)}</small>` : ""}</summary><div class="secbody">${inner}</div></details>`;
 
@@ -774,7 +861,8 @@ function aiPanel() {
     ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
     <textarea id="ask" rows="3" placeholder="예: 팔짱 끼고 내려다보게, 표정은 더 차갑게" autocomplete="off">${esc(askDraft)}</textarea>
     ${now ? `<label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> 방금 뽑은 그림도 같이 보여 주기 <span class="hint">체크하면 이 그림이 구글로 감</span></label>` : ""}
-    ${asking ? `<button type="button" id="stopAsk" class="ghost">눌러서 취소</button>` : `<button type="button" id="send">AI에게 부탁</button>`}`;
+    ${asking ? `<button type="button" id="stopAsk" class="ghost">눌러서 취소</button>` : `<button type="button" id="send">AI에게 부탁</button>`}
+    <p class="hint"><a href="#/ai">‘비서’ 탭</a> 맨 아래에서 비서 지시문을 고칠 수 있음.</p>`;
   return sec("ai", "AI 도우미", "자세·그림체·수정·설정", body);
 }
 
@@ -860,35 +948,117 @@ function advInner() {
     <p class="hint">스텝 ${FREE_STEPS} 이하, 일반 크기 이하, 한 장씩이면 Opus는 Anlas가 안 듦(문서). 넘기면 Anlas가 들 수 있음. Variety+의 값은 200이 오는 것만 확인했고 NovelAI 화면과 같은 값인지는 확인 못 함. DPM++ 2M과 Euler Ancestral이 NovelAI 권장 샘플러임(문서).</p>`;
 }
 
-const PKINDS = ["인물", "그림체", "자세·구도", "빼는 것", "내 것"];
-function presetInner() {
-  const { presets } = store.data;
-  const kind = ui.presetKind;
-  const btns = (p, key, own) => {
-    const addTxt = p.to === "style" ? "더하기" : "더하기";
-    return `<div class="acts2">
-      <button type="button" data-pset="${key}" data-pmode="add">${addTxt}</button>
-      <button type="button" class="ghost" data-pset="${key}" data-pmode="replace">바꾸기</button>
-      ${p.neg ? `<button type="button" class="ghost" data-pset="${key}" data-pmode="neg">금지 태그도</button>` : ""}
-      ${own ? `<button type="button" class="ghost" data-pdel="${p.id}">지우기</button>` : ""}
+const PKINDS = PRESET_KINDS;
+const KIND_TO = { 인물: "scene", 그림체: "style", "자세·구도": "scene", "빼는 것": "neg" }; // 종류 탭에서 새로 만들면 여기에 넣는 곳이 정해진다
+const TARGET = { scene: "이번 그림", style: "취향 그림체", neg: "빼는 것" };
+const PFIELDS = ["name", "text", "neg", "note"];
+const bkey = (kind, p) => `b:${kind}:${p.name}`;
+const baseOf = (key) => { const m = key.match(/^b:([^:]+):(.+)$/); return m ? (PRESETS[m[1]] || []).find((b) => b.name === m[2]) : null; };
+
+// 한 종류의 프리셋 전부: 내장(고친 것 반영) + 내가 만든 것. 내장의 key는 기본 이름으로 고정이라 이름을 고쳐도 안 바뀐다.
+function presetEntries(kind) {
+  const d = store.data, out = [];
+  for (const base of PRESETS[kind] || []) {
+    const key = bkey(kind, base), e = d.presetEdits[key] || {};
+    const p = { ...base };
+    for (const f of PFIELDS) if (typeof e[f] === "string") p[f] = e[f];
+    out.push({ key, p, own: false, hidden: !!e.hidden, edited: PFIELDS.some((f) => typeof e[f] === "string") });
+  }
+  for (const p of d.presets) if (p.kind === kind) out.push({ key: `own:${p.id}`, p, own: true, hidden: false, edited: false });
+  return out;
+}
+// 칸을 바꾸는 것(이번 그림·취향 그림체·빼는 것)을 넣기 전 값으로 기억해 두고, 넣은 뒤 ‘되돌리기’를 단다.
+function applyPreset(p, mode) {
+  const d = store.data;
+  const snap = { scene: d.draft.scene, seedLock: d.draft.seedLock, style: d.taste.style, negative: d.taste.negative };
+  const msg = usePreset(p, mode);
+  const changed = snap.scene !== d.draft.scene || snap.style !== d.taste.style || snap.negative !== d.taste.negative;
+  toast(msg, changed ? () => {
+    d.draft.scene = snap.scene; d.draft.seedLock = snap.seedLock; d.taste.style = snap.style; d.taste.negative = snap.negative;
+    store.save();
+  } : null);
+  store.save();
+}
+const targetNow = (p) => tidy(p.to === "scene" ? store.data.draft.scene : p.to === "style" ? store.data.taste.style : store.data.taste.negative);
+const presetByKey = (key) => {
+  if (key.startsWith("own:")) return store.data.presets.find((p) => p.id === key.slice(4));
+  const m = key.match(/^b:([^:]+):/);
+  return m ? presetEntries(m[1]).find((e) => e.key === key)?.p : null;
+};
+
+// ‘바꾸기’를 누르면 곧바로 덮어쓰지 않고, 넣을 글을 여기서 고친 뒤 넣는다. 여기서 고친 글은 이번에만 쓰이고 프리셋 자체는 ‘고치기’로 바꾼다.
+function presetPut(e) {
+  const { p, key } = e, cur = targetNow(p);
+  return `
+    <div class="preset pput" data-pput="${esc(key)}">
+      <div class="phead"><b>${esc(p.name) || "이름 없음"}</b><span class="tag">넣기 전에 고치기</span></div>
+      <label>넣을 글 <span class="hint">여기서 고친 것은 이번에만 쓰임</span>
+        <textarea data-pputtext rows="6" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(ui.pputText)}</textarea></label>
+      <p class="hint">지금 ${TARGET[p.to]} 칸: ${cur ? esc(cur.length > 160 ? cur.slice(0, 160) + "…" : cur) : "(비어 있음)"}<br>‘바꿔 넣기’는 이 칸을 위 글로 통째로 바꿈. 넣은 뒤 ‘되돌리기’로 돌릴 수 있음.</p>
+      <div class="acts2">
+        <button type="button" data-pputgo="replace">바꿔 넣기</button>
+        <button type="button" class="ghost" data-pputgo="add">더하기</button>
+        <button type="button" class="ghost" data-pputcancel>취소</button>
+      </div>
     </div>`;
-  };
-  const target = { scene: "이번 그림", style: "취향 그림체", neg: "빼는 것" };
-  const card = (p, key, own) => `
+}
+
+function presetCard(e) {
+  const { p, key } = e;
+  if (ui.pput === key) return presetPut(e);
+  const badge = e.own ? TARGET[p.to] : e.edited ? "고침" : p.ok ? "확정" : "가안";
+  if (e.hidden) return `<div class="preset dim"><div class="phead"><b>${esc(p.name)}</b><span class="tag">숨김</span></div><div class="acts2"><button type="button" class="ghost" data-punhide="${esc(key)}">숨김 풀기</button></div></div>`;
+  return `
     <div class="preset">
-      <div class="phead"><b>${esc(p.name)}</b><span class="tag ${p.ok ? "ok" : ""}">${own ? target[p.to] : p.ok ? "확정" : "가안"}</span></div>
-      <p class="ptext">${esc(p.text)}</p>
+      <div class="phead"><b>${esc(p.name) || "이름 없음"}</b><span class="tag ${!e.own && !e.edited && p.ok ? "ok" : ""}">${badge}</span></div>
+      <p class="ptext">${esc(p.text) || "(비어 있음)"}</p>
       ${p.note ? `<p class="hint">${esc(p.note)}</p>` : ""}
-      ${btns(p, key, own)}
+      <div class="acts2">
+        <button type="button" data-pset="${esc(key)}" data-pmode="add">더하기</button>
+        <button type="button" class="ghost" data-pset="${esc(key)}" data-pmode="replace">바꾸기</button>
+        ${p.neg ? `<button type="button" class="ghost" data-pset="${esc(key)}" data-pmode="neg">금지 태그도</button>` : ""}
+        <button type="button" class="ghost" data-pedit="${esc(key)}">고치기</button>
+      </div>
     </div>`;
-  const list = kind === "내 것"
-    ? (presets.length ? presets.map((p) => card(p, `own:${p.id}`, true)).join("") : `<p class="hint">저장한 것이 아직 없음.</p>`) +
-      `<div class="acts2"><button type="button" class="ghost" data-psave="scene">지금 이번 그림 저장</button><button type="button" class="ghost" data-psave="style">지금 취향 그림체 저장</button><button type="button" class="ghost" data-psave="neg">지금 빼는 것 저장</button></div>`
-    : PRESETS[kind].map((p, i) => card(p, `${kind}:${i}`, false)).join("");
+}
+
+// 고치는 칸. 글자를 칠 때는 저장만 하고 다시 그리지 않는다(키보드가 내려가지 않게). ‘완료’를 누르면 카드로 돌아간다.
+function presetForm(e, kind) {
+  const { p, key } = e;
+  const f = (name, label, hint, rows, ph) => `<label>${label}${hint ? ` <span class="hint">${hint}</span>` : ""}${rows
+    ? `<textarea data-pf="${name}" rows="${rows}" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="${ph || ""}">${esc(p[name] ?? "")}</textarea>`
+    : `<input type="text" data-pf="${name}" autocomplete="off" value="${esc(p[name] ?? "")}">`}</label>`;
+  return `
+    <div class="preset pform" data-pform="${esc(key)}">
+      ${f("name", "이름", "", 0)}
+      ${f("text", "내용", "영어 태그, 쉼표로", 5, "1girl, silver hair, looking at viewer")}
+      ${p.to !== "neg" ? f("neg", "같이 뺄 것", "‘금지 태그도’를 누르면 빼는 것에 더함", 2) : ""}
+      ${f("note", "메모", "", 0)}
+      ${e.own && kind === "내 것" ? `<label>넣는 곳<select data-pf="to">${Object.entries(TARGET).map(([k, v]) => `<option value="${k}" ${p.to === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>` : ""}
+      <div class="acts2">
+        <button type="button" data-pdone>완료</button>
+        ${e.own ? `<button type="button" class="ghost" data-pdel="${esc(p.id)}">지우기</button>` : `
+        <button type="button" class="ghost" data-prevert="${esc(key)}" ${e.edited ? "" : "disabled"}>기본값으로</button>
+        <button type="button" class="ghost" data-phide="${esc(key)}">숨기기</button>`}
+      </div>
+    </div>`;
+}
+
+function presetInner() {
+  const kind = ui.presetKind;
+  const all = presetEntries(kind);
+  const nHidden = all.filter((e) => e.hidden).length;
+  const shown = all.filter((e) => !e.hidden || ui.showHidden);
+  const list = (shown.length ? shown.map((e) => (e.key === ui.pedit ? presetForm(e, kind) : presetCard(e))).join("") : `<p class="hint">${kind === "내 것" ? "저장한 것이 아직 없음." : "없음."}</p>`) + `
+    <div class="acts2">
+      <button type="button" class="ghost" data-padd>＋ 새로 추가</button>
+      ${kind === "내 것" ? `<button type="button" class="ghost" data-psave="scene">지금 이번 그림 저장</button><button type="button" class="ghost" data-psave="style">지금 취향 그림체 저장</button><button type="button" class="ghost" data-psave="neg">지금 빼는 것 저장</button>` : ""}
+      ${nHidden ? `<button type="button" class="ghost" data-pshowhidden>${ui.showHidden ? "숨긴 것 감추기" : `숨긴 것 ${nHidden}개 보기`}</button>` : ""}
+    </div>`;
   return `
     <div class="chips pk">${PKINDS.map((k) => `<button type="button" class="chip ${k === kind ? "on" : ""}" data-pkind="${k}">${k}</button>`).join("")}</div>
     ${list}
-    <p class="hint">확정 = art 저장소에서 사용자가 확정한 것. 가안 = 사용자의 취향에서 이 앱이 짠 것이고, 태그는 사전에서 게시물 수를 확인함. 인물은 이번 그림 맨 앞에, 자세·구도는 뒤에 붙음. 그림체와 빼는 것의 ‘바꾸기’는 앞으로 모든 그림에 적용됨.</p>`;
+    <p class="hint">확정 = art 저장소에서 사용자가 확정한 것. 가안 = 사용자의 취향에서 이 앱이 짠 것이고, 태그는 사전에서 게시물 수를 확인함. 고친 것은 이 폰에만 저장되고, ‘기본값으로’로 되돌림. 인물은 이번 그림 맨 앞에, 자세·구도는 뒤에 더해짐.</p>`;
 }
 
 function mergeTags(cur, add, front) {
@@ -899,6 +1069,8 @@ function mergeTags(cur, add, front) {
 // 프리셋을 칸에 넣는다. mode: add | replace | neg(금지 태그를 빼는 것에 더함). 알릴 한 줄을 돌려준다.
 function usePreset(p, mode) {
   const d = store.data;
+  if (mode !== "neg" && !tidy(p.text || "")) return "내용이 비어 있음. ‘고치기’에서 채우기";
+  if (mode === "neg" && !tidy(p.neg || "")) return "같이 뺄 것이 비어 있음";
   if (mode === "neg") { d.taste.negative = mergeTags(d.taste.negative, p.neg, false); return `‘${p.name}’의 금지 태그를 빼는 것에 더함`; }
   if (p.to === "scene") { d.draft.scene = mode === "replace" ? tidy(p.text) : mergeTags(d.draft.scene, p.text, p.at === "front"); d.draft.seedLock = false; return `‘${p.name}’을 이번 그림에 ${mode === "replace" ? "바꿔 넣음" : "더함"}`; }
   if (p.to === "style") { const old = tidy(d.taste.style); d.taste.style = mode === "add" ? mergeTags(old, p.text, false) : tidy(p.text); return `취향 그림체에 ‘${p.name}’을 ${mode === "add" ? "더함" : "넣음"}${mode === "add" ? "" : `. 이전 값: ${old.slice(0, 90)}${old.length > 90 ? "…" : ""}`}`; }
@@ -906,11 +1078,44 @@ function usePreset(p, mode) {
   d.taste.negative = mode === "replace" ? tidy(p.text) : mergeTags(old, p.text, false);
   return `빼는 것에 ‘${p.name}’을 ${mode === "replace" ? `넣음. 이전 값: ${old.slice(0, 90)}${old.length > 90 ? "…" : ""}` : "더함"}`;
 }
-const presetByKey = (key) => {
-  if (key.startsWith("own:")) return store.data.presets.find((p) => p.id === key.slice(4));
-  const [kind, i] = key.split(":");
-  return PRESETS[kind]?.[+i];
-};
+
+// ── 비서 지시문 고치기 ───────────────────────────────────────
+// 기본 조각(assistant.js)은 바꾸지 않고, 고친 것만 store.data.persona에 덮어쓴다. 되돌리면 기본 글이 다시 나온다.
+function personaEditor() {
+  const pc = store.data.persona;
+  const part = (p) => {
+    const st = partState(pc, p);
+    return sec(`pp:${p.id}`, esc(p.name), [st.on ? "" : "꺼짐", st.edited ? "고침" : ""].filter(Boolean).join(" · "), `
+      <label class="line"><input type="checkbox" data-pon="${p.id}" ${st.on ? "checked" : ""}> 이 조각 쓰기</label>
+      <textarea data-ptext="${p.id}" rows="9" spellcheck="false" autocomplete="off">${esc(st.text)}</textarea>
+      <button type="button" class="ghost sm" data-prev="${p.id}" ${st.edited ? "" : "disabled"}>이 조각 기본값으로</button>`);
+  };
+  const extra = (e) => sec(`pe:${e.id}`, esc(e.name || "내 조각"), e.on ? "" : "꺼짐", `
+      <label class="line"><input type="checkbox" data-eon="${e.id}" ${e.on ? "checked" : ""}> 이 조각 쓰기</label>
+      <label>이름<input type="text" data-ename="${e.id}" maxlength="30" autocomplete="off" value="${esc(e.name)}"></label>
+      <textarea data-etext="${e.id}" rows="6" spellcheck="false" autocomplete="off" placeholder="비서가 늘 지킬 말을 적기">${esc(e.text)}</textarea>
+      <button type="button" class="ghost sm" data-edel="${e.id}">이 조각 지우기</button>`);
+  const full = fullPersona();
+  const body = `
+    <p class="hint">여기 글이 그대로 제미니의 지시문이 됨. 조각마다 끄거나 고칠 수 있고, 고친 조각은 ‘기본값으로’ 되돌림. 코드 블록 형식(scene·style 등)을 지운 조각을 끄면 답의 ‘넣기’ 버튼이 안 나올 수 있음.</p>
+    ${PERSONA_PARTS.map(part).join("")}
+    <h2>내 조각</h2>
+    ${pc.extra.length ? pc.extra.map(extra).join("") : `<p class="hint">더한 것이 아직 없음. 말투·금지어·늘 넣을 태그 같은 것을 조각으로 따로 두면 기본 조각을 안 건드려도 됨.</p>`}
+    <button type="button" class="ghost" id="addPiece" ${pc.extra.length >= 20 ? "disabled" : ""}>＋ 내 조각 더하기</button>
+    <h2>앱이 자동으로 붙이는 것</h2>
+    <label class="line"><input type="checkbox" id="autoState" ${pc.auto.state ? "checked" : ""}> 앱 상태 <span class="hint">지금 모델·크기·칸 내용</span></label>
+    <label class="line"><input type="checkbox" id="autoCand" ${pc.auto.cand ? "checked" : ""}> 사전 후보 <span class="hint">한국어 낱말 → 단부루 태그</span></label>
+    ${sec("pprev", "보내는 지시문 미리 보기", "", `<p class="hint" id="pcount">${full.length}자</p><pre class="pprev" id="pprevtxt">${esc(full)}</pre><p class="hint">사전 후보는 질문마다 달라서 여기엔 안 보임.</p>`)}
+    <button type="button" class="ghost" id="pReset">지시문 전부 기본값으로</button>`;
+  return sec("persona", "비서 지시문 고치기", "조각을 끄고 켜고 고침", body);
+}
+
+// 이번에 뽑은 그림 목록. 눌러서 크게 다시 본다 (새로 뽑거나 버린 그림을 되돌리는 길).
+function histStrip() {
+  if (!hist.length || (hist.length === 1 && hist[0] === now)) return "";
+  const items = [...hist].reverse().map((h) => `<button type="button" class="hthumb ${h === now ? "on" : ""} ${h.rec.verdict === "keep" ? "kept" : ""}" data-hist="${esc(h.rec.id)}" aria-label="시드 ${h.rec.seed} 그림 다시 보기"><img src="${h.url}" alt=""></button>`).join("");
+  return `<div class="hist"><p class="hint">이번에 뽑은 그림 ${hist.length}장 — 눌러서 다시 봄. 새로 고치면 사라지니 남길 것은 ♥ 보관.</p><div class="hstrip">${items}</div></div>`;
+}
 
 const SCREENS = {
   gen() {
@@ -957,6 +1162,7 @@ const SCREENS = {
           <button type="button" id="toI2i" class="ghost">이 그림으로 변형</button>
         </div>
         <p class="hint">보관과 버림이 쌓이면 ‘취향’ 탭에 자주 고른 태그가 나옴. 안 고른 그림은 새로 고치면 사라짐.</p>` : ""}
+      ${histStrip()}
       ${sec("chars", "인물별 프롬프트", nChars ? `${nChars}명` : "", charsInner())}
       ${sec("ref", "참고 그림", nRefs ? `${s.refMode === "precise" ? "정밀 참조" : "바이브"} ${nRefs}장` : "", refInner())}
       ${sec("i2i", "이미지→이미지", draft.i2i.on && src ? "켬" : "", i2iInner())}
@@ -977,6 +1183,9 @@ const SCREENS = {
         ? `<button type="button" id="stopAsk" class="ghost big">눌러서 취소</button>`
         : `<button type="button" id="send" class="big">보내기</button>`}
       ${chat.length ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
+      ${personaEditor()}
+      <label for="aiModelQ">대답하는 모델 <span class="hint">${s.aiModel === "custom" ? "직접 입력한 이름은 ‘취향’ 탭에서 고침" : ""}</span></label>
+      <select id="aiModelQ">${MODEL_CHOICES.map((m) => `<option value="${m}" ${s.aiModel === m ? "selected" : ""}>${m === "gemini-4-argon" ? "gemini-4-argon (아르곤)" : m}</option>`).join("")}<option value="custom" ${s.aiModel === "custom" ? "selected" : ""}>직접 입력${s.aiModel === "custom" && s.aiCustom ? ` (${esc(s.aiCustom)})` : ""}</option></select>
       <p class="hint">대답은 제미니(${esc(s.aiModel === "custom" ? s.aiCustom : s.aiModel)})가 하고, 태그는 같이 실린 단부루 사전에서 맞춰 봄. 제미니 말은 틀릴 수 있어서 넣은 뒤 직접 한 번 읽기.</p>`;
   },
 
@@ -1069,7 +1278,7 @@ function render() {
   const seq = ++renderSeq;
   thumbUrls.forEach((u) => URL.revokeObjectURL(u));
   thumbUrls = [];
-  document.getElementById("screen").innerHTML = SCREENS[name](arg);
+  document.getElementById("screen").innerHTML = (saveFail ? `<p class="error" role="alert">저장이 안 되고 있음. 이 기기 저장 공간이 참. 지금 고친 것은 새로 고치면 사라짐. ‘취향’ 탭에서 기록을 내보낸 뒤 오래된 대화나 기록을 지우기.</p>` : "") + SCREENS[name](arg);
   document.getElementById("title").textContent = TITLES[name];
   const kept = store.data.log.filter((r) => r.verdict === "keep").length;
   document.getElementById("count").textContent = name === "keep" && kept ? `${kept}장` : "";
@@ -1084,12 +1293,26 @@ const $ = (id) => document.getElementById(id);
 const on = (id, ev, fn) => $(id)?.addEventListener(ev, fn);
 
 // 눌러서 바꾼 것을 알리는 한 줄. 화면이 바뀌어도 남도록 본문 밖에 띄운다.
-function toast(msg) {
+// undo가 있으면 ‘되돌리기’ 버튼을 달고 조금 더 오래 둔다.
+// expire: 되돌리기 없이 알림이 사라지거나 다른 알림이 덮을 때 한 번 불린다 (버린 그림의 마무리 정리용).
+let toastTimer = null, toastExpire = null;
+function toastDone() { const f = toastExpire; toastExpire = null; f?.(); }
+function toast(msg, undo, expire) {
+  clearTimeout(toastTimer);
+  toastDone();
   document.querySelector(".toast")?.remove();
   const t = document.createElement("div");
-  t.className = "toast"; t.setAttribute("role", "status"); t.textContent = msg;
+  t.className = "toast"; t.setAttribute("role", "status");
+  const m = document.createElement("span"); m.textContent = msg; t.appendChild(m);
+  toastExpire = expire || null;
+  if (undo) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "undo"; b.textContent = "되돌리기";
+    b.addEventListener("click", () => { clearTimeout(toastTimer); toastExpire = null; t.remove(); undo(); });
+    t.appendChild(b);
+  }
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 4500);
+  toastTimer = setTimeout(() => { t.remove(); toastDone(); }, undo ? 9000 : 4500);
 }
 
 function savePreset(to) {
@@ -1098,7 +1321,7 @@ function savePreset(to) {
   if (!text) return toast("비어 있어서 저장할 게 없음");
   const name = (prompt("프리셋 이름") || "").trim().slice(0, 30);
   if (!name) return;
-  d.presets.unshift({ id: crypto.randomUUID(), name, text, to });
+  d.presets.unshift({ id: crypto.randomUUID(), name, text, to, kind: "내 것" });
   ui.open.preset = true; ui.presetKind = "내 것";
   toast(`‘${name}’ 저장함`);
   store.save();
@@ -1140,6 +1363,55 @@ function wireAsk() {
   else scrollAi = false;
 }
 
+function wirePersona() {
+  const d = store.data, pc = d.persona;
+  document.querySelectorAll("details[data-sec]").forEach((el) => el.addEventListener("toggle", () => { ui.open[el.dataset.sec] = el.open; }));
+  const refresh = () => {
+    const t = fullPersona();
+    const a = $("pprevtxt"), c = $("pcount");
+    if (a) a.textContent = t;
+    if (c) c.textContent = `${t.length}자`;
+  };
+  // 고친 조각만 남긴다: 기본과 같아지면 덮어쓴 것을 지워 기본 글이 따라오게 한다.
+  const setSec = (id, patch) => {
+    const o = { ...(pc.sections[id] || {}), ...patch };
+    if (o.text === undefined) delete o.text;
+    if (o.on !== false) delete o.on;
+    if (Object.keys(o).length) pc.sections[id] = o; else delete pc.sections[id];
+  };
+  document.querySelectorAll("[data-ptext]").forEach((el) => el.addEventListener("input", () => {
+    const id = el.dataset.ptext, base = PERSONA_PARTS.find((p) => p.id === id);
+    if (!base) return;
+    setSec(id, { text: el.value === base.text ? undefined : el.value });
+    const b = document.querySelector(`[data-prev="${id}"]`);
+    if (b) b.disabled = el.value === base.text;
+    store.persist(); refresh();
+  }));
+  document.querySelectorAll("[data-prev]").forEach((el) => el.addEventListener("click", () => { setSec(el.dataset.prev, { text: undefined }); store.save(); }));
+  document.querySelectorAll("[data-pon]").forEach((el) => el.addEventListener("change", () => { setSec(el.dataset.pon, { on: el.checked }); store.save(); }));
+  const extraOf = (el, k) => pc.extra.find((e) => e.id === el.dataset[k]);
+  on("addPiece", "click", () => {
+    if (pc.extra.length >= 20) return;
+    const e = { id: crypto.randomUUID(), name: "새 조각", text: "", on: true };
+    pc.extra.push(e); ui.open.persona = true; ui.open[`pe:${e.id}`] = true;
+    store.save();
+  });
+  document.querySelectorAll("[data-ename]").forEach((el) => el.addEventListener("input", () => { const e = extraOf(el, "ename"); if (e) { e.name = el.value; store.persist(); refresh(); } }));
+  document.querySelectorAll("[data-etext]").forEach((el) => el.addEventListener("input", () => { const e = extraOf(el, "etext"); if (e) { e.text = el.value; store.persist(); refresh(); } }));
+  document.querySelectorAll("[data-eon]").forEach((el) => el.addEventListener("change", () => { const e = extraOf(el, "eon"); if (e) { e.on = el.checked; store.save(); } }));
+  document.querySelectorAll("[data-edel]").forEach((el) => el.addEventListener("click", () => {
+    const e = extraOf(el, "edel");
+    if (!e || !confirm(`‘${e.name || "내 조각"}’ 조각을 지움.`)) return;
+    pc.extra = pc.extra.filter((x) => x !== e); store.save();
+  }));
+  on("autoState", "change", (e) => { pc.auto.state = e.target.checked; store.persist(); refresh(); });
+  on("autoCand", "change", (e) => { pc.auto.cand = e.target.checked; store.persist(); });
+  on("pReset", "click", () => {
+    if (!confirm("고친 조각, 내 조각, 켜고 끈 것을 전부 지우고 기본 지시문으로 돌림.")) return;
+    d.persona = normPersona(null); store.save();
+  });
+}
+
 function wire(name, arg, seq) {
   const d = store.data;
   if (name === "gen") {
@@ -1164,6 +1436,13 @@ function wire(name, arg, seq) {
     on("share", "click", () => now && shareImage(now.blob, now.rec));
     on("useSeed", "click", () => { if (!now) return; d.draft.seed = now.rec.seed; d.draft.seedLock = true; toast(`시드 ${now.rec.seed}로 고정함`); store.save(); });
     on("saveScene", "click", () => savePreset("scene"));
+    document.querySelectorAll("[data-hist]").forEach((b) => b.addEventListener("click", () => {
+      const h = hist.find((x) => x.rec.id === b.dataset.hist);
+      if (!h) return;
+      now = h;
+      render();
+      document.querySelector("figure.result")?.scrollIntoView({ block: "nearest" });
+    }));
 
     // 인물별 프롬프트
     const charOf = (el, k) => d.draft.chars.find((c) => c.id === el.dataset[k]);
@@ -1239,16 +1518,73 @@ function wire(name, arg, seq) {
     on("variety", "change", (e) => { d.settings.variety = e.target.checked; store.save(); });
 
     // 프리셋
-    document.querySelectorAll("[data-pkind]").forEach((b) => b.addEventListener("click", () => { ui.presetKind = b.dataset.pkind; ui.open.preset = true; render(); }));
+    document.querySelectorAll("[data-pkind]").forEach((b) => b.addEventListener("click", () => { ui.presetKind = b.dataset.pkind; ui.pedit = null; ui.pput = null; ui.open.preset = true; render(); }));
     document.querySelectorAll("[data-pset]").forEach((b) => b.addEventListener("click", () => {
       const p = presetByKey(b.dataset.pset); if (!p) return;
-      toast(usePreset(p, b.dataset.pmode));
+      if (b.dataset.pmode === "replace") {
+        if (!tidy(p.text || "")) return toast("내용이 비어 있음. ‘고치기’에서 채우기");
+        ui.pput = b.dataset.pset; ui.pputText = p.text; ui.pedit = null; ui.open.preset = true;
+        return render();
+      }
+      applyPreset(p, b.dataset.pmode);
+    }));
+    document.querySelectorAll("[data-pputtext]").forEach((el) => el.addEventListener("input", () => { ui.pputText = el.value; }));
+    document.querySelectorAll("[data-pputgo]").forEach((b) => b.addEventListener("click", () => {
+      const key = b.closest("[data-pput]")?.dataset.pput, p = key && presetByKey(key);
+      if (!p) return;
+      if (!tidy(ui.pputText)) return toast("넣을 글이 비어 있음");
+      ui.pput = null;
+      applyPreset({ ...p, text: ui.pputText }, b.dataset.pputgo);
+    }));
+    document.querySelectorAll("[data-pputcancel]").forEach((b) => b.addEventListener("click", () => { ui.pput = null; render(); }));
+    document.querySelectorAll("[data-pdel]").forEach((b) => b.addEventListener("click", () => {
+      const p = d.presets.find((x) => x.id === b.dataset.pdel);
+      if (!p || !confirm(`‘${p.name || "이름 없음"}’ 프리셋을 지움.`)) return;
+      d.presets = d.presets.filter((x) => x !== p); ui.pedit = null; store.save();
+    }));
+    // 프리셋 고치기·더하기
+    document.querySelectorAll("[data-pedit]").forEach((b) => b.addEventListener("click", () => { ui.pedit = b.dataset.pedit; ui.pput = null; ui.open.preset = true; render(); }));
+    document.querySelectorAll("[data-pdone]").forEach((b) => b.addEventListener("click", () => { ui.pedit = null; render(); }));
+    document.querySelectorAll("[data-padd]").forEach((b) => b.addEventListener("click", () => {
+      const kind = ui.presetKind;
+      const p = { id: crypto.randomUUID(), name: "새 프리셋", text: "", to: KIND_TO[kind] || "scene", kind };
+      if (kind === "인물") p.at = "front";
+      d.presets.unshift(p); ui.pedit = `own:${p.id}`; ui.open.preset = true;
       store.save();
     }));
-    document.querySelectorAll("[data-pdel]").forEach((b) => b.addEventListener("click", () => { d.presets = d.presets.filter((p) => p.id !== b.dataset.pdel); store.save(); }));
+    document.querySelectorAll("[data-pf]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
+      const key = el.closest("[data-pform]")?.dataset.pform, f = el.dataset.pf;
+      if (!key) return;
+      if (key.startsWith("own:")) {
+        const p = d.presets.find((x) => x.id === key.slice(4));
+        if (!p) return;
+        if (f === "to") { if (TARGET[el.value]) { p.to = el.value; if (p.to !== "scene") delete p.at; } } else p[f] = el.value;
+      } else {
+        const base = baseOf(key);
+        if (!base) return;
+        const e = (d.presetEdits[key] ??= {});
+        if (el.value === (base[f] ?? "")) delete e[f]; else e[f] = el.value;
+        if (!Object.keys(e).length) delete d.presetEdits[key];
+        const rv = document.querySelector(`[data-prevert="${CSS.escape(key)}"]`);
+        if (rv) rv.disabled = !PFIELDS.some((k) => typeof d.presetEdits[key]?.[k] === "string");
+      }
+      store.persist();
+    }));
+    document.querySelectorAll("[data-prevert]").forEach((b) => b.addEventListener("click", () => {
+      const e = d.presetEdits[b.dataset.prevert];
+      if (e) { for (const f of PFIELDS) delete e[f]; if (!Object.keys(e).length) delete d.presetEdits[b.dataset.prevert]; }
+      store.save();
+    }));
+    document.querySelectorAll("[data-phide]").forEach((b) => b.addEventListener("click", () => { (d.presetEdits[b.dataset.phide] ??= {}).hidden = true; ui.pedit = null; store.save(); }));
+    document.querySelectorAll("[data-punhide]").forEach((b) => b.addEventListener("click", () => {
+      const e = d.presetEdits[b.dataset.punhide];
+      if (e) { delete e.hidden; if (!Object.keys(e).length) delete d.presetEdits[b.dataset.punhide]; }
+      store.save();
+    }));
+    document.querySelectorAll("[data-pshowhidden]").forEach((b) => b.addEventListener("click", () => { ui.showHidden = !ui.showHidden; render(); }));
     document.querySelectorAll("[data-psave]").forEach((b) => b.addEventListener("click", () => savePreset(b.dataset.psave)));
   }
-  if (name === "ai") wireAsk();
+  if (name === "ai") { wireAsk(); wirePersona(); on("aiModelQ", "change", (e) => { d.settings.aiModel = e.target.value; store.save(); }); }
   if (name === "keep" && !arg) {
     document.querySelectorAll("[data-thumb]").forEach(async (a) => {
       const row = await imgGet(a.dataset.thumb).catch(() => null);
@@ -1313,7 +1649,7 @@ function wire(name, arg, seq) {
       if (src) { URL.revokeObjectURL(src.url); src = null; }
       refs.forEach((r) => URL.revokeObjectURL(r.url));
       refs = [];
-      if (now) { URL.revokeObjectURL(now.url); now = null; }
+      histClear();
       store.data = SHAPE();
       store.save();
     });
