@@ -256,3 +256,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 .pprev { margin: 8px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
 .secbody .sec { background: var(--bg); }
 .secbody h2 { margin: 18px 0 0; font-size: 15px; }
+
+/* 프리셋 고치기 */
+.preset.dim { opacity: .6; }
+.pform label { display: block; margin: 10px 0 4px; }
+.pform textarea, .pform input[type="text"], .pform select { margin-top: 4px; }

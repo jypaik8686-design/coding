@@ -42,6 +42,8 @@ const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, s
 // settings 새 칸: sampler / noise(스케줄) / cfgRescale / variety / customW·customH(size가 "직접"일 때) / refMode("vibe"|"precise")
 // draft 새 칸: chars [{id, text, neg, pos}] 인물별 프롬프트(pos: null=AI가 정함, 0~24=5x5 칸 번호), i2i {on, strength, noise} (원본 그림은 IndexedDB "src")
 // presets 항목: { id, name, text, to: "scene"|"style"|"neg" } 사용자가 저장한 프롬프트
+// presets 새 칸(옛 항목에는 없음, normPresets가 메움): kind("인물"|"그림체"|"자세·구도"|"빼는 것"|"내 것", 없으면 "내 것") / neg / note / at("front")
+// presetEdits: 내장 프리셋(presets.js)을 고친 것. { "b:<종류>:<기본 이름>": { name?, text?, neg?, note?, hidden? } }. 기본과 같아진 칸은 지워서 기본 글이 따라오게 한다.
 // persona: 비서 지시문을 사용자가 고친 것. sections { <조각 id>: { text?, on? } }는 기본 조각을 덮어쓴 것만 담고, extra [{id, name, text, on}]는 사용자가 더한 조각,
 //   auto { state, cand }는 앱이 지시문 뒤에 자동으로 붙이는 ‘앱 상태’와 ‘사전 후보’를 켜는지. 옛 데이터에는 없다 (normPersona가 메운다).
 // log 새 칸: sampler / noise / cr / vb / chars / i2i / mode. 옛 항목에는 없다 (없으면 처음 값으로 읽는다).
@@ -57,8 +59,11 @@ const SHAPE = () => ({
   chat: [],
   presets: [],
   persona: { sections: {}, extra: [], auto: { state: true, cand: true } },
+  presetEdits: {},
 });
 
+const PRESET_KINDS = ["인물", "그림체", "자세·구도", "빼는 것", "내 것"];
+const str = (v, max) => (typeof v === "string" ? v.slice(0, max) : "");
 let saveFail = false; // 마지막 저장이 실패했는지 (화면 맨 위 경고)
 const store = {
   data: load(),
@@ -73,6 +78,30 @@ const store = {
   },
   save() { this.persist(); render(); },
 };
+
+function normPresets(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((p) => p && p.id && typeof p.text === "string").map((p) => {
+    const o = { id: String(p.id), name: str(p.name, 60), text: p.text.slice(0, 4000), to: ["scene", "style", "neg"].includes(p.to) ? p.to : "scene", kind: PRESET_KINDS.includes(p.kind) ? p.kind : "내 것" };
+    if (typeof p.neg === "string" && p.neg) o.neg = p.neg.slice(0, 4000);
+    if (typeof p.note === "string" && p.note) o.note = p.note.slice(0, 300);
+    if (p.at === "front" && o.to === "scene") o.at = "front";
+    return o;
+  });
+}
+function normPresetEdits(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const kind of Object.keys(PRESETS)) for (const b of PRESETS[kind]) {
+    const k = `b:${kind}:${b.name}`, o = raw[k];
+    if (!o || typeof o !== "object") continue;
+    const e = {};
+    for (const f of ["name", "text", "neg", "note"]) if (typeof o[f] === "string" && o[f] !== (b[f] ?? "")) e[f] = o[f].slice(0, 4000);
+    if (o.hidden === true) e.hidden = true;
+    if (Object.keys(e).length) out[k] = e;
+  }
+  return out;
+}
 
 // 옛 데이터·깨진 값이 와도 항상 같은 꼴로 돌려준다. 항목 안쪽 칸은 펼치기가 메워 주지 않아서 여기서 하나씩 본다.
 function normPersona(raw) {
@@ -110,7 +139,8 @@ function load() {
       settings: { ...base.settings, ...(raw.settings || {}) },
       taste,
       draft,
-      presets: Array.isArray(raw.presets) ? raw.presets.filter((p) => p && p.id && typeof p.text === "string") : [],
+      presets: normPresets(raw.presets),
+      presetEdits: normPresetEdits(raw.presetEdits),
       log: Array.isArray(raw.log) ? raw.log.filter((r) => r && r.id) : [],
       chat: Array.isArray(raw.chat) ? raw.chat.filter((m) => m && (m.role === "user" || m.role === "model") && typeof m.text === "string") : [],
       persona: normPersona(raw.persona),
@@ -777,7 +807,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 
 // ── 뽑기 화면 조각들 ─────────────────────────────────────────
 // 접었다 펴는 칸. 화면이 다시 그려져도 펼친 상태를 기억하려고 ui.open에 둔다 (새로 고치면 처음으로).
-const ui = { open: {}, withImg: false, presetKind: "인물" };
+const ui = { open: {}, withImg: false, presetKind: "인물", pedit: null, showHidden: false };
 const sec = (k, title, hint, inner) =>
   `<details class="sec" data-sec="${k}" ${ui.open[k] ? "open" : ""}><summary>${title}${hint ? ` <small>${esc(hint)}</small>` : ""}</summary><div class="secbody">${inner}</div></details>`;
 
@@ -894,35 +924,86 @@ function advInner() {
     <p class="hint">스텝 ${FREE_STEPS} 이하, 일반 크기 이하, 한 장씩이면 Opus는 Anlas가 안 듦(문서). 넘기면 Anlas가 들 수 있음. Variety+의 값은 200이 오는 것만 확인했고 NovelAI 화면과 같은 값인지는 확인 못 함. DPM++ 2M과 Euler Ancestral이 NovelAI 권장 샘플러임(문서).</p>`;
 }
 
-const PKINDS = ["인물", "그림체", "자세·구도", "빼는 것", "내 것"];
-function presetInner() {
-  const { presets } = store.data;
-  const kind = ui.presetKind;
-  const btns = (p, key, own) => {
-    const addTxt = p.to === "style" ? "더하기" : "더하기";
-    return `<div class="acts2">
-      <button type="button" data-pset="${key}" data-pmode="add">${addTxt}</button>
-      <button type="button" class="ghost" data-pset="${key}" data-pmode="replace">바꾸기</button>
-      ${p.neg ? `<button type="button" class="ghost" data-pset="${key}" data-pmode="neg">금지 태그도</button>` : ""}
-      ${own ? `<button type="button" class="ghost" data-pdel="${p.id}">지우기</button>` : ""}
-    </div>`;
-  };
-  const target = { scene: "이번 그림", style: "취향 그림체", neg: "빼는 것" };
-  const card = (p, key, own) => `
+const PKINDS = PRESET_KINDS;
+const KIND_TO = { 인물: "scene", 그림체: "style", "자세·구도": "scene", "빼는 것": "neg" }; // 종류 탭에서 새로 만들면 여기에 넣는 곳이 정해진다
+const TARGET = { scene: "이번 그림", style: "취향 그림체", neg: "빼는 것" };
+const PFIELDS = ["name", "text", "neg", "note"];
+const bkey = (kind, p) => `b:${kind}:${p.name}`;
+const baseOf = (key) => { const m = key.match(/^b:([^:]+):(.+)$/); return m ? (PRESETS[m[1]] || []).find((b) => b.name === m[2]) : null; };
+
+// 한 종류의 프리셋 전부: 내장(고친 것 반영) + 내가 만든 것. 내장의 key는 기본 이름으로 고정이라 이름을 고쳐도 안 바뀐다.
+function presetEntries(kind) {
+  const d = store.data, out = [];
+  for (const base of PRESETS[kind] || []) {
+    const key = bkey(kind, base), e = d.presetEdits[key] || {};
+    const p = { ...base };
+    for (const f of PFIELDS) if (typeof e[f] === "string") p[f] = e[f];
+    out.push({ key, p, own: false, hidden: !!e.hidden, edited: PFIELDS.some((f) => typeof e[f] === "string") });
+  }
+  for (const p of d.presets) if (p.kind === kind) out.push({ key: `own:${p.id}`, p, own: true, hidden: false, edited: false });
+  return out;
+}
+const presetByKey = (key) => {
+  if (key.startsWith("own:")) return store.data.presets.find((p) => p.id === key.slice(4));
+  const m = key.match(/^b:([^:]+):/);
+  return m ? presetEntries(m[1]).find((e) => e.key === key)?.p : null;
+};
+
+function presetCard(e) {
+  const { p, key } = e;
+  const badge = e.own ? TARGET[p.to] : e.edited ? "고침" : p.ok ? "확정" : "가안";
+  if (e.hidden) return `<div class="preset dim"><div class="phead"><b>${esc(p.name)}</b><span class="tag">숨김</span></div><div class="acts2"><button type="button" class="ghost" data-punhide="${esc(key)}">숨김 풀기</button></div></div>`;
+  return `
     <div class="preset">
-      <div class="phead"><b>${esc(p.name)}</b><span class="tag ${p.ok ? "ok" : ""}">${own ? target[p.to] : p.ok ? "확정" : "가안"}</span></div>
-      <p class="ptext">${esc(p.text)}</p>
+      <div class="phead"><b>${esc(p.name) || "이름 없음"}</b><span class="tag ${!e.own && !e.edited && p.ok ? "ok" : ""}">${badge}</span></div>
+      <p class="ptext">${esc(p.text) || "(비어 있음)"}</p>
       ${p.note ? `<p class="hint">${esc(p.note)}</p>` : ""}
-      ${btns(p, key, own)}
+      <div class="acts2">
+        <button type="button" data-pset="${esc(key)}" data-pmode="add">더하기</button>
+        <button type="button" class="ghost" data-pset="${esc(key)}" data-pmode="replace">바꾸기</button>
+        ${p.neg ? `<button type="button" class="ghost" data-pset="${esc(key)}" data-pmode="neg">금지 태그도</button>` : ""}
+        <button type="button" class="ghost" data-pedit="${esc(key)}">고치기</button>
+      </div>
     </div>`;
-  const list = kind === "내 것"
-    ? (presets.length ? presets.map((p) => card(p, `own:${p.id}`, true)).join("") : `<p class="hint">저장한 것이 아직 없음.</p>`) +
-      `<div class="acts2"><button type="button" class="ghost" data-psave="scene">지금 이번 그림 저장</button><button type="button" class="ghost" data-psave="style">지금 취향 그림체 저장</button><button type="button" class="ghost" data-psave="neg">지금 빼는 것 저장</button></div>`
-    : PRESETS[kind].map((p, i) => card(p, `${kind}:${i}`, false)).join("");
+}
+
+// 고치는 칸. 글자를 칠 때는 저장만 하고 다시 그리지 않는다(키보드가 내려가지 않게). ‘완료’를 누르면 카드로 돌아간다.
+function presetForm(e, kind) {
+  const { p, key } = e;
+  const f = (name, label, hint, rows, ph) => `<label>${label}${hint ? ` <span class="hint">${hint}</span>` : ""}${rows
+    ? `<textarea data-pf="${name}" rows="${rows}" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="${ph || ""}">${esc(p[name] ?? "")}</textarea>`
+    : `<input type="text" data-pf="${name}" autocomplete="off" value="${esc(p[name] ?? "")}">`}</label>`;
+  return `
+    <div class="preset pform" data-pform="${esc(key)}">
+      ${f("name", "이름", "", 0)}
+      ${f("text", "내용", "영어 태그, 쉼표로", 5, "1girl, silver hair, looking at viewer")}
+      ${p.to !== "neg" ? f("neg", "같이 뺄 것", "‘금지 태그도’를 누르면 빼는 것에 더함", 2) : ""}
+      ${f("note", "메모", "", 0)}
+      ${e.own && kind === "내 것" ? `<label>넣는 곳<select data-pf="to">${Object.entries(TARGET).map(([k, v]) => `<option value="${k}" ${p.to === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>` : ""}
+      <div class="acts2">
+        <button type="button" data-pdone>완료</button>
+        ${e.own ? `<button type="button" class="ghost" data-pdel="${esc(p.id)}">지우기</button>` : `
+        <button type="button" class="ghost" data-prevert="${esc(key)}" ${e.edited ? "" : "disabled"}>기본값으로</button>
+        <button type="button" class="ghost" data-phide="${esc(key)}">숨기기</button>`}
+      </div>
+    </div>`;
+}
+
+function presetInner() {
+  const kind = ui.presetKind;
+  const all = presetEntries(kind);
+  const nHidden = all.filter((e) => e.hidden).length;
+  const shown = all.filter((e) => !e.hidden || ui.showHidden);
+  const list = (shown.length ? shown.map((e) => (e.key === ui.pedit ? presetForm(e, kind) : presetCard(e))).join("") : `<p class="hint">${kind === "내 것" ? "저장한 것이 아직 없음." : "없음."}</p>`) + `
+    <div class="acts2">
+      <button type="button" class="ghost" data-padd>＋ 새로 추가</button>
+      ${kind === "내 것" ? `<button type="button" class="ghost" data-psave="scene">지금 이번 그림 저장</button><button type="button" class="ghost" data-psave="style">지금 취향 그림체 저장</button><button type="button" class="ghost" data-psave="neg">지금 빼는 것 저장</button>` : ""}
+      ${nHidden ? `<button type="button" class="ghost" data-pshowhidden>${ui.showHidden ? "숨긴 것 감추기" : `숨긴 것 ${nHidden}개 보기`}</button>` : ""}
+    </div>`;
   return `
     <div class="chips pk">${PKINDS.map((k) => `<button type="button" class="chip ${k === kind ? "on" : ""}" data-pkind="${k}">${k}</button>`).join("")}</div>
     ${list}
-    <p class="hint">확정 = art 저장소에서 사용자가 확정한 것. 가안 = 사용자의 취향에서 이 앱이 짠 것이고, 태그는 사전에서 게시물 수를 확인함. 인물은 이번 그림 맨 앞에, 자세·구도는 뒤에 붙음. 그림체와 빼는 것의 ‘바꾸기’는 앞으로 모든 그림에 적용됨.</p>`;
+    <p class="hint">확정 = art 저장소에서 사용자가 확정한 것. 가안 = 사용자의 취향에서 이 앱이 짠 것이고, 태그는 사전에서 게시물 수를 확인함. 고친 것은 이 폰에만 저장되고, ‘기본값으로’로 되돌림. 인물은 이번 그림 맨 앞에, 자세·구도는 뒤에 더해짐.</p>`;
 }
 
 function mergeTags(cur, add, front) {
@@ -933,6 +1014,8 @@ function mergeTags(cur, add, front) {
 // 프리셋을 칸에 넣는다. mode: add | replace | neg(금지 태그를 빼는 것에 더함). 알릴 한 줄을 돌려준다.
 function usePreset(p, mode) {
   const d = store.data;
+  if (mode !== "neg" && !tidy(p.text || "")) return "내용이 비어 있음. ‘고치기’에서 채우기";
+  if (mode === "neg" && !tidy(p.neg || "")) return "같이 뺄 것이 비어 있음";
   if (mode === "neg") { d.taste.negative = mergeTags(d.taste.negative, p.neg, false); return `‘${p.name}’의 금지 태그를 빼는 것에 더함`; }
   if (p.to === "scene") { d.draft.scene = mode === "replace" ? tidy(p.text) : mergeTags(d.draft.scene, p.text, p.at === "front"); d.draft.seedLock = false; return `‘${p.name}’을 이번 그림에 ${mode === "replace" ? "바꿔 넣음" : "더함"}`; }
   if (p.to === "style") { const old = tidy(d.taste.style); d.taste.style = mode === "add" ? mergeTags(old, p.text, false) : tidy(p.text); return `취향 그림체에 ‘${p.name}’을 ${mode === "add" ? "더함" : "넣음"}${mode === "add" ? "" : `. 이전 값: ${old.slice(0, 90)}${old.length > 90 ? "…" : ""}`}`; }
@@ -940,11 +1023,6 @@ function usePreset(p, mode) {
   d.taste.negative = mode === "replace" ? tidy(p.text) : mergeTags(old, p.text, false);
   return `빼는 것에 ‘${p.name}’을 ${mode === "replace" ? `넣음. 이전 값: ${old.slice(0, 90)}${old.length > 90 ? "…" : ""}` : "더함"}`;
 }
-const presetByKey = (key) => {
-  if (key.startsWith("own:")) return store.data.presets.find((p) => p.id === key.slice(4));
-  const [kind, i] = key.split(":");
-  return PRESETS[kind]?.[+i];
-};
 
 // ── 비서 지시문 고치기 ───────────────────────────────────────
 // 기본 조각(assistant.js)은 바꾸지 않고, 고친 것만 store.data.persona에 덮어쓴다. 되돌리면 기본 글이 다시 나온다.
@@ -1166,7 +1244,7 @@ function savePreset(to) {
   if (!text) return toast("비어 있어서 저장할 게 없음");
   const name = (prompt("프리셋 이름") || "").trim().slice(0, 30);
   if (!name) return;
-  d.presets.unshift({ id: crypto.randomUUID(), name, text, to });
+  d.presets.unshift({ id: crypto.randomUUID(), name, text, to, kind: "내 것" });
   ui.open.preset = true; ui.presetKind = "내 것";
   toast(`‘${name}’ 저장함`);
   store.save();
@@ -1356,13 +1434,57 @@ function wire(name, arg, seq) {
     on("variety", "change", (e) => { d.settings.variety = e.target.checked; store.save(); });
 
     // 프리셋
-    document.querySelectorAll("[data-pkind]").forEach((b) => b.addEventListener("click", () => { ui.presetKind = b.dataset.pkind; ui.open.preset = true; render(); }));
+    document.querySelectorAll("[data-pkind]").forEach((b) => b.addEventListener("click", () => { ui.presetKind = b.dataset.pkind; ui.pedit = null; ui.open.preset = true; render(); }));
     document.querySelectorAll("[data-pset]").forEach((b) => b.addEventListener("click", () => {
       const p = presetByKey(b.dataset.pset); if (!p) return;
       toast(usePreset(p, b.dataset.pmode));
       store.save();
     }));
-    document.querySelectorAll("[data-pdel]").forEach((b) => b.addEventListener("click", () => { d.presets = d.presets.filter((p) => p.id !== b.dataset.pdel); store.save(); }));
+    document.querySelectorAll("[data-pdel]").forEach((b) => b.addEventListener("click", () => {
+      const p = d.presets.find((x) => x.id === b.dataset.pdel);
+      if (!p || !confirm(`‘${p.name || "이름 없음"}’ 프리셋을 지움.`)) return;
+      d.presets = d.presets.filter((x) => x !== p); ui.pedit = null; store.save();
+    }));
+    // 프리셋 고치기·더하기
+    document.querySelectorAll("[data-pedit]").forEach((b) => b.addEventListener("click", () => { ui.pedit = b.dataset.pedit; ui.open.preset = true; render(); }));
+    document.querySelectorAll("[data-pdone]").forEach((b) => b.addEventListener("click", () => { ui.pedit = null; render(); }));
+    document.querySelectorAll("[data-padd]").forEach((b) => b.addEventListener("click", () => {
+      const kind = ui.presetKind;
+      const p = { id: crypto.randomUUID(), name: "새 프리셋", text: "", to: KIND_TO[kind] || "scene", kind };
+      if (kind === "인물") p.at = "front";
+      d.presets.unshift(p); ui.pedit = `own:${p.id}`; ui.open.preset = true;
+      store.save();
+    }));
+    document.querySelectorAll("[data-pf]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
+      const key = el.closest("[data-pform]")?.dataset.pform, f = el.dataset.pf;
+      if (!key) return;
+      if (key.startsWith("own:")) {
+        const p = d.presets.find((x) => x.id === key.slice(4));
+        if (!p) return;
+        if (f === "to") { if (TARGET[el.value]) { p.to = el.value; if (p.to !== "scene") delete p.at; } } else p[f] = el.value;
+      } else {
+        const base = baseOf(key);
+        if (!base) return;
+        const e = (d.presetEdits[key] ??= {});
+        if (el.value === (base[f] ?? "")) delete e[f]; else e[f] = el.value;
+        if (!Object.keys(e).length) delete d.presetEdits[key];
+        const rv = document.querySelector(`[data-prevert="${CSS.escape(key)}"]`);
+        if (rv) rv.disabled = !PFIELDS.some((k) => typeof d.presetEdits[key]?.[k] === "string");
+      }
+      store.persist();
+    }));
+    document.querySelectorAll("[data-prevert]").forEach((b) => b.addEventListener("click", () => {
+      const e = d.presetEdits[b.dataset.prevert];
+      if (e) { for (const f of PFIELDS) delete e[f]; if (!Object.keys(e).length) delete d.presetEdits[b.dataset.prevert]; }
+      store.save();
+    }));
+    document.querySelectorAll("[data-phide]").forEach((b) => b.addEventListener("click", () => { (d.presetEdits[b.dataset.phide] ??= {}).hidden = true; ui.pedit = null; store.save(); }));
+    document.querySelectorAll("[data-punhide]").forEach((b) => b.addEventListener("click", () => {
+      const e = d.presetEdits[b.dataset.punhide];
+      if (e) { delete e.hidden; if (!Object.keys(e).length) delete d.presetEdits[b.dataset.punhide]; }
+      store.save();
+    }));
+    document.querySelectorAll("[data-pshowhidden]").forEach((b) => b.addEventListener("click", () => { ui.showHidden = !ui.showHidden; render(); }));
     document.querySelectorAll("[data-psave]").forEach((b) => b.addEventListener("click", () => savePreset(b.dataset.psave)));
   }
   if (name === "ai") { wireAsk(); wirePersona(); on("aiModelQ", "change", (e) => { d.settings.aiModel = e.target.value; store.save(); }); }
