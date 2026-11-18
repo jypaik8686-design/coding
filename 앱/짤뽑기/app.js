@@ -42,6 +42,7 @@ const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, s
 // settings 새 칸: sampler / noise(스케줄) / cfgRescale / variety / customW·customH(size가 "직접"일 때) / refMode("vibe"|"precise")
 // draft 새 칸: chars [{id, text, neg, pos}] 인물별 프롬프트(pos: null=AI가 정함, 0~24=5x5 칸 번호), i2i {on, strength, noise} (원본 그림은 IndexedDB "src")
 // presets 항목: { id, name, text, to: "scene"|"style"|"neg" } 사용자가 저장한 프롬프트
+// userDict: 내 단어 사전 [{id, word, tags}]. 비서에게 말할 때 낱말이 들어 있으면 기본 사전보다 먼저 [사전 후보]로 붙는다. 옛 데이터에는 없어 처음 한 번 STARTER_DICT로 채운다(그 뒤에 비우면 다시 안 채움).
 // presets 새 칸(옛 항목에는 없음, normPresets가 메움): kind("인물"|"그림체"|"자세·구도"|"빼는 것"|"내 것", 없으면 "내 것") / neg / note / at("front")
 // presetEdits: 내장 프리셋(presets.js)을 고친 것. { "b:<종류>:<기본 이름>": { name?, text?, neg?, note?, hidden? } }. 기본과 같아진 칸은 지워서 기본 글이 따라오게 한다.
 // persona: 비서 지시문을 사용자가 고친 것. sections { <조각 id>: { text?, on? } }는 기본 조각을 덮어쓴 것만 담고, extra [{id, name, text, on}]는 사용자가 더한 조각,
@@ -60,10 +61,24 @@ const SHAPE = () => ({
   presets: [],
   persona: { sections: {}, extra: [], auto: { state: true, cand: true } },
   presetEdits: {},
+  userDict: starterDict(),
 });
 
 const PRESET_KINDS = ["인물", "그림체", "자세·구도", "빼는 것", "내 것"];
 const str = (v, max) => (typeof v === "string" ? v.slice(0, max) : "");
+// 내 단어 사전의 처음 낱말. art/취향.md와 이 앱 프리셋(가안)에서 자주 나온 말을, 기본 사전(tags.json)에 있고 게시물 1,000개 이상인 태그로 옮긴 것(2026-11-18 확인). 사용자가 고치거나 지울 수 있다.
+const STARTER_DICT = [
+  ["정장", "business suit, suit"], ["로우앵글", "from below"], ["내려다보는", "looking down, from below"], ["올려다보는", "looking up, from above"],
+  ["팔짱", "crossed arms"], ["턱 괴", "head rest, hand on own chin"], ["왕좌", "throne"], ["눈물", "tears"], ["짜증", "annoyed"],
+  ["겁먹", "scared, trembling"], ["오만", "smug, jitome, half-closed eyes"], ["회사원", "office lady"], ["중국식", "east asian"], ["한푸", "hanfu"],
+  ["상반신", "upper body"], ["전신", "full body"], ["클로즈업", "close-up"], ["돌아봄", "looking back"], ["옆모습", "profile"],
+];
+const starterDict = () => STARTER_DICT.map(([word, tags]) => ({ id: crypto.randomUUID(), word, tags }));
+const DICT_MAX = 300;
+function normDict(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((e) => e && e.id && typeof e.word === "string" && typeof e.tags === "string").slice(0, DICT_MAX).map((e) => ({ id: String(e.id), word: e.word.slice(0, 40), tags: e.tags.slice(0, 300) }));
+}
 let saveFail = false; // 마지막 저장이 실패했는지 (화면 맨 위 경고)
 const store = {
   data: load(),
@@ -141,6 +156,7 @@ function load() {
       draft,
       presets: normPresets(raw.presets),
       presetEdits: normPresetEdits(raw.presetEdits),
+      userDict: Array.isArray(raw.userDict) ? normDict(raw.userDict) : starterDict(),
       log: Array.isArray(raw.log) ? raw.log.filter((r) => r && r.id) : [],
       chat: Array.isArray(raw.chat) ? raw.chat.filter((m) => m && (m.role === "user" || m.role === "model") && typeof m.text === "string") : [],
       persona: normPersona(raw.persona),
@@ -602,6 +618,7 @@ const CHAT_MAX = 40;
 const RARE = 1000; // 단부루 게시물 수가 이보다 적은 태그는 NovelAI가 잘 못 알아듣는다 (art/태그사전/README.md)
 let tags = null;        // tags.json: { ko: {한국어: [태그…]}, n: {태그: 게시물 수} }
 let tagsState = "";     // "" | "loading" | "ok" | "fail"
+let tagsErr = "";       // 실패했을 때 이유 한 줄
 let asking = null;      // AbortController
 let askErr = "";
 let askDraft = "";      // 쓰는 중인 질문. 화면이 다시 그려져도 남긴다
@@ -614,14 +631,25 @@ async function loadTags() {
     const r = await fetch("tags.json");
     if (!r.ok) throw new Error(String(r.status));
     tags = await r.json();
+    if (!tags?.ko || !tags?.n) throw new Error("사전 모양이 이상함");
     tagsState = "ok";
-  } catch { tagsState = "fail"; }
+  } catch (e) { tags = null; tagsState = "fail"; tagsErr = e?.message === "404" ? "파일이 없음(404)" : (e?.message || "받지 못함"); }
 }
 
-// 사용자가 쓴 한국어 낱말에서 사전 후보를 뽑는다. 비서가 태그를 지어내지 않게 근거로 붙인다.
+const splitTags = (t) => String(t || "").split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
+const fmtN = (n) => (n === undefined ? "사전에 없음" : `게시물 ${n.toLocaleString("ko-KR")}`);
+
+// 사용자가 쓴 한국어 낱말에서 사전 후보를 뽑는다. 내 단어 사전이 먼저고, 그다음 기본 사전(tags.json).
+// 내 단어는 기본 사전을 못 받았어도 붙는다. 비서가 태그를 지어내지 않게 근거로 붙인다.
 function candidates(text) {
-  if (!tags) return [];
   const out = [], seen = new Set();
+  const mine = store.data.userDict.filter((e) => e.word.trim() && splitTags(e.tags).length && text.includes(e.word.trim())).sort((a, b) => b.word.length - a.word.length);
+  for (const e of mine) {
+    const ts = splitTags(e.tags);
+    out.push(`${e.word.trim()} → ${ts.join(", ")} (내 사전)`);
+    ts.forEach((t) => seen.add(t.toLowerCase()));
+  }
+  if (!tags) return out.slice(0, 20);
   const keys = Object.keys(tags.ko).filter((k) => k.length >= 2 && text.includes(k)).sort((a, b) => b.length - a.length);
   for (const k of keys) {
     for (const t of tags.ko[k].slice(0, 2)) {
@@ -642,7 +670,9 @@ function plainTags(t) {
 function checkTags(text) {
   if (!tags) return null;
   const missing = [], rare = [];
+  const mine = new Set(store.data.userDict.flatMap((e) => splitTags(e.tags).map((t) => t.toLowerCase()))); // 내 사전의 태그는 사용자가 정한 것이라 검사에서 뺀다
   for (const t of new Set(plainTags(text))) {
+    if (mine.has(t)) continue;
     const n = tags.n[t];
     if (n === undefined) missing.push(t);
     else if (n < RARE) rare.push(`${t}(${n})`);
@@ -667,7 +697,8 @@ function stateText() {
   const [w, h] = sizeOf(s);
   const chars = draft.chars.filter((c) => tidy(c.text)).map((c, i) => `  ${i + 1}. ${tidy(c.text)}${Number.isInteger(c.pos) ? ` (위치 칸 ${c.pos + 1}번/25)` : ""}`).join("\n");
   const plan = refPlan(s);
-  return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 이번 그림 칸: ${tidy(draft.scene) || "(비어 있음)"}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 취향 프롬프트: ${tidy(taste.style) || "(비어 있음)"}\n- 빼는 것: ${tidy(taste.negative) || "(비어 있음)"}\n- 품질 태그 자동: ${s.quality ? "켜짐" : "꺼짐"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}`;
+  const presetLine = PRESET_KINDS.map((k) => { const names = presetEntries(k).filter((e) => !e.hidden && e.p.name).map((e) => e.p.name); return names.length ? `${k}[${names.join(", ")}]` : ""; }).filter(Boolean).join(" / ");
+  return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 이번 그림 칸: ${tidy(draft.scene) || "(비어 있음)"}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 취향 프롬프트: ${tidy(taste.style) || "(비어 있음)"}\n- 빼는 것: ${tidy(taste.negative) || "(비어 있음)"}\n- 품질 태그 자동: ${s.quality ? "켜짐" : "꺼짐"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}\n- 프리셋(사용자가 눌러 쓰는 것): ${presetLine || "없음"}`;
 }
 
 // 제미니에 보내는 지시문 전체: 켠 조각들(+내 조각) + (켰다면) 앱 상태. 사전 후보는 질문마다 달라서 질문 쪽에 붙는다.
@@ -775,6 +806,19 @@ function applyChar(text) {
   return c.text ? c : null;
 }
 
+// 블록을 넣기 전 값을 통째로 기억해 두고 ‘되돌리기’로 돌린다. 블록이 건드리는 것: 이번 그림, 취향 그림체, 빼는 것, 인물 칸, 생성 설정.
+const SETTING_KEYS = ["sampler", "steps", "scale", "cfgRescale", "noise", "variety", "size"];
+function snapBlocks() {
+  const d = store.data;
+  return JSON.stringify({ scene: d.draft.scene, lock: d.draft.seedLock, chars: d.draft.chars, style: d.taste.style, neg: d.taste.negative, set: Object.fromEntries(SETTING_KEYS.map((k) => [k, d.settings[k]])) });
+}
+function restoreBlocks(json) {
+  const d = store.data, o = JSON.parse(json);
+  d.draft.scene = o.scene; d.draft.seedLock = o.lock; d.draft.chars = o.chars; d.taste.style = o.style; d.taste.negative = o.neg;
+  Object.assign(d.settings, o.set);
+  store.save();
+}
+
 // kind, 블록 글을 칸에 넣는다. 돌려주는 것은 사용자에게 알릴 한 줄 (null이면 아무것도 안 함)
 function applyBlock(kind, v) {
   const d = store.data;
@@ -831,7 +875,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 
 // ── 뽑기 화면 조각들 ─────────────────────────────────────────
 // 접었다 펴는 칸. 화면이 다시 그려져도 펼친 상태를 기억하려고 ui.open에 둔다 (새로 고치면 처음으로).
-const ui = { open: {}, withImg: false, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "" };
+const ui = { open: {}, withImg: false, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "", dq: "" };
 const sec = (k, title, hint, inner) =>
   `<details class="sec" data-sec="${k}" ${ui.open[k] ? "open" : ""}><summary>${title}${hint ? ` <small>${esc(hint)}</small>` : ""}</summary><div class="secbody">${inner}</div></details>`;
 
@@ -1079,6 +1123,65 @@ function usePreset(p, mode) {
   return `빼는 것에 ‘${p.name}’을 ${mode === "replace" ? `넣음. 이전 값: ${old.slice(0, 90)}${old.length > 90 ? "…" : ""}` : "더함"}`;
 }
 
+// ── 단어 사전 (비서 탭) ──────────────────────────────────────
+// 기본 사전(tags.json)에 없는 내 낱말은 ‘내 단어’에 적어 둔다. 비서에게 말할 때 낱말이 들어 있으면 그 태그가 [사전 후보]로 붙는다.
+function dictStatus() {
+  if (tags) return `기본 사전: 낱말 ${Object.keys(tags.ko).length.toLocaleString("ko-KR")}개, 태그 ${Object.keys(tags.n).length.toLocaleString("ko-KR")}개 불러옴.`;
+  if (tagsState === "loading") return "기본 사전을 받는 중…";
+  if (tagsState === "fail") return `기본 사전을 못 받음 (${esc(tagsErr)}). 내 단어는 그대로 쓰임. <button type="button" class="ghost sm" data-dretry>다시 받기</button>`;
+  return "기본 사전은 아직 안 받음. 이 칸을 열면 받음.";
+}
+
+// 찾기: 내 단어 → 기본 사전의 한국어 낱말 → 영어 태그 이름 순. 최대 20줄.
+function dictSearch(q) {
+  q = q.trim().toLowerCase();
+  if (!q) return [];
+  const rows = [];
+  for (const e of store.data.userDict) {
+    const ts = splitTags(e.tags);
+    if (e.word.toLowerCase().includes(q) || ts.some((t) => t.toLowerCase().includes(q))) rows.push({ word: e.word, tags: ts, own: true });
+  }
+  if (tags) {
+    for (const [k, v] of Object.entries(tags.ko)) { if (rows.length >= 20) break; if (k.toLowerCase().includes(q)) rows.push({ word: k, tags: v.slice(0, 4) }); }
+    if (rows.length < 20) {
+      const seen = new Set(rows.flatMap((r) => r.tags));
+      const hit = Object.entries(tags.n).filter(([t]) => t.includes(q) && !seen.has(t)).sort((a, b) => b[1] - a[1]).slice(0, 20 - rows.length);
+      for (const [t] of hit) rows.push({ word: t, tags: [t], eng: true });
+    }
+  }
+  return rows.slice(0, 20);
+}
+function dictResults() {
+  const q = ui.dq.trim();
+  if (!q) return `<p class="hint">한국어 낱말이나 영어 태그로 찾음. 태그를 누르면 ‘이번 그림’에 더함. 예: 금발, blonde</p>`;
+  const rows = dictSearch(q);
+  const none = `<p class="hint">${rows.length ? "" : tags ? "찾은 것이 없음. " : "기본 사전을 못 받아서 내 단어만 찾음. "}‘${esc(q)}’를 내 단어로 직접 더할 수 있음.</p><button type="button" class="ghost sm" data-dnew="${esc(q)}">‘${esc(q)}’ 내 단어로 더하기</button>`;
+  return rows.map((r) => `<div class="drow"><b>${esc(r.word)}</b>${r.own ? " <small>내 단어</small>" : ""}<div class="chips">${r.tags.map((t) => `<button type="button" class="chip" data-dadd="${esc(t)}">${esc(t)} <small>${tags && !r.own ? fmtN(tags.n[t]).replace("게시물 ", "") : tags ? fmtN(tags.n[t.toLowerCase()]).replace("게시물 ", "") : ""}</small></button>`).join("")}</div></div>`).join("") + none;
+}
+function dictPanel() {
+  const list = store.data.userDict.map((e) => {
+    const ts = splitTags(e.tags);
+    const info = tags && ts.length ? ts.map((t) => `${esc(t)}(${fmtN(tags.n[t.toLowerCase()])})`).join(" · ") : "";
+    return `
+      <div class="dent" data-did="${esc(e.id)}">
+        <input type="text" data-dword maxlength="40" autocomplete="off" placeholder="낱말 (한국어)" value="${esc(e.word)}">
+        <input type="text" data-dtags maxlength="300" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="태그, 쉼표로 (영어)" value="${esc(e.tags)}">
+        ${info ? `<p class="hint">${info}</p>` : ""}
+        <button type="button" class="ghost sm" data-ddel="${esc(e.id)}">지우기</button>
+      </div>`;
+  }).join("");
+  const body = `
+    <p class="hint" id="dstatus">${dictStatus()}</p>
+    <label for="dq">사전에서 찾기</label>
+    <input id="dq" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="금발, blonde, 팔짱 …" value="${esc(ui.dq)}">
+    <div id="dres">${dictResults()}</div>
+    <h2>내 단어 <small>${store.data.userDict.length}개</small></h2>
+    <p class="hint">여기 적은 낱말이 비서에게 한 말에 들어 있으면 그 태그가 사전 후보로 먼저 붙음. 숫자는 기본 사전의 게시물 수(1000 미만이면 잘 안 먹을 수 있음).</p>
+    ${list || `<p class="hint">아직 없음.</p>`}
+    <button type="button" class="ghost" id="dadd" ${store.data.userDict.length >= DICT_MAX ? "disabled" : ""}>＋ 단어 더하기</button>`;
+  return sec("dict", "단어 사전", `내 단어 ${store.data.userDict.filter((e) => e.word.trim()).length}개`, body);
+}
+
 // ── 비서 지시문 고치기 ───────────────────────────────────────
 // 기본 조각(assistant.js)은 바꾸지 않고, 고친 것만 store.data.persona에 덮어쓴다. 되돌리면 기본 글이 다시 나온다.
 function personaEditor() {
@@ -1183,6 +1286,7 @@ const SCREENS = {
         ? `<button type="button" id="stopAsk" class="ghost big">눌러서 취소</button>`
         : `<button type="button" id="send" class="big">보내기</button>`}
       ${chat.length ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
+      ${dictPanel()}
       ${personaEditor()}
       <label for="aiModelQ">대답하는 모델 <span class="hint">${s.aiModel === "custom" ? "직접 입력한 이름은 ‘취향’ 탭에서 고침" : ""}</span></label>
       <select id="aiModelQ">${MODEL_CHOICES.map((m) => `<option value="${m}" ${s.aiModel === m ? "selected" : ""}>${m === "gemini-4-argon" ? "gemini-4-argon (아르곤)" : m}</option>`).join("")}<option value="custom" ${s.aiModel === "custom" ? "selected" : ""}>직접 입력${s.aiModel === "custom" && s.aiCustom ? ` (${esc(s.aiCustom)})` : ""}</option></select>
@@ -1348,9 +1452,10 @@ function wireAsk() {
   const blockOf = (id) => { const [i, j] = id.split(":").map(Number); return parseBlocks(d.chat[i]?.text || "")[j]?.v; };
   document.querySelectorAll("[data-blk]").forEach((el) => el.addEventListener("click", () => {
     const v = blockOf(el.dataset.blk); if (!v) return;
+    const before = snapBlocks();
     const msg = applyBlock(el.dataset.kind, v);
     if (msg == null) return;
-    toast(msg);
+    toast(msg, snapBlocks() !== before ? () => restoreBlocks(before) : null);
     store.persist();
     if (el.dataset.kind === "scene" && route()[0] === "ai") location.hash = "#/gen"; else render();
   }));
@@ -1361,6 +1466,45 @@ function wireAsk() {
   }));
   if (scrollAi && route()[0] === "ai") { scrollAi = false; scrollTo({ top: document.body.scrollHeight }); }
   else scrollAi = false;
+}
+
+function wireDict() {
+  const d = store.data;
+  const upd = () => { const st = $("dstatus"); if (st) st.innerHTML = dictStatus(); const r = $("dres"); if (r) r.innerHTML = dictResults(); };
+  // 이 화면을 열면 기본 사전을 받아 둔다 (처음 비서에게 말할 때만 받던 것을 앞당김). 받은 뒤에는 상태 줄과 찾기 결과만 고쳐 그린다.
+  if (!tags && tagsState !== "loading") { tagsState = ""; loadTags().then(upd); upd(); }
+  $("dstatus")?.addEventListener("click", (e) => { if (e.target.closest("[data-dretry]")) { tags = null; tagsState = ""; loadTags().then(upd); upd(); } });
+  on("dq", "input", (e) => { ui.dq = e.target.value; const r = $("dres"); if (r) r.innerHTML = dictResults(); });
+  $("dres")?.addEventListener("click", (e) => {
+    const add = e.target.closest("[data-dadd]"), nw = e.target.closest("[data-dnew]");
+    if (add) {
+      const before = d.draft.scene, lock = d.draft.seedLock;
+      d.draft.scene = mergeTags(d.draft.scene, add.dataset.dadd, false); d.draft.seedLock = false;
+      toast(`‘${add.dataset.dadd}’를 이번 그림에 더함`, () => { d.draft.scene = before; d.draft.seedLock = lock; store.save(); });
+      store.persist();
+    } else if (nw) {
+      if (d.userDict.length >= DICT_MAX) return toast(`내 단어는 ${DICT_MAX}개까지`);
+      d.userDict.unshift({ id: crypto.randomUUID(), word: nw.dataset.dnew.slice(0, 40), tags: "" });
+      ui.open.dict = true; store.save();
+      document.querySelector(".dent [data-dtags]")?.focus();
+    }
+  });
+  on("dadd", "click", () => {
+    if (d.userDict.length >= DICT_MAX) return;
+    d.userDict.unshift({ id: crypto.randomUUID(), word: "", tags: "" });
+    ui.open.dict = true; store.save();
+    document.querySelector(".dent [data-dword]")?.focus();
+  });
+  const entry = (el) => d.userDict.find((x) => x.id === el.closest("[data-did]")?.dataset.did);
+  document.querySelectorAll("[data-dword]").forEach((el) => el.addEventListener("input", () => { const e = entry(el); if (e) { e.word = el.value; store.persist(); } }));
+  document.querySelectorAll("[data-dtags]").forEach((el) => el.addEventListener("input", () => { const e = entry(el); if (e) { e.tags = el.value; store.persist(); } }));
+  document.querySelectorAll("[data-ddel]").forEach((el) => el.addEventListener("click", () => {
+    const i = d.userDict.findIndex((x) => x.id === el.dataset.ddel);
+    if (i < 0) return;
+    const [gone] = d.userDict.splice(i, 1);
+    toast(`‘${gone.word || "빈 칸"}’ 지움`, () => { d.userDict.splice(Math.min(i, d.userDict.length), 0, gone); store.save(); });
+    store.save();
+  }));
 }
 
 function wirePersona() {
@@ -1584,7 +1728,7 @@ function wire(name, arg, seq) {
     document.querySelectorAll("[data-pshowhidden]").forEach((b) => b.addEventListener("click", () => { ui.showHidden = !ui.showHidden; render(); }));
     document.querySelectorAll("[data-psave]").forEach((b) => b.addEventListener("click", () => savePreset(b.dataset.psave)));
   }
-  if (name === "ai") { wireAsk(); wirePersona(); on("aiModelQ", "change", (e) => { d.settings.aiModel = e.target.value; store.save(); }); }
+  if (name === "ai") { wireAsk(); wirePersona(); wireDict(); on("aiModelQ", "change", (e) => { d.settings.aiModel = e.target.value; store.save(); }); }
   if (name === "keep" && !arg) {
     document.querySelectorAll("[data-thumb]").forEach(async (a) => {
       const row = await imgGet(a.dataset.thumb).catch(() => null);
