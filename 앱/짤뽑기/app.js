@@ -21,12 +21,13 @@ const DEFAULT_NEG = "lowres, artistic error, film grain, scan artifacts, worst q
 const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, signature, watermark, username, blurry";
 
 // ── 데이터 모양 ──────────────────────────────────────────────
-// log 항목 하나: { id, scene, style, negative, seed, model, w, h, steps, scale, at, verdict }
+// log 항목 하나: { id, scene, style, negative, seed, model, w, h, steps, scale, at, verdict, i2i? }
+//   i2i: 참조 그림을 썼을 때만 있는 강도(0.05~0.95). 그림 자체는 저장하지 않는다.
 //   verdict: null(안 고름) | "keep"(보관) | "drop"(버림)
 const SHAPE = () => ({
   settings: { token: "", model: "nai-diffusion-5-full", customModel: "", size: "세로", steps: 28, scale: 5, quality: true },
   taste: { style: DEFAULT_STYLE, negative: DEFAULT_NEG, seeded: true },
-  draft: { scene: DEFAULT_SCENE, seedLock: false, seed: null, seeded: true },
+  draft: { scene: DEFAULT_SCENE, seedLock: false, seed: null, seeded: true, refStrength: 0.6 },
   log: [],
 });
 
@@ -106,19 +107,22 @@ function compose(scene, style, s) {
 }
 
 // 요청 몸통은 V5에서 200이 확인된 꼴 그대로 (명세.md '밖에 나가는 것' 참고). v4_prompt 둘을 빼면 500이 난다.
-function requestBody(prompt, negative, rec) {
+// refB64가 있으면 이미지로 이미지(img2img). V5에서 200이 나오고 출력이 참조 그림의 색 배치를 따르는 것을 2026-11-18 curl로 확인했다.
+function requestBody(prompt, negative, rec, refB64) {
   const cap = (t) => ({ use_coords: false, use_order: false, caption: { base_caption: t, char_captions: [] } });
+  const i2i = refB64 ? { image: refB64, strength: rec.i2i, noise: 0 } : {};
   return {
-    input: prompt, model: rec.model, action: "generate",
+    input: prompt, model: rec.model, action: refB64 ? "img2img" : "generate",
     parameters: {
       params_version: 4, width: rec.w, height: rec.h, scale: rec.scale, sampler: "k_euler_ancestral",
       steps: rec.steps, seed: rec.seed, n_samples: 1, ucPreset: 3, qualityToggle: false,
       sm: false, sm_dyn: false, dynamic_thresholding: false, controlnet_strength: 1,
-      legacy: false, add_original_image: false, cfg_rescale: 0, noise_schedule: "karras",
+      legacy: false, add_original_image: Boolean(refB64), cfg_rescale: 0, noise_schedule: "karras",
       legacy_v3_extend: false, uncond_scale: 1, negative_prompt: negative, prompt,
       reference_image_multiple: [], reference_information_extracted_multiple: [], reference_strength_multiple: [],
       extra_noise_seed: rec.seed,
       v4_prompt: cap(prompt), v4_negative_prompt: cap(negative),
+      ...i2i,
     },
   };
 }
@@ -144,9 +148,28 @@ async function pngFromResponse(buf) {
   return new Uint8Array(await new Response(out).arrayBuffer());
 }
 
+// 참조 그림: 고른 파일을 뽑을 크기(w×h)에 꽉 차게 잘라 PNG로 만든 뒤 base64 글자로 바꾼다.
+// 메모리에만 둔다 (새로 고치면 사라짐). localStorage에 큰 그림을 넣으면 가득 찼을 때 조용히 저장이 안 되기 때문.
+async function refToBase64(blob, w, h) {
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const k = Math.max(w / bmp.width, h / bmp.height);
+  const dw = bmp.width * k, dh = bmp.height * k;
+  c.getContext("2d").drawImage(bmp, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  bmp.close?.();
+  const png = await new Promise((ok) => c.toBlob(ok, "image/png"));
+  if (!png) throw new Error("참조 그림을 PNG로 못 바꿈");
+  const u8 = new Uint8Array(await png.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
 // 지금 화면에 떠 있는 한 장. 새로 고치면 사라진다 (보관한 것만 남는다).
 let now = null;      // { rec, blob, url }
 let busy = null;     // AbortController
+let ref = null;      // 참조 그림 { blob, url, name }
 let errMsg = "";
 
 async function generate() {
@@ -162,15 +185,21 @@ async function generate() {
     id: crypto.randomUUID(), scene: tidy(d.draft.scene), style: tidy(d.taste.style), negative: tidy(d.taste.negative),
     seed, model: modelId(s), w, h, steps: clamp(s.steps, 1, 28, 28), scale: clamp(s.scale, 0, 10, 5), at: Date.now(), verdict: null,
   };
+  if (ref) rec.i2i = clamp(d.draft.refStrength, 0.05, 0.95, 0.6);
   const prompt = compose(rec.scene, rec.style, s);
 
   busy = new AbortController();
   render();
   try {
+    let refB64 = null;
+    if (ref) {
+      try { refB64 = await refToBase64(ref.blob, w, h); }
+      catch (e) { throw new Error(`참조 그림을 못 읽음 (${e?.message || e}). 다른 그림으로 고르거나 ✕로 빼기.`); }
+    }
     const res = await fetch(API, {
       method: "POST", signal: busy.signal,
       headers: { Authorization: `Bearer ${s.token.trim()}`, "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody(prompt, rec.negative, rec)),
+      body: JSON.stringify(requestBody(prompt, rec.negative, rec, refB64)),
     });
     if (!res.ok) {
       let said = "";
@@ -289,6 +318,18 @@ const SCREENS = {
       <div class="seg" role="group" aria-label="크기">
         ${Object.keys(SIZES).map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${SIZES[k].join("×")}</small></button>`).join("")}
       </div>
+      <div class="ref">
+        ${ref
+          ? `<img src="${ref.url}" alt="참조 그림" class="refimg">
+             <div class="refbody">
+               <label for="refStrength">참조 강도 <b id="refVal">${Number(draft.refStrength).toFixed(2)}</b> <span class="hint">작을수록 원본에 가까움</span></label>
+               <input id="refStrength" type="range" min="0.05" max="0.95" step="0.05" value="${esc(draft.refStrength)}">
+               <button type="button" id="refDel" class="ghost">참조 빼기</button>
+             </div>`
+          : `<button type="button" id="refPick" class="ghost">＋ 참조 그림 넣기</button>
+             <p class="hint">고른 그림을 바탕으로 이번 그림을 다시 그림. 새로 고치면 사라짐.</p>`}
+        <input type="file" id="refFile" accept="image/*" hidden>
+      </div>
       <label class="line"><input type="checkbox" id="seedLock" ${draft.seedLock ? "checked" : ""}>
         같은 시드로 다시 <span class="hint">${Number.isInteger(draft.seed) ? `시드 ${draft.seed}` : "아직 뽑은 적 없음"}</span></label>
       ${busy
@@ -298,7 +339,7 @@ const SCREENS = {
       ${now ? `
         <figure class="result">
           <img src="${now.url}" alt="방금 뽑은 그림" width="${now.rec.w}" height="${now.rec.h}">
-          <figcaption class="hint">시드 ${now.rec.seed} · ${now.rec.w}×${now.rec.h} · ${esc(now.rec.model)}</figcaption>
+          <figcaption class="hint">시드 ${now.rec.seed} · ${now.rec.w}×${now.rec.h} · ${esc(now.rec.model)}${now.rec.i2i ? ` · 참조 ${now.rec.i2i}` : ""}</figcaption>
         </figure>
         <div class="acts">
           ${now.rec.verdict === "keep"
@@ -328,6 +369,7 @@ const SCREENS = {
           <dt>취향</dt><dd>${esc(r.style) || "—"}</dd>
           <dt>빼는 것</dt><dd>${esc(r.negative) || "—"}</dd>
           <dt>값</dt><dd>시드 ${r.seed} · ${r.w}×${r.h} · ${r.steps}스텝 · 강도 ${r.scale} · ${esc(r.model)}</dd>
+          ${r.i2i ? `<dt>참조</dt><dd>참조 그림을 바탕으로 뽑음 (강도 ${r.i2i}). 그림은 저장하지 않아서 ‘다시 뽑기’에는 따라오지 않음.</dd>` : ""}
         </dl>`;
     }
     if (!kept.length) return `<p class="empty">아직 없음.<br>뽑은 그림에서 ‘♥ 보관’을 누르면 여기 모임.</p>`;
@@ -410,6 +452,18 @@ function wire(name, arg, seq) {
     on("scene", "input", (e) => { d.draft.scene = e.target.value; store.persist(); });
     on("seedLock", "change", (e) => { d.draft.seedLock = e.target.checked; store.persist(); });
     document.querySelectorAll("[data-size]").forEach((b) => b.addEventListener("click", () => { d.settings.size = b.dataset.size; store.save(); }));
+    on("refPick", "click", () => $("refFile").click());
+    on("refFile", "change", (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      if (!f.type.startsWith("image/")) { errMsg = "그림 파일이 아님."; return render(); }
+      if (ref) URL.revokeObjectURL(ref.url);
+      ref = { blob: f, url: URL.createObjectURL(f), name: f.name };
+      errMsg = "";
+      render();
+    });
+    on("refStrength", "input", (e) => { d.draft.refStrength = clamp(e.target.value, 0.05, 0.95, 0.6); $("refVal").textContent = d.draft.refStrength.toFixed(2); store.persist(); });
+    on("refDel", "click", () => { if (ref) URL.revokeObjectURL(ref.url); ref = null; render(); });
     on("go", "click", generate);
     on("stop", "click", () => busy?.abort());
     on("keep", "click", () => judge("keep"));
@@ -470,6 +524,7 @@ function wire(name, arg, seq) {
       if (!confirm("취향, 기록, 보관한 그림, 토큰을 전부 지움. 되돌릴 수 없음.")) return;
       await imgClear().catch(() => {});
       if (now) { URL.revokeObjectURL(now.url); now = null; }
+      if (ref) { URL.revokeObjectURL(ref.url); ref = null; }
       store.data = SHAPE();
       store.save();
     });
