@@ -4,7 +4,8 @@
 
 // 2026-11-18 이 키로 직접 호출해 200을 받은 것만 둔다. gemini-2.5-flash·2.5-pro는 목록에는 있어도 "새 사용자에게는 더 안 열림"으로 404였다.
 // 별칭(-latest)은 구글이 가리키는 모델을 바꿔 주니 처음 값으로 둔다.
-export const MODEL_CHOICES = ["gemini-flash-latest", "gemini-3.8-flash", "gemini-3.1-pro-preview"];
+// gemini-4-argon(아르곤)은 같은 날 이 키로 글·그림 첨부 둘 다 200을 받았다. 처음 값은 그대로 두고 고르기에만 더했다.
+export const MODEL_CHOICES = ["gemini-flash-latest", "gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-4-argon"];
 
 // 사용자가 확정한 인물 고정 블록 (art/프롬프트/NAI.md 그대로)
 const CHARACTERS = `

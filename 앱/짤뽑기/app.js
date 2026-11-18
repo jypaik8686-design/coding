@@ -1043,6 +1043,8 @@ const SCREENS = {
         : `<button type="button" id="send" class="big">보내기</button>`}
       ${chat.length ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
       ${personaEditor()}
+      <label for="aiModelQ">대답하는 모델 <span class="hint">${s.aiModel === "custom" ? "직접 입력한 이름은 ‘취향’ 탭에서 고침" : ""}</span></label>
+      <select id="aiModelQ">${MODEL_CHOICES.map((m) => `<option value="${m}" ${s.aiModel === m ? "selected" : ""}>${m === "gemini-4-argon" ? "gemini-4-argon (아르곤)" : m}</option>`).join("")}<option value="custom" ${s.aiModel === "custom" ? "selected" : ""}>직접 입력${s.aiModel === "custom" && s.aiCustom ? ` (${esc(s.aiCustom)})` : ""}</option></select>
       <p class="hint">대답은 제미니(${esc(s.aiModel === "custom" ? s.aiCustom : s.aiModel)})가 하고, 태그는 같이 실린 단부루 사전에서 맞춰 봄. 제미니 말은 틀릴 수 있어서 넣은 뒤 직접 한 번 읽기.</p>`;
   },
 
@@ -1363,7 +1365,7 @@ function wire(name, arg, seq) {
     document.querySelectorAll("[data-pdel]").forEach((b) => b.addEventListener("click", () => { d.presets = d.presets.filter((p) => p.id !== b.dataset.pdel); store.save(); }));
     document.querySelectorAll("[data-psave]").forEach((b) => b.addEventListener("click", () => savePreset(b.dataset.psave)));
   }
-  if (name === "ai") { wireAsk(); wirePersona(); }
+  if (name === "ai") { wireAsk(); wirePersona(); on("aiModelQ", "change", (e) => { d.settings.aiModel = e.target.value; store.save(); }); }
   if (name === "keep" && !arg) {
     document.querySelectorAll("[data-thumb]").forEach(async (a) => {
       const row = await imgGet(a.dataset.thumb).catch(() => null);
