@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """세션 지킴이 훅. 다섯 저장소에 같은 파일을 둔다 (Claude-의 tools/check_rules.py가 같은지 본다).
 
-  python3 .claude/hooks/guard.py start   # SessionStart: 규칙 세 줄 + 지금 상태 + 도구 지도를 맥락에 넣는다
+  python3 .claude/hooks/guard.py start   # SessionStart: 규칙 세 줄 + 지금 상태 + 찾기표 전체 + 도구 지도를 맥락에 넣는다
   python3 .claude/hooks/guard.py stop    # Stop: 대답이 사실과 어긋나면 막고 고치게 한다
-  python3 .claude/hooks/guard.py prompt  # UserPromptSubmit: 요청마다 "도구부터 찾는다"와 찾기표에서 맞는 줄을 맥락에 넣는다
+  python3 .claude/hooks/guard.py prompt  # UserPromptSubmit: 요청마다 "도구부터 찾는다"와 찾기표에서 맞는 줄(띄어쓰기 무시), 못 맞추면 직접 고르라는 한 줄
 
 stop이 막는 것:
   1. 병합 안 된 일이 남았는데 대답에 "병합해야 다음 세션에 보임"이 없다
@@ -83,6 +83,10 @@ def start():
     for repo in repos:
         name, s = state(repo)
         print(f"- {name}: {s or '깨끗함 (main과 같음)'}")
+    표 = 표전체(repos)
+    if 표:
+        print("\n할 수 있는 일 (Claude-/할수있는일.md 찾기표 전체. MCP 도구는 시스템 메시지의 deferred 목록에 이름이 있고 ToolSearch로 불러 쓴다):")
+        print("\n".join(표))
     hub = next((r for r in repos if r.name == "Claude-"), None)
     if hub and (hub / "tools" / "check_rules.py").exists():
         try:
@@ -109,6 +113,8 @@ TOOL_FIRST = ("[도구 먼저] 요청을 바로 실행하지 않는다. 먼저 �
               "② 설치된 스킬(Skill 도구)과 SearchSkills·SearchPlugins "
               "③ 없으면 외부 스킬을 검색(firecrawl_developer_search의 skills:\"only\", 웹 검색)하되 참고용으로만 읽고 설치·실행하지 않는다. "
               "고른 도구 이름을 대답 첫 줄에 밝히고 실행한다. 한두 줄짜리 질문·잡담은 건너뛴다.")
+NO_MATCH = ("[찾기표] 낱말로는 못 맞췄다. 세션 시작 때 넣은 찾기표 전체와 시스템 메시지의 deferred 도구 이름 목록에서 직접 고른다. "
+            "MCP 도구는 이름만 보이고 ToolSearch로 불러와야 쓴다. 기본 도구만 있다고 답하지 않는다.")
 만들기말 = ("만들", "써 줘", "써줘", "써 봐", "작성", "초안", "원고", "문구", "카피", "가사", "소개글", "보고서", "정리해서", "다듬", "그려", "그림")
 NO_AI_TELL = ("[AI 티] 만드는 글·문서는 쓴 뒤 `anthropic-skills:korean-ai-tone-remover`(한국어)나 `anti-ai-writing:anti-ai-writing`(영어 등) 규칙으로 고쳐 낸다. "
               "상투어·번역투·과장·맺음 요약·줄표·습관적 3개 나열·불릿 남발 금지. 그림은 art의 '사람이 만든 것처럼 보이게'. 코드·설정·표·사용자가 정한 형식은 예외.")
@@ -129,10 +135,35 @@ def 찾기표(prompt, 최대=4):
             if on and ln.startswith("|"):
                 c = [x.strip() for x in ln.strip().strip("|").split("|")]
                 if len(c) >= 2 and not set(c[0]) <= set("-: ") and c[0] != "찾는 말":
-                    keys = [k.strip() for k in c[0].split(",") if len(k.strip()) >= 2]
-                    if any(k in prompt for k in keys):
+                    keys = [붙여(k) for k in c[0].split(",") if len(붙여(k)) >= 2]
+                    if any(k in 붙여(prompt) for k in keys):
                         rows.append(c[1])
         return rows[:최대]
+    return []
+
+
+def 붙여(s):
+    """띄어쓰기·문장부호를 빼서 '자료 모아'와 '자료모아'를 같게 본다."""
+    return re.sub(r"[\s.,!?~·'\"]+", "", s).lower()
+
+
+def 표전체(repos=None):
+    """찾기표 전체를 '찾는 말 → 쓸 것' 한 줄씩으로 (세션 시작 때 한 번 넣는다)."""
+    for repo in repos or repos_here():
+        try:
+            lines = (repo / "할수있는일.md").read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        on, out = False, []
+        for ln in lines:
+            if ln.startswith("## "):
+                on = ln.startswith("## 요청별 찾기표")
+                continue
+            if on and ln.startswith("|"):
+                c = [x.strip() for x in ln.strip().strip("|").split("|")]
+                if len(c) >= 2 and not set(c[0]) <= set("-: ") and c[0] != "찾는 말":
+                    out.append(f"- {c[0].split(',')[0].strip()} 등 → {c[1][:140]}")
+        return out
     return []
 
 
@@ -150,6 +181,8 @@ def prompt():
     rows = 찾기표(text)
     if rows:
         print("찾기표에서 맞는 줄 (놓칠 수 있다. 없으면 직접 찾는다): " + " | ".join(rows))
+    else:
+        print(NO_MATCH)
 
 
 def turn_of(path):
