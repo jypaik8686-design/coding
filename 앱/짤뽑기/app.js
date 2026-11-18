@@ -45,17 +45,18 @@ const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, s
 // userDict: 내 단어 사전 [{id, word, tags}]. 비서에게 말할 때 낱말이 들어 있으면 기본 사전보다 먼저 [사전 후보]로 붙는다. 옛 데이터에는 없어 처음 한 번 STARTER_DICT로 채운다(그 뒤에 비우면 다시 안 채움).
 // presets 새 칸(옛 항목에는 없음, normPresets가 메움): kind("인물"|"그림체"|"자세·구도"|"빼는 것"|"내 것", 없으면 "내 것") / neg / note / at("front")
 // presetEdits: 내장 프리셋(presets.js)을 고친 것. { "b:<종류>:<기본 이름>": { name?, text?, neg?, note?, hidden? } }. 기본과 같아진 칸은 지워서 기본 글이 따라오게 한다.
+// draft.slots {count, traits, outfit, pose, bg, rest}: 이번 그림을 칸으로 나눈 것(위 ‘프롬프트 칸’). settings.qualityText: 7순위 품질 태그를 고친 글(비면 모델별 기본). 옛 데이터에는 없다.
 // persona: 비서 지시문을 사용자가 고친 것. sections { <조각 id>: { text?, on? } }는 기본 조각을 덮어쓴 것만 담고, extra [{id, name, text, on}]는 사용자가 더한 조각,
 //   auto { state, cand }는 앱이 지시문 뒤에 자동으로 붙이는 ‘앱 상태’와 ‘사전 후보’를 켜는지. 옛 데이터에는 없다 (normPersona가 메운다).
 // log 새 칸: sampler / noise / cr / vb / chars / i2i / mode. 옛 항목에는 없다 (없으면 처음 값으로 읽는다).
 const SHAPE = () => ({
   settings: {
     token: "", model: "nai-diffusion-5-full", customModel: "", size: "세로", steps: 28, scale: 5, quality: true,
-    aiKey: "", aiModel: MODEL_CHOICES[0], aiCustom: "",
+    aiKey: "", aiModel: MODEL_CHOICES[0], aiCustom: "", qualityText: "",
     sampler: "k_euler_ancestral", noise: "karras", cfgRescale: 0, variety: false, customW: 832, customH: 1216, refMode: "vibe",
   },
   taste: { style: DEFAULT_STYLE, negative: DEFAULT_NEG, seeded: true },
-  draft: { scene: DEFAULT_SCENE, seedLock: false, seed: null, seeded: true, chars: [], i2i: { on: false, strength: 0.7, noise: 0 } },
+  draft: { scene: sceneOf(DEFAULT_SLOTS), slots: { ...DEFAULT_SLOTS }, seedLock: false, seed: null, seeded: true, chars: [], i2i: { on: false, strength: 0.7, noise: 0 } },
   log: [],
   chat: [],
   presets: [],
@@ -75,6 +76,36 @@ const STARTER_DICT = [
 ];
 const starterDict = () => STARTER_DICT.map(([word, tags]) => ({ id: crypto.randomUUID(), word, tags }));
 const DICT_MAX = 300;
+
+// ── 프롬프트 칸 ─────────────────────────────────────────────
+// NovelAI로 가는 글은 칸을 이 순서로 이어 붙인다: 1 인원수·성별 → 2 화풍·작가(취향 프롬프트) → 3 캐릭터 특징 → 4 의상·장신구 → 5 포즈·시선·구도 → 6 배경·조명·분위기·이펙트 → (그 밖에) → 7 품질 태그.
+// draft.slots에 담기는 칸은 아래 SLOT_KEYS. 2순위는 taste.style, 7순위는 settings.qualityText(비어 있으면 모델별 기본 글)에 있다.
+// draft.scene은 칸들을 이어 붙인 값으로 늘 맞춰 둔다(기록·보관함·통계가 읽는 쪽이라 그대로 쓰게). 이 도우미들은 store가 만들어질 때 load()가 부르므로 함수로 둔다.
+const SLOT_KEYS = ["count", "traits", "outfit", "pose", "bg", "rest"];
+const SLOT_NAMES = { count: "인원수·성별", traits: "캐릭터 특징", outfit: "의상·장신구", pose: "포즈·시선·구도", bg: "배경·조명·분위기·이펙트", rest: "그 밖에" };
+const DEFAULT_SLOTS = { count: "1girl, solo", traits: "blonde hair, long hair, east asian, mature female, elegant", outfit: "business suit, formal", pose: "looking at viewer, upper body", bg: "", rest: "" };
+const COUNT_RE = /^(\d+\+?(girl|boy|girls|boys|other|others)|solo|no humans)$/i;
+function tg(t) { return String(t || "").split(/[,\n]/).map((x) => x.trim()).filter(Boolean).join(", "); }
+function joinTags(parts) { // 칸 글들을 이어 붙이되 같은 태그는 먼저 나온 것만 남긴다
+  const seen = new Set(), out = [];
+  for (const part of parts) for (const t of tg(part).split(", ")) { if (!t) continue; const k = t.toLowerCase(); if (seen.has(k)) continue; seen.add(k); out.push(t); }
+  return out.join(", ");
+}
+function sceneOf(sl) { return joinTags(SLOT_KEYS.map((k) => sl?.[k])); }
+function splitCount(text) { // 인원수·성별 태그(1girl, solo 등)만 따로 뽑는다
+  const c = [], r = [];
+  for (const t of tg(text).split(", ")) { if (!t) continue; (COUNT_RE.test(t.replace(/[{}\[\]]/g, "")) ? c : r).push(t); }
+  return { count: c.join(", "), rest: r.join(", ") };
+}
+function normSlots(rawSlots, scene) { // 칸이 없던 옛 데이터는 scene 글에서 만든다. 못 나누는 글은 ‘그 밖에’로 간다
+  const out = Object.fromEntries(SLOT_KEYS.map((k) => [k, ""]));
+  if (rawSlots && typeof rawSlots === "object") { for (const k of SLOT_KEYS) if (typeof rawSlots[k] === "string") out[k] = rawSlots[k].slice(0, 4000); return out; }
+  const sc = tg(scene);
+  if (!sc) return out;
+  if (sc === tg(DEFAULT_SCENE)) return { ...DEFAULT_SLOTS };
+  const { count, rest } = splitCount(sc); out.count = count; out.rest = rest;
+  return out;
+}
 function normDict(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.filter((e) => e && e.id && typeof e.word === "string" && typeof e.tags === "string").slice(0, DICT_MAX).map((e) => ({ id: String(e.id), word: e.word.slice(0, 40), tags: e.tags.slice(0, 300) }));
@@ -101,6 +132,7 @@ function normPresets(raw) {
     if (typeof p.neg === "string" && p.neg) o.neg = p.neg.slice(0, 4000);
     if (typeof p.note === "string" && p.note) o.note = p.note.slice(0, 300);
     if (p.at === "front" && o.to === "scene") o.at = "front";
+    if (SLOT_KEYS.includes(p.slot) && o.to === "scene") o.slot = p.slot;
     return o;
   });
 }
@@ -143,6 +175,10 @@ function load() {
     const draft = { ...base.draft, ...(raw.draft || {}) };
     // 기본값이 생기기 전에 저장된 옛 데이터: 비어 있던 칸은 기본값으로 채우고, 직접 적은 것은 건드리지 않는다.
     if (!raw.draft?.seeded) { draft.seeded = true; if (!String(raw.draft?.scene || "").trim()) draft.scene = DEFAULT_SCENE; }
+    draft.slots = normSlots(raw.draft?.slots, draft.scene);
+    draft.scene = sceneOf(draft.slots);
+    const settings = { ...base.settings, ...(raw.settings || {}) };
+    if (typeof settings.qualityText !== "string") settings.qualityText = "";
     const taste = { ...base.taste, ...(raw.taste || {}) };
     if (taste.negative === OLD_NEG) taste.negative = DEFAULT_NEG;
     // 취향 처음 값이 생기기 전에 저장된 데이터: 비어 있으면 한 번만 채운다. 그 뒤에 사용자가 비우면 다시 채우지 않는다.
@@ -151,7 +187,7 @@ function load() {
     draft.chars = Array.isArray(draft.chars) ? draft.chars.filter((c) => c && c.id).slice(0, MAX_CHARS) : [];
     draft.i2i = { ...base.draft.i2i, ...(draft.i2i || {}) };
     return {
-      settings: { ...base.settings, ...(raw.settings || {}) },
+      settings,
       taste,
       draft,
       presets: normPresets(raw.presets),
@@ -214,10 +250,13 @@ async function thumbOf(blob) {
 const modelId = (s) => (s.model === "custom" ? s.customModel.trim() : s.model);
 const tidy = (t) => t.split(/[,\n]/).map((x) => x.trim()).filter(Boolean).join(", ");
 
-function compose(scene, style, s) {
-  const body = [tidy(scene), tidy(style)].filter(Boolean).join(", ");
-  const q = (MODELS[modelId(s)] || MODELS["nai-diffusion-5-full"]).품질;
-  return s.quality ? body + q : body;
+// 7순위 품질 태그: 모델별 기본 글(NovelAI 문서) 또는 사용자가 고친 글
+const qDefault = (s) => (MODELS[modelId(s)] || MODELS["nai-diffusion-5-full"]).품질.replace(/^[,\s]+/, "");
+const qText = (s) => tg(s.qualityText) || qDefault(s);
+function syncScene() { store.data.draft.scene = sceneOf(store.data.draft.slots); }
+// NovelAI로 보낼 글: 1 인원수 → 2 화풍·작가 → 3 특징 → 4 의상 → 5 포즈 → 6 배경 → 그 밖에 → 7 품질. 같은 태그는 먼저 나온 것만.
+function composePrompt(sl, style, s) {
+  return joinTags([sl.count, style, sl.traits, sl.outfit, sl.pose, sl.bg, sl.rest, s.quality ? qText(s) : ""]);
 }
 
 // ── 참고 그림 (V4.5 바이브 트랜스퍼) ─────────────────────────
@@ -361,7 +400,9 @@ async function padPrecise(blob) {
 }
 // 제미니에 보여 줄 그림: 긴 변 768px JPEG
 async function shrinkJpeg(blob) {
-  const bmp = await createImageBitmap(blob);
+  let bmp;
+  try { bmp = await createImageBitmap(blob); }
+  catch (e) { throw new Error(`그림을 읽지 못함 (${e?.message || e}). 다른 파일로 시도하거나 JPEG·PNG로 바꿔서 올리기.`); }
   const k = Math.min(1, 768 / Math.max(bmp.width, bmp.height));
   const c = document.createElement("canvas");
   c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
@@ -465,7 +506,7 @@ async function generate() {
   errMsg = "";
   if (!s.token.trim()) { errMsg = "토큰이 없음. ‘취향’ 탭 맨 아래에서 넣기."; return render(); }
   if (!modelId(s)) { errMsg = "모델 이름이 비어 있음. ‘취향’ 탭에서 고르기."; return render(); }
-  if (!tidy(d.draft.scene) && !tidy(d.taste.style)) { errMsg = "그릴 것이 비어 있음."; return render(); }
+  if (!sceneOf(d.draft.slots) && !tidy(d.taste.style)) { errMsg = "그릴 것이 비어 있음."; return render(); }
 
   const [w, h] = sizeOf(s);
   const seed = d.draft.seedLock && Number.isInteger(d.draft.seed) ? d.draft.seed : Math.floor(Math.random() * 4294967295);
@@ -474,7 +515,7 @@ async function generate() {
   const chars = supportsChars(s) ? d.draft.chars.filter((c) => tidy(c.text)).map((c) => ({ text: tidy(c.text), neg: tidy(c.neg || ""), pos: Number.isInteger(c.pos) ? c.pos : null })) : [];
   const useI2i = d.draft.i2i.on && src;
   const rec = {
-    id: crypto.randomUUID(), scene: tidy(d.draft.scene), style: tidy(d.taste.style), negative: tidy(d.taste.negative),
+    id: crypto.randomUUID(), scene: sceneOf(d.draft.slots), slots: { ...d.draft.slots }, style: tidy(d.taste.style), negative: tidy(d.taste.negative),
     seed, model: modelId(s), w, h, steps: clamp(s.steps, 1, MAX_STEPS, 28), scale: clamp(s.scale, 0, 10, 5), at: Date.now(), verdict: null,
     sampler: SAMPLERS[s.sampler] ? s.sampler : "k_euler_ancestral", noise: NOISES.includes(s.noise) ? s.noise : "karras",
     cr: clamp(s.cfgRescale, 0, 1, 0), vb: !!s.variety,
@@ -482,7 +523,7 @@ async function generate() {
   if (used.length) { rec.refs = used.map((r) => ({ s: r.strength, i: r.info })); rec.mode = plan; }
   if (chars.length) rec.chars = chars;
   if (useI2i) rec.i2i = { strength: clamp(d.draft.i2i.strength, 0, 1, 0.7), noise: clamp(d.draft.i2i.noise, 0, 1, 0) };
-  const prompt = compose(rec.scene, rec.style, s);
+  const prompt = composePrompt(rec.slots, rec.style, s);
 
   busy = new AbortController();
   phase = "";
@@ -663,7 +704,7 @@ function candidates(text) {
 }
 
 function plainTags(t) {
-  return t.replace(/-?\d*\.?\d+::|::/g, ",").replace(/[{}\[\]()]/g, "").split(/[,\n]/)
+  return t.replace(/^\s*(count|traits|outfit|pose|bg)\s*:\s*/gim, "").replace(/-?\d*\.?\d+::|::/g, ",").replace(/[{}\[\]()]/g, "").split(/[,\n]/)
     .map((x) => x.trim().toLowerCase()).filter((x) => x && !x.includes(":") && !x.includes("@"));
 }
 // scene 블록의 태그를 사전과 맞춰 본다. 일반 태그만 사전에 있어서 캐릭터·작가 이름은 '사전에 없음'으로 나올 수 있다.
@@ -696,9 +737,11 @@ function stateText() {
   const { settings: s, taste, draft } = store.data;
   const [w, h] = sizeOf(s);
   const chars = draft.chars.filter((c) => tidy(c.text)).map((c, i) => `  ${i + 1}. ${tidy(c.text)}${Number.isInteger(c.pos) ? ` (위치 칸 ${c.pos + 1}번/25)` : ""}`).join("\n");
+  const sl = draft.slots;
+  const slotLines = [["1순위 인원수·성별", sl.count], ["2순위 화풍·작가(취향 프롬프트)", taste.style], ["3순위 캐릭터 특징", sl.traits], ["4순위 의상·장신구", sl.outfit], ["5순위 포즈·시선·구도", sl.pose], ["6순위 배경·조명·분위기·이펙트", sl.bg], ...(tg(sl.rest) ? [["그 밖에(칸을 못 나눈 글)", sl.rest]] : []), ["7순위 품질 태그", s.quality ? qText(s) : "꺼짐(안 붙임)"]].map(([n, v]) => `  ${n}: ${tg(v) || "(비어 있음)"}`).join("\n");
   const plan = refPlan(s);
   const presetLine = PRESET_KINDS.map((k) => { const names = presetEntries(k).filter((e) => !e.hidden && e.p.name).map((e) => e.p.name); return names.length ? `${k}[${names.join(", ")}]` : ""; }).filter(Boolean).join(" / ");
-  return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 이번 그림 칸: ${tidy(draft.scene) || "(비어 있음)"}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 취향 프롬프트: ${tidy(taste.style) || "(비어 있음)"}\n- 빼는 것: ${tidy(taste.negative) || "(비어 있음)"}\n- 품질 태그 자동: ${s.quality ? "켜짐" : "꺼짐"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}\n- 프리셋(사용자가 눌러 쓰는 것): ${presetLine || "없음"}`;
+  return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 프롬프트 칸(앱이 1→7순위로 이어 붙여 보냄):\n${slotLines}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 빼는 것: ${tidy(taste.negative) || "(비어 있음)"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg && !ui.attachFile ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}${ui.attachFile ? "\n- 첨부: 사용자가 고른 사진 한 장을 이 메시지에 붙임" : ""}\n- 프리셋(사용자가 눌러 쓰는 것): ${presetLine || "없음"}`;
 }
 
 // 제미니에 보내는 지시문 전체: 켠 조각들(+내 조각) + (켰다면) 앱 상태. 사전 후보는 질문마다 달라서 질문 쪽에 붙는다.
@@ -725,9 +768,12 @@ async function ask(text, opts = {}) {
   const model = (s.aiModel === "custom" ? s.aiCustom : s.aiModel).trim().replace(/^models\//, "");
   if (!s.aiKey.trim()) { askErr = "제미니 키가 없음. ‘취향’ 탭 맨 아래에서 넣기."; return render(); }
   if (!model) { askErr = "제미니 모델 이름이 비어 있음. ‘취향’ 탭에서 고르기."; return render(); }
-  const withImage = !!(opts.image && now);
+  // 보여 줄 그림: 사용자가 고른 사진이 있으면 그것, 없으면 체크했을 때의 방금 뽑은 그림. 한 번에 한 장.
+  const fileImg = ui.attachFile?.blob || null;
+  const nowImg = !fileImg && opts.image && now ? now.blob : null;
+  const imgBlob = fileImg || nowImg, imgKind = fileImg ? "file" : nowImg ? "now" : null;
   askDraft = "";
-  d.chat.push({ role: "user", text, at: Date.now(), ...(withImage ? { img: true } : {}) });
+  d.chat.push({ role: "user", text, at: Date.now(), ...(imgKind ? { img: imgKind } : {}) });
   while (d.chat.length > CHAT_MAX) d.chat.shift();
   store.persist();
   asking = new AbortController();
@@ -738,7 +784,7 @@ async function ask(text, opts = {}) {
     let hist = d.chat.slice(-20);
     while (hist.length && hist[0].role !== "user") hist.shift(); // 제미니는 사용자 말로 시작해야 한다
     const cand = d.persona.auto.cand ? candidates(text) : [];
-    const img = withImage ? await shrinkJpeg(now.blob) : null;
+    const img = imgBlob ? await shrinkJpeg(imgBlob) : null;
     const contents = hist.map((m, i) => {
       const last = i === hist.length - 1;
       const parts = [{ text: last && cand.length ? `${m.text}\n\n[사전 후보]\n${cand.join("\n")}` : m.text }];
@@ -756,6 +802,7 @@ async function ask(text, opts = {}) {
     const out = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("").trim();
     if (!out) throw new Error(`빈 답이 옴 (${c?.finishReason || j.promptFeedback?.blockReason || "이유 모름"}). 말을 바꿔 다시 보내기.`);
     d.chat.push({ role: "model", text: out, at: Date.now() });
+    if (fileImg) clearAttach(); // 사진은 보낸 한 번만. 실패하면 남겨 두어 다시 보낼 수 있다
     while (d.chat.length > CHAT_MAX) d.chat.shift();
     store.persist();
   } catch (e) {
@@ -810,19 +857,34 @@ function applyChar(text) {
 const SETTING_KEYS = ["sampler", "steps", "scale", "cfgRescale", "noise", "variety", "size"];
 function snapBlocks() {
   const d = store.data;
-  return JSON.stringify({ scene: d.draft.scene, lock: d.draft.seedLock, chars: d.draft.chars, style: d.taste.style, neg: d.taste.negative, set: Object.fromEntries(SETTING_KEYS.map((k) => [k, d.settings[k]])) });
+  return JSON.stringify({ slots: d.draft.slots, lock: d.draft.seedLock, chars: d.draft.chars, style: d.taste.style, neg: d.taste.negative, set: Object.fromEntries(SETTING_KEYS.map((k) => [k, d.settings[k]])) });
 }
 function restoreBlocks(json) {
   const d = store.data, o = JSON.parse(json);
-  d.draft.scene = o.scene; d.draft.seedLock = o.lock; d.draft.chars = o.chars; d.taste.style = o.style; d.taste.negative = o.neg;
+  d.draft.slots = o.slots; syncScene(); d.draft.seedLock = o.lock; d.draft.chars = o.chars; d.taste.style = o.style; d.taste.negative = o.neg;
   Object.assign(d.settings, o.set);
   store.save();
+}
+
+// scene 블록: 한 줄에 칸 하나(`count:` `traits:` `outfit:` `pose:` `bg:`로 시작). 줄 이름이 없는 글은 인원수 태그만 1순위로 빼고 나머지를 ‘그 밖에’ 칸에 넣는다.
+// 블록이 이번 그림 전체를 대신하므로 블록에 없는 칸은 비워진다.
+function parseSceneBlock(v) {
+  const out = Object.fromEntries(SLOT_KEYS.map((k) => [k, ""])), loose = [];
+  let labeled = false;
+  for (const line of String(v).split("\n")) {
+    const m = line.match(/^\s*(count|traits|outfit|pose|bg)\s*:\s*(.*)$/i);
+    if (m) { labeled = true; const k = m[1].toLowerCase(); out[k] = joinTags([out[k], m[2]]); }
+    else if (line.trim()) loose.push(line);
+  }
+  if (!labeled) { const { count, rest } = splitCount(loose.join("\n")); out.count = count; out.rest = rest; return out; }
+  out.rest = joinTags(loose);
+  return out;
 }
 
 // kind, 블록 글을 칸에 넣는다. 돌려주는 것은 사용자에게 알릴 한 줄 (null이면 아무것도 안 함)
 function applyBlock(kind, v) {
   const d = store.data;
-  if (kind === "scene") { d.draft.scene = tidy(v); d.draft.seedLock = false; return "이번 그림 칸을 바꿈"; }
+  if (kind === "scene") { d.draft.slots = parseSceneBlock(v); syncScene(); d.draft.seedLock = false; return "이번 그림 칸들을 바꿈"; }
   if (kind === "style") {
     if (!confirm(`취향 프롬프트를 바꿈. 앞으로 모든 그림에 붙음.\n\n지금 값: ${tidy(d.taste.style).slice(0, 140) || "(비어 있음)"}`)) return null;
     d.taste.style = tidy(v);
@@ -852,7 +914,7 @@ function applyBlock(kind, v) {
 
 // 비서 한 메시지를 HTML로. i는 chat 안의 번호. 블록 버튼의 data-blk는 "i:j"
 function msgHtml(m, i) {
-  if (m.role === "user") return `<div class="msg me">${esc(m.text)}${m.img ? `<small class="att">방금 그림 첨부</small>` : ""}</div>`;
+  if (m.role === "user") return `<div class="msg me">${esc(m.text)}${m.img ? `<small class="att">${m.img === "file" ? "사진 첨부" : "방금 그림 첨부"}</small>` : ""}</div>`;
   const parts = parseBlocks(m.text).map((b, j) => {
     if (b.t === "text") return b.v.trim() ? `<p class="mt">${esc(b.v.trim())}</p>` : "";
     const id = `${i}:${j}`;
@@ -875,16 +937,32 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 
 // ── 뽑기 화면 조각들 ─────────────────────────────────────────
 // 접었다 펴는 칸. 화면이 다시 그려져도 펼친 상태를 기억하려고 ui.open에 둔다 (새로 고치면 처음으로).
-const ui = { open: {}, withImg: false, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "", dq: "" };
+const ui = { open: {}, withImg: false, attachFile: null, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "", dq: "" };
 const sec = (k, title, hint, inner) =>
   `<details class="sec" data-sec="${k}" ${ui.open[k] ? "open" : ""}><summary>${title}${hint ? ` <small>${esc(hint)}</small>` : ""}</summary><div class="secbody">${inner}</div></details>`;
 
 const QUICK = {
-  pose: "이번 그림 칸의 인물·의상은 그대로 두고, 내 취향에 맞는 자세·구도를 서로 다른 3안으로 줘. 각 안은 scene 블록 전체 프롬프트로.",
+  pose: "지금 칸들의 인물·의상은 그대로 두고, 내 취향에 맞는 자세·구도를 서로 다른 3안으로 줘. 각 안은 칸 이름 줄을 쓴 scene 블록 전체로.",
   style: "지금 장면과 인물에 어울리는 그림체를 내 취향대로 잡아서 style 블록 하나로 줘. 지금 취향 프롬프트와 뭐가 다른지 한 줄.",
-  tidy: "이번 그림 칸 프롬프트를 정리해 줘. 겹치는 태그, 서로 부딪치는 태그, 반영이 약한 태그를 고쳐서 scene 블록 전체로. 바뀐 점은 한 줄.",
+  tidy: "지금 칸들의 프롬프트를 정리해 줘. 겹치는 태그, 서로 부딪치는 태그, 반영이 약한 태그를 고쳐서 칸 이름 줄을 쓴 scene 블록 전체로. 바뀐 점은 한 줄.",
   params: "이 장면에 맞는 생성 설정을 params 블록 JSON으로 추천해 줘. Anlas가 안 드는 범위(스텝 28 이하, 일반 크기)에서. 이유 한 줄.",
 };
+
+// 비서에게 그림 보여 주기. 뽑기 화면의 AI 도우미와 ‘비서’ 탭이 같이 쓴다.
+// 방금 뽑은 그림(체크)과 내가 고른 사진(한 번만) 둘 중 하나를 이 질문에 붙여 구글로 보낸다. 그림이 없을 때도 이유를 보여 준다.
+function attachBar() {
+  const f = ui.attachFile;
+  return `
+    <div class="attach">
+      ${now
+        ? `<label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> 방금 뽑은 그림도 같이 보여 주기 <span class="hint">체크하면 이 그림이 구글로 감</span></label>`
+        : `<p class="hint">방금 뽑은 그림이 없어서 ‘방금 그림 보여 주기’는 꺼져 있음. 새로 고쳤거나 버린 뒤에는 없어짐. 뽑으면 체크칸이 생김.</p>`}
+      ${f ? `<div class="srcrow"><img src="${f.url}" alt="고른 사진"><div><span class="hint">${esc(f.name)} — 다음 질문에 한 번 보냄 (구글로 감)</span><button type="button" class="ghost sm" id="askUnpick">빼기</button></div></div>` : ""}
+      <input id="askFile" type="file" accept="image/*" hidden>
+      <button type="button" class="ghost sm" id="askPick">${f ? "다른 사진 고르기" : "사진 골라서 보여 주기"}</button>
+    </div>`;
+}
+function clearAttach() { if (ui.attachFile) { URL.revokeObjectURL(ui.attachFile.url); ui.attachFile = null; } }
 
 function aiPanel() {
   const { settings: s, chat } = store.data;
@@ -904,7 +982,7 @@ function aiPanel() {
     ${shown.length ? `<div class="chat">${shown.map((i) => msgHtml(chat[i], i)).join("")}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>` : (asking ? `<div class="msg ai dim">생각 중…</div>` : "")}
     ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
     <textarea id="ask" rows="3" placeholder="예: 팔짱 끼고 내려다보게, 표정은 더 차갑게" autocomplete="off">${esc(askDraft)}</textarea>
-    ${now ? `<label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> 방금 뽑은 그림도 같이 보여 주기 <span class="hint">체크하면 이 그림이 구글로 감</span></label>` : ""}
+    ${attachBar()}
     ${asking ? `<button type="button" id="stopAsk" class="ghost">눌러서 취소</button>` : `<button type="button" id="send">AI에게 부탁</button>`}
     <p class="hint"><a href="#/ai">‘비서’ 탭</a> 맨 아래에서 비서 지시문을 고칠 수 있음.</p>`;
   return sec("ai", "AI 도우미", "자세·그림체·수정·설정", body);
@@ -925,7 +1003,7 @@ function charsInner() {
     </div>`).join("");
   return `${list}
     <button type="button" class="ghost" id="addChar" ${draft.chars.length >= MAX_CHARS ? "disabled" : ""}>＋ 인물 더하기 (${draft.chars.length}/${MAX_CHARS})</button>
-    <p class="hint">인원 태그(2girls 등)는 위 ‘이번 그림’에 쓰고, 인물 칸에는 girl·boy처럼 숫자 없이 (NovelAI 문서). 인물 칸에는 취향 프롬프트·품질 태그가 안 붙음. 위치는 5x5 칸에서 고르고, 글로도 같이 쓰면 더 잘 따라옴(문서). 인물이 여럿이면 번짐이 생길 수 있음.</p>`;
+    <p class="hint">인원 태그(2girls 등)는 위 1순위 칸에 쓰고, 인물 칸에는 girl·boy처럼 숫자 없이 (NovelAI 문서). 인물 칸에는 취향 프롬프트·품질 태그가 안 붙음. 위치는 5x5 칸에서 고르고, 글로도 같이 쓰면 더 잘 따라옴(문서). 인물이 여럿이면 번짐이 생길 수 있음.</p>`;
 }
 
 function refInner() {
@@ -996,6 +1074,7 @@ const PKINDS = PRESET_KINDS;
 const KIND_TO = { 인물: "scene", 그림체: "style", "자세·구도": "scene", "빼는 것": "neg" }; // 종류 탭에서 새로 만들면 여기에 넣는 곳이 정해진다
 const TARGET = { scene: "이번 그림", style: "취향 그림체", neg: "빼는 것" };
 const PFIELDS = ["name", "text", "neg", "note"];
+const defaultSlot = (kind) => (kind === "인물" ? "traits" : kind === "자세·구도" ? "pose" : "rest");
 const bkey = (kind, p) => `b:${kind}:${p.name}`;
 const baseOf = (key) => { const m = key.match(/^b:([^:]+):(.+)$/); return m ? (PRESETS[m[1]] || []).find((b) => b.name === m[2]) : null; };
 
@@ -1004,26 +1083,26 @@ function presetEntries(kind) {
   const d = store.data, out = [];
   for (const base of PRESETS[kind] || []) {
     const key = bkey(kind, base), e = d.presetEdits[key] || {};
-    const p = { ...base };
+    const p = { ...base, ...(base.to === "scene" ? { slot: base.slot || defaultSlot(kind) } : {}) };
     for (const f of PFIELDS) if (typeof e[f] === "string") p[f] = e[f];
     out.push({ key, p, own: false, hidden: !!e.hidden, edited: PFIELDS.some((f) => typeof e[f] === "string") });
   }
-  for (const p of d.presets) if (p.kind === kind) out.push({ key: `own:${p.id}`, p, own: true, hidden: false, edited: false });
+  for (const p of d.presets) if (p.kind === kind) out.push({ key: `own:${p.id}`, p: p.to === "scene" ? { ...p, slot: SLOT_KEYS.includes(p.slot) ? p.slot : defaultSlot(p.kind) } : p, own: true, hidden: false, edited: false });
   return out;
 }
 // 칸을 바꾸는 것(이번 그림·취향 그림체·빼는 것)을 넣기 전 값으로 기억해 두고, 넣은 뒤 ‘되돌리기’를 단다.
 function applyPreset(p, mode) {
   const d = store.data;
-  const snap = { scene: d.draft.scene, seedLock: d.draft.seedLock, style: d.taste.style, negative: d.taste.negative };
+  const snap = { slots: JSON.stringify(d.draft.slots), seedLock: d.draft.seedLock, style: d.taste.style, negative: d.taste.negative };
   const msg = usePreset(p, mode);
-  const changed = snap.scene !== d.draft.scene || snap.style !== d.taste.style || snap.negative !== d.taste.negative;
+  const changed = snap.slots !== JSON.stringify(d.draft.slots) || snap.style !== d.taste.style || snap.negative !== d.taste.negative;
   toast(msg, changed ? () => {
-    d.draft.scene = snap.scene; d.draft.seedLock = snap.seedLock; d.taste.style = snap.style; d.taste.negative = snap.negative;
+    d.draft.slots = JSON.parse(snap.slots); syncScene(); d.draft.seedLock = snap.seedLock; d.taste.style = snap.style; d.taste.negative = snap.negative;
     store.save();
   } : null);
   store.save();
 }
-const targetNow = (p) => tidy(p.to === "scene" ? store.data.draft.scene : p.to === "style" ? store.data.taste.style : store.data.taste.negative);
+const targetNow = (p) => tidy(p.to === "scene" ? (store.data.draft.slots[p.slot] ?? store.data.draft.slots.rest) : p.to === "style" ? store.data.taste.style : store.data.taste.negative);
 const presetByKey = (key) => {
   if (key.startsWith("own:")) return store.data.presets.find((p) => p.id === key.slice(4));
   const m = key.match(/^b:([^:]+):/);
@@ -1078,6 +1157,7 @@ function presetForm(e, kind) {
       ${f("text", "내용", "영어 태그, 쉼표로", 5, "1girl, silver hair, looking at viewer")}
       ${p.to !== "neg" ? f("neg", "같이 뺄 것", "‘금지 태그도’를 누르면 빼는 것에 더함", 2) : ""}
       ${f("note", "메모", "", 0)}
+      ${e.own && p.to === "scene" ? `<label>넣는 칸<select data-pf="slot">${SLOT_KEYS.map((k) => `<option value="${k}" ${p.slot === k ? "selected" : ""}>${SLOT_NAMES[k]}</option>`).join("")}</select></label>` : ""}
       ${e.own && kind === "내 것" ? `<label>넣는 곳<select data-pf="to">${Object.entries(TARGET).map(([k, v]) => `<option value="${k}" ${p.to === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>` : ""}
       <div class="acts2">
         <button type="button" data-pdone>완료</button>
@@ -1116,7 +1196,14 @@ function usePreset(p, mode) {
   if (mode !== "neg" && !tidy(p.text || "")) return "내용이 비어 있음. ‘고치기’에서 채우기";
   if (mode === "neg" && !tidy(p.neg || "")) return "같이 뺄 것이 비어 있음";
   if (mode === "neg") { d.taste.negative = mergeTags(d.taste.negative, p.neg, false); return `‘${p.name}’의 금지 태그를 빼는 것에 더함`; }
-  if (p.to === "scene") { d.draft.scene = mode === "replace" ? tidy(p.text) : mergeTags(d.draft.scene, p.text, p.at === "front"); d.draft.seedLock = false; return `‘${p.name}’을 이번 그림에 ${mode === "replace" ? "바꿔 넣음" : "더함"}`; }
+  if (p.to === "scene") {
+    // 프리셋은 자기 칸(slot)에만 넣는다. ‘바꾸기’도 그 칸만 바꾸고 다른 칸은 그대로 둔다.
+    const slot = SLOT_KEYS.includes(p.slot) ? p.slot : "rest", sl = d.draft.slots;
+    const put = (k, txt) => { if (!tidy(txt)) return; sl[k] = mode === "replace" ? tidy(txt) : mergeTags(sl[k], txt, p.at === "front"); };
+    if (slot === "traits") { const { count, rest } = splitCount(p.text); put("count", count); put("traits", rest); } else put(slot, p.text);
+    syncScene(); d.draft.seedLock = false;
+    return `‘${p.name}’을 ${SLOT_NAMES[slot]} 칸에 ${mode === "replace" ? "바꿔 넣음" : "더함"}`;
+  }
   if (p.to === "style") { const old = tidy(d.taste.style); d.taste.style = mode === "add" ? mergeTags(old, p.text, false) : tidy(p.text); return `취향 그림체에 ‘${p.name}’을 ${mode === "add" ? "더함" : "넣음"}${mode === "add" ? "" : `. 이전 값: ${old.slice(0, 90)}${old.length > 90 ? "…" : ""}`}`; }
   const old = tidy(d.taste.negative);
   d.taste.negative = mode === "replace" ? tidy(p.text) : mergeTags(old, p.text, false);
@@ -1213,6 +1300,55 @@ function personaEditor() {
   return sec("persona", "비서 지시문 고치기", "조각을 끄고 켜고 고침", body);
 }
 
+// ── 프롬프트 칸 화면 ────────────────────────────────────────
+// 1→7순위 칸. 2순위는 취향 프롬프트, 7순위는 품질 태그와 같은 값이다. 글자를 칠 때는 저장만 하고 다시 그리지 않는다.
+function slotsPanel() {
+  const d = store.data, sl = d.draft.slots, s = d.settings;
+  const area = (key, val, ph) => `<textarea id="slot-${key}" data-slot="${key}" rows="1" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="${esc(ph)}">${esc(val)}</textarea>`;
+  const row = (key, n, title, hint, val, ph) => `<div class="slot"><label for="slot-${key}"><b>${n}</b> ${title}${hint ? ` <span class="hint">${hint}</span>` : ""}</label>${area(key, val, ph)}</div>`;
+  const full = composePrompt(sl, d.taste.style, s);
+  return `
+    <p class="hint">아래 칸이 1→7순위 순서로 이어 붙어 NovelAI로 감. 영어 태그, 쉼표로. 같은 태그는 먼저 나온 것만 남음. 프리셋은 자기 칸에만 들어감.</p>
+    ${row("count", "1순위", "인원수·성별", "", sl.count, "1girl, solo")}
+    ${row("style", "2순위", "화풍·작가", "‘취향’ 탭의 취향 프롬프트와 같은 칸", d.taste.style, "{painterly}, artist:이름")}
+    ${row("traits", "3순위", "캐릭터 고유 특징", "체형, 머리, 눈 색, 표정", sl.traits, "silver hair, long hair, blue eyes")}
+    ${row("outfit", "4순위", "의상·장신구", "", sl.outfit, "black suit, necktie")}
+    ${row("pose", "5순위", "포즈·시선·구도", "", sl.pose, "crossed arms, from below, upper body")}
+    ${row("bg", "6순위", "배경·조명·분위기·이펙트", "", sl.bg, "palace, backlighting")}
+    ${tg(sl.rest) ? row("rest", "그 밖에", "칸을 나누기 전의 글", "위 칸으로 옮겨 적고 비워도 됨", sl.rest, "") : ""}
+    <div class="slot"><label for="slot-quality"><b>7순위</b> 기본 퀄리티 태그 <span class="hint">모델별 기본 글. 고치면 이 폰에 저장</span></label>
+      ${area("quality", qText(s), "")}
+      <div class="acts2"><label class="line"><input type="checkbox" id="qualityOn" ${s.quality ? "checked" : ""}> 붙이기</label><button type="button" class="ghost sm" id="qualityDef" ${tg(s.qualityText) ? "" : "disabled"}>기본값으로</button></div>
+    </div>
+    ${sec("sprev", "완성된 프롬프트 보기", "", `<p class="hint" id="scount">${full.length}자</p><pre class="pprev" id="sprevtxt">${esc(full) || "(비어 있음)"}</pre>`)}
+    <div class="acts2"><button type="button" class="ghost sm" id="saveScene">이 칸들을 내 프리셋으로 저장</button><button type="button" class="ghost sm" id="slotsClear">1·3~6순위 칸 비우기</button></div>`;
+}
+function wireSlots() {
+  const d = store.data, s = d.settings;
+  const prev = () => { const t = composePrompt(d.draft.slots, d.taste.style, s); const a = $("sprevtxt"), c = $("scount"); if (a) a.textContent = t || "(비어 있음)"; if (c) c.textContent = `${t.length}자`; };
+  const grow = (el) => { el.style.height = "auto"; el.style.height = Math.max(el.scrollHeight + 2, 46) + "px"; };
+  document.querySelectorAll("[data-slot]").forEach((el) => {
+    grow(el);
+    el.addEventListener("input", () => {
+      grow(el);
+      const k = el.dataset.slot;
+      if (k === "style") d.taste.style = el.value;
+      else if (k === "quality") { s.qualityText = tg(el.value) === qDefault(s) ? "" : el.value; const b = $("qualityDef"); if (b) b.disabled = !tg(s.qualityText); }
+      else { d.draft.slots[k] = el.value; syncScene(); }
+      store.persist(); prev();
+    });
+  });
+  on("qualityOn", "change", (e) => { s.quality = e.target.checked; store.persist(); prev(); });
+  on("qualityDef", "click", () => { s.qualityText = ""; store.save(); });
+  on("slotsClear", "click", () => {
+    const before = JSON.stringify(d.draft.slots);
+    for (const k of SLOT_KEYS) d.draft.slots[k] = "";
+    syncScene();
+    toast("칸을 비움", () => { d.draft.slots = JSON.parse(before); syncScene(); store.save(); });
+    store.save();
+  });
+}
+
 // 이번에 뽑은 그림 목록. 눌러서 크게 다시 본다 (새로 뽑거나 버린 그림을 되돌리는 길).
 function histStrip() {
   if (!hist.length || (hist.length === 1 && hist[0] === now)) return "";
@@ -1231,11 +1367,7 @@ const SCREENS = {
     return `
       ${s.token.trim() ? "" : `<p class="notice">NovelAI 토큰이 아직 없음. <a href="#/taste">‘취향’ 탭 맨 아래</a>에서 넣어야 뽑힘.</p>`}
       ${aiPanel()}
-      <label for="scene">이번 그림 <span class="hint">영어 태그, 쉼표로</span></label>
-      <textarea id="scene" rows="4" autocapitalize="off" autocomplete="off" spellcheck="false"
-        placeholder="1girl, silver hair, looking at viewer, upper body">${esc(draft.scene)}</textarea>
-      <p class="hint">${styleLen ? `여기에 취향 프롬프트(${styleLen}자)` : `취향 프롬프트는 아직 비어 있고,`}${s.quality ? " 품질 태그가" : ""} 뒤에 붙음. 아래 ‘프리셋’에서 인물·자세·그림체를 눌러 넣을 수 있음.</p>
-      <div class="acts2"><button type="button" class="ghost sm" id="saveScene">이 프롬프트를 내 프리셋으로 저장</button></div>
+      ${slotsPanel()}
       <div class="seg seg4" role="group" aria-label="크기">
         ${[...Object.keys(SIZES), "직접"].map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${k === "직접" ? `${w}×${h}` : SIZES[k].join("×")}</small></button>`).join("")}
       </div>
@@ -1282,6 +1414,7 @@ const SCREENS = {
       <div class="chat">${bubbles}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>
       ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
       <textarea id="ask" rows="3" placeholder="장면, 인물, 분위기를 한국어로" autocomplete="off">${esc(askDraft)}</textarea>
+      ${attachBar()}
       ${asking
         ? `<button type="button" id="stopAsk" class="ghost big">눌러서 취소</button>`
         : `<button type="button" id="send" class="big">보내기</button>`}
@@ -1325,7 +1458,7 @@ const SCREENS = {
     const chip = (r, act) => `<button type="button" class="chip" ${act ? `data-add="${esc(r.tag)}"` : "disabled"}>${esc(r.tag)} <small>${r.keep}/${r.drop}</small></button>`;
     return `
       <h2>취향 프롬프트</h2>
-      <p class="hint">뽑을 때마다 뒤에 붙는 것. 화풍, 작가(artist:이름), 색감, 분위기 태그.</p>
+      <p class="hint">뽑을 때마다 2순위로 들어가는 것(‘뽑기’ 탭의 2순위 칸과 같은 값). 화풍, 작가(artist:이름), 색감, 분위기 태그.</p>
       <textarea id="style" rows="4" autocapitalize="off" autocomplete="off" spellcheck="false"
         placeholder="artist:이름, soft lighting, muted colors">${esc(taste.style)}</textarea>
       <h2>빼는 것</h2>
@@ -1425,7 +1558,7 @@ function savePreset(to) {
   if (!text) return toast("비어 있어서 저장할 게 없음");
   const name = (prompt("프리셋 이름") || "").trim().slice(0, 30);
   if (!name) return;
-  d.presets.unshift({ id: crypto.randomUUID(), name, text, to, kind: "내 것" });
+  d.presets.unshift({ id: crypto.randomUUID(), name, text, to, kind: "내 것", ...(to === "scene" ? { slot: "rest" } : {}) });
   ui.open.preset = true; ui.presetKind = "내 것";
   toast(`‘${name}’ 저장함`);
   store.save();
@@ -1436,6 +1569,17 @@ function wireAsk() {
   const d = store.data;
   on("ask", "input", (e) => { askDraft = e.target.value; });
   on("withImg", "change", (e) => { ui.withImg = e.target.checked; });
+  on("askPick", "click", () => $("askFile").click());
+  on("askFile", "change", (e) => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    if (!/^image\//.test(f.type) && !/\.(jpe?g|png|webp|gif|heic|heif|avif)$/i.test(f.name)) { askErr = "그림 파일이 아님."; return render(); }
+    clearAttach();
+    ui.attachFile = { blob: f, name: (f.name || "사진").slice(0, 40), url: URL.createObjectURL(f) };
+    askErr = "";
+    render();
+  });
+  on("askUnpick", "click", () => { clearAttach(); render(); });
   on("send", "click", () => { const t = askDraft.trim(); if (t) ask(t, { image: ui.withImg && !!now }); });
   on("stopAsk", "click", () => asking?.abort());
   on("clearChat", "click", () => { if (confirm("비서와 한 대화를 지움.")) { d.chat = []; store.save(); } });
@@ -1460,7 +1604,9 @@ function wireAsk() {
     if (el.dataset.kind === "scene" && route()[0] === "ai") location.hash = "#/gen"; else render();
   }));
   document.querySelectorAll("[data-copy]").forEach((el) => el.addEventListener("click", async () => {
-    const v = blockOf(el.dataset.copy); if (!v) return;
+    let v = blockOf(el.dataset.copy); if (!v) return;
+    const [ci, cj] = el.dataset.copy.split(":").map(Number);
+    if (parseBlocks(d.chat[ci]?.text || "")[cj]?.lang === "scene") v = sceneOf(parseSceneBlock(v)); // 칸 이름 줄을 떼고 이어 붙인 글
     try { await navigator.clipboard.writeText(v); el.textContent = "복사함"; }
     catch { el.textContent = "복사 못 함 — 길게 눌러 직접 복사"; }
   }));
@@ -1478,9 +1624,9 @@ function wireDict() {
   $("dres")?.addEventListener("click", (e) => {
     const add = e.target.closest("[data-dadd]"), nw = e.target.closest("[data-dnew]");
     if (add) {
-      const before = d.draft.scene, lock = d.draft.seedLock;
-      d.draft.scene = mergeTags(d.draft.scene, add.dataset.dadd, false); d.draft.seedLock = false;
-      toast(`‘${add.dataset.dadd}’를 이번 그림에 더함`, () => { d.draft.scene = before; d.draft.seedLock = lock; store.save(); });
+      const before = JSON.stringify(d.draft.slots), lock = d.draft.seedLock;
+      d.draft.slots.rest = mergeTags(d.draft.slots.rest, add.dataset.dadd, false); syncScene(); d.draft.seedLock = false;
+      toast(`‘${add.dataset.dadd}’를 ‘그 밖에’ 칸에 더함`, () => { d.draft.slots = JSON.parse(before); syncScene(); d.draft.seedLock = lock; store.save(); });
       store.persist();
     } else if (nw) {
       if (d.userDict.length >= DICT_MAX) return toast(`내 단어는 ${DICT_MAX}개까지`);
@@ -1561,7 +1707,7 @@ function wire(name, arg, seq) {
   if (name === "gen") {
     document.querySelectorAll("details[data-sec]").forEach((el) => el.addEventListener("toggle", () => { ui.open[el.dataset.sec] = el.open; }));
     wireAsk();
-    on("scene", "input", (e) => { d.draft.scene = e.target.value; store.persist(); });
+    wireSlots();
     on("seedLock", "change", (e) => { d.draft.seedLock = e.target.checked; store.save(); });
     on("seed", "change", (e) => {
       const v = e.target.value.trim();
@@ -1693,6 +1839,7 @@ function wire(name, arg, seq) {
       const kind = ui.presetKind;
       const p = { id: crypto.randomUUID(), name: "새 프리셋", text: "", to: KIND_TO[kind] || "scene", kind };
       if (kind === "인물") p.at = "front";
+      if (p.to === "scene") p.slot = defaultSlot(kind);
       d.presets.unshift(p); ui.pedit = `own:${p.id}`; ui.open.preset = true;
       store.save();
     }));
@@ -1702,7 +1849,9 @@ function wire(name, arg, seq) {
       if (key.startsWith("own:")) {
         const p = d.presets.find((x) => x.id === key.slice(4));
         if (!p) return;
-        if (f === "to") { if (TARGET[el.value]) { p.to = el.value; if (p.to !== "scene") delete p.at; } } else p[f] = el.value;
+        if (f === "to") { if (TARGET[el.value]) { p.to = el.value; if (p.to !== "scene") { delete p.at; delete p.slot; } else if (!p.slot) p.slot = "rest"; } }
+        else if (f === "slot") { if (SLOT_KEYS.includes(el.value)) p.slot = el.value; }
+        else p[f] = el.value;
       } else {
         const base = baseOf(key);
         if (!base) return;
@@ -1751,7 +1900,7 @@ function wire(name, arg, seq) {
       $("full").src = u;
     });
     on("again", "click", () => {
-      d.draft.scene = rec.scene; d.draft.seed = rec.seed; d.draft.seedLock = true;
+      d.draft.slots = rec.slots ? normSlots(rec.slots) : normSlots(null, rec.scene); syncScene(); d.draft.seed = rec.seed; d.draft.seedLock = true;
       d.draft.chars = (rec.chars || []).map((c) => ({ id: crypto.randomUUID(), text: c.text, neg: c.neg || "", pos: Number.isInteger(c.pos) ? c.pos : null }));
       if (SAMPLERS[rec.sampler]) d.settings.sampler = rec.sampler;
       if (rec.noise) d.settings.noise = rec.noise;
@@ -1793,7 +1942,7 @@ function wire(name, arg, seq) {
       if (src) { URL.revokeObjectURL(src.url); src = null; }
       refs.forEach((r) => URL.revokeObjectURL(r.url));
       refs = [];
-      histClear();
+      histClear(); clearAttach();
       store.data = SHAPE();
       store.save();
     });
