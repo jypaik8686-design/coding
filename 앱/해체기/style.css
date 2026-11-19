@@ -56,7 +56,7 @@ main {
 /* 하단 탭 — 손가락 닿는 높이 44px 이상 */
 .tabs {
   position: fixed; inset: auto 0 0 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: repeat(4, 1fr);
   padding-bottom: env(safe-area-inset-bottom);
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: blur(12px);
@@ -146,3 +146,9 @@ li.row.lore { align-items: center; }
 @media (prefers-color-scheme: dark) { .k-zip { background: #2f343b; color: var(--ink); } }
 p.hint + button, .kv + button { margin-top: 10px; }
 #screen > button + button { margin-left: 8px; }
+.back { display: inline-block; margin-bottom: 8px; color: var(--accent); text-decoration: none; font-weight: 600; min-height: 32px; }
+section.blk { border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-bottom: 10px; background: var(--bg); }
+.bhead { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.bhead b { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+pre.out.small { max-height: 40dvh; font-size: 12.5px; }
+section.blk .btns { margin: 6px 0 0; }

@@ -3,6 +3,8 @@
 
 import { PERSONA_PARTS, partState, buildPersona, MODEL_CHOICES } from "./assistant.js";
 import { PRESETS } from "./presets.js";
+// 받은 파일을 블록으로 펼치는 것은 해체기와 같은 코드를 쓴다(같은 주소 아래 있어서 바로 불러옴). 해체기 폴더를 옮기면 이 줄도 고친다.
+import { parseFile, vaultItems } from "../해체기/risu.js";
 
 const KEY = "짤뽑기/v1";
 const API = "https://image.novelai.net/ai/generate-image";
@@ -224,9 +226,10 @@ let dbp = null;
 function db() {
   dbp ??= new Promise((ok, no) => {
     // 2: 참고 그림 창고 "ref". 3: 이미지→이미지 원본 창고 "src"(한 줄, id "main"). 4: 프리셋 그림 창고 "pimg". 옛 창고는 그대로 둔다.
-    const q = indexedDB.open("짤뽑기", 4);
+    // 5: 보관소 창고 "vault"(받은 프롬프트·파일을 펼친 블록).
+    const q = indexedDB.open("짤뽑기", 5);
     q.onupgradeneeded = () => {
-      for (const n of ["img", "ref", "src", "pimg"]) if (!q.result.objectStoreNames.contains(n)) q.result.createObjectStore(n, { keyPath: "id" });
+      for (const n of ["img", "ref", "src", "pimg", "vault"]) if (!q.result.objectStoreNames.contains(n)) q.result.createObjectStore(n, { keyPath: "id" });
     };
     q.onsuccess = () => ok(q.result);
     q.onerror = () => no(q.error);
@@ -259,6 +262,10 @@ const pimgGet = (id) => idb("readonly", (s) => s.get(id), "pimg");
 const pimgDel = (id) => idb("readwrite", (s) => s.delete(id), "pimg");
 const pimgAll = () => idb("readonly", (s) => s.getAll(), "pimg");
 const pimgClear = () => idb("readwrite", (s) => s.clear(), "pimg");
+const vaultPutRows = (rows) => idb("readwrite", (s) => { rows.forEach((r) => s.put(r)); }, "vault");
+const vaultAllRows = () => idb("readonly", (s) => s.getAll(), "vault");
+const vaultDelRow = (id) => idb("readwrite", (s) => s.delete(id), "vault");
+const vaultClear = () => idb("readwrite", (s) => s.clear(), "vault");
 
 async function thumbOf(blob) {
   const bmp = await createImageBitmap(blob);
@@ -373,6 +380,53 @@ async function autoRef(key, p) {
   const blob = await pimgBlob(key);
   if (blob) await toRefs(blob, name);
 }
+// ── 보관소 ─────────────────────────────────────────────────
+// 다른 곳에서 받은 프롬프트·파일을 파일 안의 블록 그대로 펼쳐 둔다. IndexedDB "vault" 한 줄:
+// { id, name, kind, label, size, at, src("파일"|"붙여 넣기"), blocks:[{title, kind, text, meta?}] }. 원본 파일은 안 남긴다.
+let vault = [], vaultErr = "";
+async function loadVault() {
+  try { vault = ((await vaultAllRows()) || []).sort((a, b) => b.at - a.at); vaultErr = ""; }
+  catch (e) { vault = []; vaultErr = `보관소를 못 읽음 (${e?.name || e}).`; }
+}
+async function vaultAdd(node, src) {
+  const rows = vaultItems(node).map((it) => ({ id: crypto.randomUUID(), at: Date.now(), src, ...it }));
+  if (!rows.length) return [];
+  await vaultPutRows(rows);
+  await loadVault();
+  return rows;
+}
+// 블록을 어디에 넣을지. 값은 vaultPut이 읽는다.
+const VTO = [
+  ["scene", "이번 그림 칸 전체로 (scene 블록처럼)"], ["slot:count", "1순위 인원수·성별에 더하기"], ["style", "2순위 화풍·작가에 더하기"],
+  ["slot:traits", "3순위 캐릭터 특징에 더하기"], ["slot:outfit", "4순위 의상에 더하기"], ["slot:pose", "5순위 포즈·구도에 더하기"],
+  ["slot:bg", "6순위 배경에 더하기"], ["slot:rest", "‘그 밖에’ 칸에 더하기"], ["neg", "이번 빼는 것에 더하기"], ["char", "인물별 프롬프트 칸으로"],
+  ["piece", "비서 내 조각으로"], ...PRESET_KINDS.map((k) => [`p:${k}`, `${k} 프리셋으로 저장`]),
+];
+const vtoGuess = (b) => (/빼는 것|negative|uc/i.test(b.kind) ? "neg" : /NAI·프롬프트|^scene$/i.test(b.kind) ? "scene" : /NAI·인물|^char$/.test(b.kind) ? "char" : /^style$/i.test(b.kind) ? "style" : "piece");
+function vaultPut(b, to) {
+  const d = store.data, text = b.text;
+  if (to === "piece") return pasteToPiece(`## ${b.title}\n${text}`);
+  if (to.startsWith("p:")) {
+    const kind = to.slice(2), pto = KIND_TO[kind] || "scene", t = tidy(text);
+    if (!t) return toast("블록이 비어 있음");
+    const name = (prompt(`${kind} 프리셋 이름`, b.title.slice(0, 30)) || "").trim().slice(0, 30);
+    if (!name) return;
+    const pr = { id: crypto.randomUUID(), name, text: t, to: pto, kind, ...(pto === "scene" ? { slot: defaultSlot(kind) } : {}), ...(kind === "인물" ? { at: "front" } : {}) };
+    d.presets.unshift(pr);
+    toast(`‘${name}’을 ${kind} 프리셋으로 저장함`, () => { d.presets = d.presets.filter((x) => x !== pr); store.save(); });
+    return store.save();
+  }
+  const snap = snapBlocks();
+  let msg;
+  if (to === "scene" || to === "char") msg = applyBlock(to, text);
+  else if (to === "style") { d.taste.style = mergeTags(d.taste.style, text, false); msg = "화풍·작가에 더함"; }
+  else if (to === "neg") { d.draft.neg = mergeTags(d.draft.neg, text, false); msg = "이번 빼는 것에 더함"; }
+  else if (to.startsWith("slot:")) { const k = to.slice(5); d.draft.slots[k] = mergeTags(d.draft.slots[k], text, false); syncScene(); d.draft.seedLock = false; msg = `${SLOT_NAMES[k]} 칸에 더함`; }
+  if (!msg) return;
+  toast(msg, () => restoreBlocks(snap));
+  store.save();
+}
+
 // 그림 한 장을 참고 그림으로. 넣었으면 true. 지금 모델이 참고 그림을 못 보내면 알린다.
 async function toRefs(blob, name) {
   const before = refs.length;
@@ -1100,7 +1154,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 
 // ── 뽑기 화면 조각들 ─────────────────────────────────────────
 // 접었다 펴는 칸. 화면이 다시 그려져도 펼친 상태를 기억하려고 ui.open에 둔다 (새로 고치면 처음으로).
-const ui = { open: {}, withImg: false, attachFile: null, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "", dq: "", pimgOpen: null, pimgTarget: null };
+const ui = { open: {}, withImg: false, attachFile: null, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "", dq: "", pimgOpen: null, pimgTarget: null, vq: "", bq: "", vShow: 40, vOpen: new Set(), vto: {} };
 const sec = (k, title, hint, inner) =>
   `<details class="sec" data-sec="${k}" ${ui.open[k] ? "open" : ""}><summary>${title}${hint ? ` <small>${esc(hint)}</small>` : ""}</summary><div class="secbody">${inner}</div></details>`;
 
@@ -1567,6 +1621,38 @@ function wireSlots() {
   }));
 }
 
+function vaultList(list) {
+  if (!list.length) return `<p class="hint">${vault.length ? "찾은 것이 없음." : "아직 없음."}</p>`;
+  return list.map((v) => `<a class="vrow" href="#/vault/${v.id}"><span class="tag">${esc(v.label)}</span><b>${esc(v.name)}</b><small>${v.blocks.length}블록</small></a>`).join("");
+}
+function vaultItemView(id) {
+  const v = vault.find((x) => x.id === id);
+  if (!v) return `<p class="empty">보관소에 없음.<br><a href="#/vault">보관소로</a></p>`;
+  return `
+    <a class="back" href="#/vault">‹ 보관소</a>
+    <h2>${esc(v.name)}</h2>
+    <p class="hint">${esc(v.label)} · ${esc(v.src)} · ${new Date(v.at).toLocaleDateString("ko-KR")} · ${v.blocks.length}블록</p>
+    <div class="acts2"><button type="button" class="ghost" id="vCopyAll">블록 전부 복사</button><button type="button" class="ghost" id="vDel">보관소에서 지우기</button></div>
+    <input id="bq" type="search" placeholder="블록에서 찾기" value="${esc(ui.bq)}" autocomplete="off">
+    <div id="blist">${blockList(v)}</div>`;
+}
+const VPREVIEW = 400, VOPEN = 20000;
+function blockList(v) {
+  const q = ui.bq.trim().toLowerCase();
+  const hit = v.blocks.map((b, i) => ({ b, i })).filter(({ b }) => !q || (b.title + " " + (b.meta || "") + " " + b.text).toLowerCase().includes(q));
+  const shown = hit.slice(0, ui.vShow);
+  return `<p class="hint">${hit.length}블록${hit.length > shown.length ? ` 중 ${shown.length}개 보임` : ""}</p>${shown.map(({ b, i }) => {
+    const open = ui.vOpen.has(i), long = b.text.length > VPREVIEW, sel = ui.vto[`${v.id}:${i}`] || vtoGuess(b);
+    return `<section class="blk">
+      <div class="bhead"><span class="tag">${esc(b.kind)}</span><b>${esc(b.title)}</b><small class="hint">${b.text.length}자</small></div>
+      ${b.meta ? `<p class="hint">키워드: ${esc(b.meta)}</p>` : ""}
+      <pre class="bout">${esc(open ? b.text.slice(0, VOPEN) : b.text.slice(0, VPREVIEW))}${!open && long ? "…" : ""}</pre>
+      <div class="vput"><select data-vto="${i}" aria-label="넣을 곳">${VTO.map(([k, t]) => `<option value="${esc(k)}" ${k === sel ? "selected" : ""}>${esc(t)}</option>`).join("")}</select><button type="button" data-vgo="${i}">넣기</button></div>
+      <div class="acts2"><button type="button" class="ghost sm" data-vcopy="${i}">복사</button>${long ? `<button type="button" class="ghost sm" data-vopen="${i}">${open ? "접기" : "펼치기"}</button>` : ""}</div>
+    </section>`;
+  }).join("")}${hit.length > shown.length ? `<button type="button" class="ghost" id="vMore">더 보기</button>` : ""}`;
+}
+
 // 이번에 뽑은 그림 목록. 눌러서 크게 다시 본다 (새로 뽑거나 버린 그림을 되돌리는 길).
 function histStrip() {
   if (!hist.length || (hist.length === 1 && hist[0] === now)) return "";
@@ -1677,6 +1763,24 @@ const SCREENS = {
       `<a href="#/keep/${r.id}" data-thumb="${r.id}" style="aspect-ratio:${r.w}/${r.h}" aria-label="시드 ${r.seed} 그림"></a>`).join("")}</div>`;
   },
 
+  vault(id) {
+    if (id) return vaultItemView(id);
+    const q = ui.vq.trim().toLowerCase();
+    const list = !q ? vault : vault.filter((v) => (v.name + " " + v.blocks.map((b) => b.title + " " + b.text).join(" ")).toLowerCase().includes(q));
+    return `
+      ${vaultErr ? `<p class="error">${esc(vaultErr)}</p>` : ""}
+      <p class="hint">다른 곳에서 받은 프롬프트·파일을 파일 안의 블록 그대로 펼쳐 이 폰에 둠. 블록마다 칸·프리셋·비서 조각에 넣을 수 있음. RisuAI 파일(.risup·.risum·.charx·카드), NovelAI PNG, 글·JSON, zip.</p>
+      <input id="vFile" type="file" multiple hidden>
+      <div class="acts2"><button type="button" id="vPick">＋ 받은 파일 펼치기</button></div>
+      <label for="vText">받은 글 붙여 넣기 <span class="hint">## 제목, \`\`\` 블록, 빈 줄로 나눈 덩어리가 블록이 됨</span></label>
+      <input id="vName" type="text" placeholder="이름 (비우면 첫 줄)" autocomplete="off">
+      <textarea id="vText" rows="4" autocomplete="off" spellcheck="false" placeholder="받은 프롬프트, 설정…"></textarea>
+      <div class="acts2"><button type="button" class="ghost" id="vPaste">펼쳐서 넣기</button></div>
+      <h2>보관소 <small>${vault.length}개</small></h2>
+      ${vault.length ? `<input id="vq" type="search" placeholder="이름·블록 글에서 찾기" value="${esc(ui.vq)}" autocomplete="off">` : ""}
+      <div id="vlist">${vaultList(list)}</div>`;
+  },
+
   taste() {
     const { settings: s, taste, log } = store.data;
     const st = tagStats();
@@ -1741,7 +1845,7 @@ const SCREENS = {
 };
 
 // ── 라우터 ──────────────────────────────────────────────────
-const TITLES = { gen: "짤뽑기", ai: "비서", keep: "보관함", taste: "화풍·작가" };
+const TITLES = { gen: "짤뽑기", ai: "비서", keep: "보관함", vault: "보관소", taste: "화풍·작가" };
 const route = () => (location.hash.replace(/^#\/?/, "") || "gen").split("/");
 let thumbUrls = [];
 let renderSeq = 0;
@@ -1936,6 +2040,63 @@ function wirePersona() {
   on("pReset", "click", () => {
     if (!confirm("고친 조각, 내 조각, 켜고 끈 것을 전부 지우고 기본 지시문으로 돌림.")) return;
     d.persona = normPersona(null); store.save();
+  });
+}
+
+function wireVault(id) {
+  const v = id && vault.find((x) => x.id === id);
+  on("vPick", "click", () => $("vFile").click());
+  on("vFile", "change", async (e) => {
+    const fs = [...e.target.files]; e.target.value = "";
+    let n = 0; const none = [];
+    for (const f of fs) {
+      try {
+        if (f.size > 150 * 1024 * 1024) { none.push(`${f.name}(150MB 넘음)`); continue; }
+        const rows = await vaultAdd(await parseFile(f.name, new Uint8Array(await f.arrayBuffer())), "파일");
+        if (rows.length) n += rows.length; else none.push(f.name);
+      } catch (err) { none.push(`${f.name}(${err?.message || err})`); }
+    }
+    toast(`보관소에 ${n}개 넣음${none.length ? ` · 펼칠 블록이 없음: ${none.slice(0, 3).join(", ")}` : ""}`);
+    render();
+  });
+  on("vPaste", "click", async () => {
+    const text = $("vText").value;
+    if (!text.trim()) return toast("붙여 넣은 글이 비어 있음");
+    const nm = $("vName").value.trim() || text.trim().split("\n")[0].slice(0, 40);
+    const rows = await vaultAdd(await parseFile(/\.(txt|json)$/i.test(nm) ? nm : nm + ".txt", new TextEncoder().encode(text)), "붙여 넣기").catch(() => []);
+    if (!rows.length) return toast("펼칠 블록이 없음");
+    location.hash = `#/vault/${rows[0].id}`;
+  });
+  on("vq", "input", (e) => {
+    ui.vq = e.target.value;
+    const q = ui.vq.trim().toLowerCase();
+    $("vlist").innerHTML = vaultList(!q ? vault : vault.filter((x) => (x.name + " " + x.blocks.map((b) => b.title + " " + b.text).join(" ")).toLowerCase().includes(q)));
+  });
+  if (!v) return;
+  const redraw = () => { $("blist").innerHTML = blockList(v); wireBlocks(); };
+  const wireBlocks = () => {
+    document.querySelectorAll("[data-vto]").forEach((el) => el.addEventListener("change", () => { ui.vto[`${v.id}:${el.dataset.vto}`] = el.value; }));
+    document.querySelectorAll("[data-vgo]").forEach((b) => b.addEventListener("click", () => {
+      const i = +b.dataset.vgo, sel = document.querySelector(`[data-vto="${i}"]`);
+      vaultPut(v.blocks[i], sel.value);
+    }));
+    document.querySelectorAll("[data-vcopy]").forEach((b) => b.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(v.blocks[+b.dataset.vcopy].text); toast("복사함"); } catch { toast("복사 못 함. 글을 길게 눌러 직접 선택"); }
+    }));
+    document.querySelectorAll("[data-vopen]").forEach((b) => b.addEventListener("click", () => { const i = +b.dataset.vopen; if (ui.vOpen.has(i)) ui.vOpen.delete(i); else ui.vOpen.add(i); redraw(); }));
+    on("vMore", "click", () => { ui.vShow += 40; redraw(); });
+  };
+  wireBlocks();
+  on("bq", "input", (e) => { ui.bq = e.target.value; ui.vShow = 40; redraw(); });
+  on("vCopyAll", "click", async () => {
+    const all = v.blocks.map((b) => `## ${b.title}${b.meta ? `\n키워드: ${b.meta}` : ""}\n${b.text}`).join("\n\n");
+    try { await navigator.clipboard.writeText(all); toast(`블록 ${v.blocks.length}개를 복사함`); } catch { toast("복사 못 함"); }
+  });
+  on("vDel", "click", async () => {
+    if (!confirm("보관소에서 지움. 되돌릴 수 없음.")) return;
+    await vaultDelRow(v.id).catch(() => {});
+    await loadVault();
+    location.hash = "#/vault";
   });
 }
 
@@ -2180,6 +2341,7 @@ function wire(name, arg, seq) {
     fillThumbs(seq);
   }
   if (name === "ai") { wireAsk(); wirePersona(); wireDict(); on("aiModelQ", "change", (e) => { d.settings.aiModel = e.target.value; store.save(); }); }
+  if (name === "vault") wireVault(arg);
   if (name === "keep" || name === "taste") {
     on("inAdd", "click", () => $("inFile").click());
     on("inFile", "change", (e) => { const f = [...e.target.files]; e.target.value = ""; if (f.length) importImages(f); });
@@ -2248,11 +2410,12 @@ function wire(name, arg, seq) {
     on("jsonFile", "change", async (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) importJson(await f.text()); });
     on("pasteGo", "click", () => pasteToPiece($("pasteIn")?.value));
     on("reset", "click", async () => {
-      if (!confirm("화풍·작가, 빼는 것, 기록, 보관한 그림, 참고 그림, 프리셋 그림, 대화, 토큰과 키를 전부 지움. 되돌릴 수 없음.")) return;
+      if (!confirm("화풍·작가, 빼는 것, 기록, 보관한 그림, 참고 그림, 프리셋 그림, 보관소, 대화, 토큰과 키를 전부 지움. 되돌릴 수 없음.")) return;
       await imgClear().catch(() => {});
       await refClear().catch(() => {});
       await srcClear().catch(() => {});
       await pimgClear().catch(() => {});
+      await vaultClear().catch(() => {}); await loadVault();
       await loadPimgs();
       if (src) { URL.revokeObjectURL(src.url); src = null; }
       refs.forEach((r) => URL.revokeObjectURL(r.url));
@@ -2264,9 +2427,9 @@ function wire(name, arg, seq) {
   }
 }
 
-addEventListener("hashchange", () => { errMsg = ""; askErr = ""; render(); });
+addEventListener("hashchange", () => { errMsg = ""; askErr = ""; ui.bq = ""; ui.vShow = 40; ui.vOpen = new Set(); render(); });
 render();
-loadRefs().then(render); loadSrc().then(render); loadPimgs().then(render);
+loadRefs().then(render); loadSrc().then(render); loadPimgs().then(render); loadVault().then(render);
 // 참고 그림은 IndexedDB에서 읽어 와야 해서 한 박자 늦게 그린다
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") {

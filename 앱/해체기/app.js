@@ -2,7 +2,7 @@
 // 파일은 이 기기 안에서만 풀린다(밖으로 안 나감). 불러온 파일은 메모리에만 있고, 저장하는 것은 설정뿐이다.
 // 바꿀 곳: SHAPE(저장하는 설정), SCREENS(화면). 풀이 로직은 risu.js.
 
-import { parseFile, assemble, outline, forJjal, loreText } from "./risu.js";
+import { parseFile, assemble, outline, forJjal, loreText, vaultItems } from "./risu.js";
 
 const KEY = "해체기/v1";
 
@@ -10,7 +10,7 @@ const KEY = "해체기/v1";
 // 저장: 조립 설정만. 불러온 파일(files)은 크기가 커서(수 MB) 저장하지 않고 메모리에만 둔다.
 const SHAPE = () => ({ settings: { slots: "mark", headers: true, strip: false, lore: true } });
 
-const ui = { busy: false, saveFail: false, loreQ: "", loreShow: 30 };
+const ui = { busy: false, saveFail: false, loreQ: "", loreShow: 30, vq: "", bq: "", vShow: 40, vOpen: new Set() };
 
 const store = {
   data: load(),
@@ -29,6 +29,44 @@ function load() {
     return { ...SHAPE(), ...d, settings: { ...SHAPE().settings, ...(d.settings || {}) } };
   } catch { return SHAPE(); }
 }
+
+// ── 보관소 (IndexedDB "해체기" / "vault") ───────────────────
+// 받은 파일·붙여 넣은 글을 블록으로 펼쳐 둔다. 한 줄: { id, name, kind, label, size, at, src("파일"|"붙여 넣기"), blocks:[{title, kind, text, meta?}] }
+// 원본 파일은 안 남기고 펼친 블록만 남긴다(크기가 작고, 파일 안 코드가 다시 읽힐 일이 없게).
+let dbp = null;
+function db() {
+  dbp ??= new Promise((ok, no) => {
+    const q = indexedDB.open("해체기", 1);
+    q.onupgradeneeded = () => { if (!q.result.objectStoreNames.contains("vault")) q.result.createObjectStore("vault", { keyPath: "id" }); };
+    q.onsuccess = () => ok(q.result);
+    q.onerror = () => no(q.error);
+  });
+  return dbp;
+}
+async function idb(mode, fn) {
+  const d = await db();
+  return new Promise((ok, no) => {
+    const tx = d.transaction("vault", mode), q = fn(tx.objectStore("vault"));
+    tx.oncomplete = () => ok(q?.result);
+    tx.onerror = tx.onabort = () => no(tx.error);
+  });
+}
+let vault = [];        // 보관소 전부 (최근 것이 앞)
+let vaultErr = "";
+async function loadVault() {
+  try { vault = ((await idb("readonly", (s) => s.getAll())) || []).sort((a, b) => b.at - a.at); vaultErr = ""; }
+  catch (e) { vault = []; vaultErr = `보관소를 못 읽음 (${e?.name || e}). 이 브라우저가 저장을 막고 있을 수 있음.`; }
+}
+async function vaultAdd(node, src) {
+  const items = vaultItems(node).map((it) => ({ id: crypto.randomUUID(), at: Date.now(), src, ...it }));
+  if (!items.length) return 0;
+  try { await idb("readwrite", (s) => { items.forEach((it) => s.put(it)); }); }
+  catch (e) { toast(`보관소에 못 넣음 (${e?.name || e}). 저장 공간이 찼을 수 있음`); return 0; }
+  await loadVault();
+  return items.length;
+}
+async function vaultDel(id) { await idb("readwrite", (s) => s.delete(id)).catch(() => {}); await loadVault(); }
+const blockText = (b) => `## ${b.title}${b.meta ? `\n키워드: ${b.meta}` : ""}\n${b.text}`;
 
 // 메모리에만 있는 것
 const files = []; // 최상위 노드(가장 나중에 연 것이 앞)
@@ -89,6 +127,22 @@ const SCREENS = {
       <p class="hint">파일은 이 기기 안에서만 풀리고 어디로도 안 나감. 닫으면 불러온 것은 사라짐.</p>`;
   },
 
+  vault(id) {
+    if (id) return vaultItemView(id);
+    const q = ui.vq.trim().toLowerCase();
+    const list = !q ? vault : vault.filter((v) => (v.name + " " + v.blocks.map((b) => b.title + " " + b.text).join(" ")).toLowerCase().includes(q));
+    return `
+      ${vaultErr ? `<p class="warn">${esc(vaultErr)}</p>` : ""}
+      <p class="hint">받은 파일과 글을 블록으로 펼쳐 이 기기에 남겨 둠. 파일은 ‘내용 보기’의 ‘보관소에 넣기’로, 글은 여기에 붙여 넣어 넣음.</p>
+      <label for="pasteName">받은 글 붙여 넣기</label>
+      <input id="pasteName" type="text" placeholder="이름 (비우면 첫 줄)" autocomplete="off">
+      <textarea id="pasteText" rows="5" placeholder="프롬프트, 설정, JSON… ## 제목이나 \`\`\` 블록, 빈 줄로 나눈 덩어리가 블록이 됨" autocomplete="off" spellcheck="false"></textarea>
+      <div class="btns"><button id="pasteSave">펼쳐서 보관소에 넣기</button></div>
+      <h2>보관소 ${num(vault.length)}개</h2>
+      ${vault.length ? `<input id="vq" type="text" placeholder="이름·블록 글에서 찾기" value="${esc(ui.vq)}" autocomplete="off">` : ""}
+      <div id="vlist">${vaultList(list)}</div>`;
+  },
+
   view(id, sub) {
     const n = byId.get(id);
     if (!n) return `<p class="empty">그 파일이 없음. 새로 고치면 불러온 것이 사라짐.<br><a href="#/add">다시 열기</a></p>`;
@@ -102,6 +156,7 @@ const SCREENS = {
         <div class="vname">${esc(n.name)}</div>
         ${n.note ? `<p class="hint">${esc(n.note)}</p>` : ""}
       </div>
+      ${vaultItems(n).length ? `<div class="btns"><button class="ghost small" data-act="vsave" data-id="${n.id}">보관소에 넣기${n.kind === "zip" ? ` (안의 파일 ${vaultItems(n).length}개)` : ""}</button></div>` : ""}
       ${tabs.length > 1 ? `<div class="seg">${tabs.map(([k, t]) => `<a href="#/view/${n.id}/${k}" ${k === cur ? 'aria-current="true"' : ""}>${t}</a>`).join("")}</div>` : ""}`;
     if (cur === "asm") return head + asmView(n, asm);
     if (cur === "jjal") return head + jjalView(n);
@@ -128,6 +183,54 @@ const SCREENS = {
       <button class="danger" id="reset">설정 처음 값으로</button>`;
   },
 };
+
+function vaultList(list) {
+  if (!list.length) return `<p class="hint">${vault.length ? "찾은 것이 없음." : "아직 없음."}</p>`;
+  return `<ul class="list">${list.map((v) => `
+    <li><a class="row item" href="#/vault/${v.id}">
+      <span class="badge k-${esc(v.kind)}">${esc(v.label)}</span><span class="text">${esc(v.name)}</span>
+      <span class="sz">${num(v.blocks.length)}블록</span></a></li>`).join("")}</ul>`;
+}
+
+function vaultItemView(id) {
+  const v = vault.find((x) => x.id === id);
+  if (!v) return `<p class="empty">보관소에 없음.<br><a href="#/vault">보관소로</a></p>`;
+  const q = ui.bq.trim().toLowerCase();
+  const all = v.blocks.map((b, i) => ({ b, i }));
+  const hit = !q ? all : all.filter(({ b }) => (b.title + " " + (b.meta || "") + " " + b.text).toLowerCase().includes(q));
+  copyBuf.vall = v.blocks.map(blockText).join("\n\n");
+  return `
+    <a class="back" href="#/vault">‹ 보관소</a>
+    <div class="vhead"><span class="badge k-${esc(v.kind)}">${esc(v.label)}</span> <span class="sz">${esc(v.src)} · ${new Date(v.at).toLocaleDateString("ko-KR")}</span>
+      <div class="vname">${esc(v.name)}</div></div>
+    <div class="btns">
+      <button data-act="copy" data-key="vall">블록 전부 복사</button>
+      <button class="ghost" data-act="save" data-key="vall" data-name="${esc(v.name.replace(/[\\/:*?"<>|]/g, "_"))}.md">.md로 저장</button>
+      <button class="ghost" data-act="vdel" data-id="${v.id}">보관소에서 지우기</button>
+    </div>
+    <input id="bq" type="text" placeholder="블록에서 찾기" value="${esc(ui.bq)}" autocomplete="off">
+    <div id="blist">${blockList(hit)}</div>`;
+}
+
+const PREVIEW = 400, OPEN_MAX = 20000;
+function blockList(hit) {
+  const shown = hit.slice(0, ui.vShow);
+  return `
+    <p class="hint">${num(hit.length)}블록${hit.length > shown.length ? ` 중 ${num(shown.length)}개 보임` : ""}</p>
+    ${shown.map(({ b, i }) => {
+      copyBuf["vb" + i] = b.text;
+      const open = ui.vOpen.has(i), long = b.text.length > PREVIEW;
+      const body = open ? b.text.slice(0, OPEN_MAX) : b.text.slice(0, PREVIEW);
+      return `<section class="blk">
+        <div class="bhead"><span class="badge">${esc(b.kind)}</span><b>${esc(b.title)}</b><span class="sz">${num(b.text.length)}자</span></div>
+        ${b.meta ? `<p class="hint">키워드: ${esc(b.meta)}</p>` : ""}
+        <pre class="out small">${esc(body)}${!open && long ? "…" : ""}</pre>
+        ${open && b.text.length > OPEN_MAX ? `<p class="hint">앞 ${num(OPEN_MAX)}자만 보임. 복사는 전체.</p>` : ""}
+        <div class="btns"><button class="small" data-act="copy" data-key="vb${i}">복사</button>${long ? `<button class="ghost small" data-act="vopen" data-i="${i}">${open ? "접기" : "펼치기"}</button>` : ""}</div>
+      </section>`;
+    }).join("")}
+    ${hit.length > shown.length ? `<button class="ghost" data-act="vmore">더 보기</button>` : ""}`;
+}
 
 // 긴 글은 화면에 일부만 그린다(폰이 느려짐). 복사·저장은 전체.
 const SHOW = 12000;
@@ -207,7 +310,7 @@ function render() {
   document.getElementById("screen").innerHTML = warn + SCREENS[screen](id, sub);
   const node = screen === "view" ? byId.get(id) : null;
   document.getElementById("title").textContent =
-    screen === "view" ? (node ? "내용 보기" : "없음") : { list: "해체기", add: "파일 열기", settings: "설정" }[screen];
+    screen === "view" ? (node ? "내용 보기" : "없음") : { list: "해체기", add: "파일 열기", settings: "설정", vault: "보관소" }[screen];
   document.getElementById("count").textContent = screen === "list" && files.length ? `${files.length}묶음` : "";
   const tab = screen === "view" ? "list" : screen;
   document.querySelectorAll(".tabs a").forEach((a) => {
@@ -291,6 +394,23 @@ function wire(screen) {
       if (confirm("설정을 처음 값으로 되돌림.")) { memo.clear(); store.reset(); }
     });
   }
+  if (screen === "vault") {
+    document.getElementById("pasteSave")?.addEventListener("click", async () => {
+      const text = document.getElementById("pasteText").value;
+      if (!text.trim()) return toast("붙여 넣은 글이 비어 있음");
+      const nm = document.getElementById("pasteName").value.trim() || text.trim().split("\n")[0].slice(0, 40);
+      const node = await parseFile(nm.endsWith(".txt") || nm.endsWith(".json") ? nm : nm + ".txt", new TextEncoder().encode(text));
+      const n = await vaultAdd(node, "붙여 넣기");
+      if (n) { toast(`보관소에 넣음 (${vault[0]?.blocks.length ?? 0}블록)`); location.hash = `#/vault/${vault[0].id}`; }
+      else toast("펼칠 블록이 없음");
+    });
+    const redrawList = () => {
+      const q = ui.vq.trim().toLowerCase();
+      document.getElementById("vlist").innerHTML = vaultList(!q ? vault : vault.filter((v) => (v.name + " " + v.blocks.map((b) => b.title + " " + b.text).join(" ")).toLowerCase().includes(q)));
+    };
+    document.getElementById("vq")?.addEventListener("input", (e) => { ui.vq = e.target.value; redrawList(); });
+    document.getElementById("bq")?.addEventListener("input", (e) => { ui.bq = e.target.value; ui.vShow = 40; redrawBlocks(); });
+  }
   if (screen === "view") {
     const q = document.getElementById("loreQ");
     if (q) {
@@ -311,6 +431,20 @@ document.getElementById("screen").addEventListener("click", async (e) => {
   if (!btn) return;
   const act = btn.dataset.act;
   if (act === "copy") toast((await copyText(copyBuf[btn.dataset.key] ?? "")) ? "복사함" : "복사 못 함. 글을 길게 눌러 직접 선택");
+  else if (act === "vsave") {
+    const n = byId.get(btn.dataset.id);
+    if (!n) return;
+    const k = await vaultAdd(n, "파일");
+    if (k) toast(`보관소에 ${k}개 넣음`);
+  } else if (act === "vdel") {
+    if (!confirm("보관소에서 지움. 되돌릴 수 없음.")) return;
+    await vaultDel(btn.dataset.id);
+    location.hash = "#/vault";
+  } else if (act === "vopen") {
+    const i = Number(btn.dataset.i);
+    if (ui.vOpen.has(i)) ui.vOpen.delete(i); else ui.vOpen.add(i);
+    redrawBlocks();
+  } else if (act === "vmore") { ui.vShow += 40; redrawBlocks(); }
   else if (act === "save") download(btn.dataset.name || "해체기.md", copyBuf[btn.dataset.key] ?? "");
   else if (act === "drop") {
     const i = files.findIndex((f) => f.id === btn.dataset.id);
@@ -325,8 +459,18 @@ document.getElementById("screen").addEventListener("click", async (e) => {
   }
 });
 
-addEventListener("hashchange", () => { ui.loreQ = ""; ui.loreShow = 30; render(); window.scrollTo(0, 0); });
+// 블록 목록만 다시 그린다(찾기 칸의 글자·키보드를 지키려고)
+function redrawBlocks() {
+  const [, id] = parts(), v = vault.find((x) => x.id === id), box = document.getElementById("blist");
+  if (!v || !box) return;
+  const q = ui.bq.trim().toLowerCase();
+  const all = v.blocks.map((b, i) => ({ b, i }));
+  box.innerHTML = blockList(!q ? all : all.filter(({ b }) => (b.title + " " + (b.meta || "") + " " + b.text).toLowerCase().includes(q)));
+}
+
+addEventListener("hashchange", () => { ui.loreQ = ""; ui.loreShow = 30; ui.bq = ""; ui.vShow = 40; ui.vOpen = new Set(); render(); window.scrollTo(0, 0); });
 render();
+loadVault().then(render);
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));

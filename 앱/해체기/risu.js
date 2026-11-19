@@ -178,6 +178,41 @@ function pngCard(u8) {
   return best;
 }
 
+// ── NovelAI PNG 안의 생성 정보 ──────────────────────────────
+// tEXt 청크 Description(프롬프트)·Software·Source(모델)·Comment(생성 정보 JSON). 청크 이름은 novelai-sdk-unofficial 문서·NAIWeaver 변경 기록(2026-11-19 확인).
+// Comment 안의 키 이름은 진짜 파일로 확인 못 해서 변형 여럿을 같이 본다.
+export function pngTexts(u8) {
+  if (u8.length < 8 || u8[0] !== 0x89 || u8[1] !== 0x50 || u8[2] !== 0x4e || u8[3] !== 0x47) return null;
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength), out = {};
+  for (let p = 8; p + 12 <= u8.length;) {
+    const len = dv.getUint32(p), type = String.fromCharCode(...u8.subarray(p + 4, p + 8));
+    if (p + 12 + len > u8.length) break;
+    const body = u8.subarray(p + 8, p + 8 + len);
+    if (type === "tEXt") { const z = body.indexOf(0); if (z > 0) out[td.decode(body.subarray(0, z))] = td.decode(body.subarray(z + 1)); }
+    else if (type === "iTXt") { // 키\0 압축여부 방식 언어\0 번역키\0 글. 압축된 것은 건너뜀
+      const z = body.indexOf(0);
+      if (z > 0 && body[z + 1] === 0) { const l = body.indexOf(0, z + 3), t = l >= 0 ? body.indexOf(0, l + 1) : -1; if (t >= 0) out[td.decode(body.subarray(0, z))] = td.decode(body.subarray(t + 1)); }
+    }
+    if (type === "IEND") break;
+    p += 12 + len;
+  }
+  return out;
+}
+export function naiInfo(u8) {
+  const t = pngTexts(u8);
+  if (!t) return null;
+  let c = {};
+  try { c = JSON.parse(t.Comment || "{}") || {}; } catch { c = {}; }
+  const prompt = String(c.prompt ?? c.v4_prompt?.caption?.base_caption ?? t.Description ?? "").trim();
+  const uc = String(c.uc ?? c.negative_prompt ?? c.v4_negative_prompt?.caption?.base_caption ?? "").trim();
+  if (!prompt && !uc) return null;
+  const cc = c.v4_prompt?.caption?.char_captions, nc = c.v4_negative_prompt?.caption?.char_captions;
+  const chars = Array.isArray(cc) ? cc.map((x, i) => ({ text: String(x?.char_caption ?? ""), neg: String(nc?.[i]?.char_caption ?? "") })).filter((x) => x.text.trim()) : [];
+  const params = {};
+  for (const k of ["seed", "steps", "scale", "sampler", "noise_schedule", "cfg_rescale", "width", "height", "skip_cfg_above_sigma", "strength", "noise"]) if (c[k] !== undefined) params[k] = c[k];
+  return { prompt, uc, chars, params, model: String(t.Source || "").slice(0, 80), software: String(t.Software || "").slice(0, 80) };
+}
+
 // ── 종류 알아내기 ───────────────────────────────────────────
 const looksText = (u8) => {
   const n = Math.min(u8.length, 4096);
@@ -206,7 +241,7 @@ function classifyJson(o) {
 }
 
 const LABEL = {
-  preset: "프리셋", module: "모듈", card: "캐릭터 카드", hypa: "하이파(장기기억) 설정",
+  nai: "NovelAI 그림 정보", preset: "프리셋", module: "모듈", card: "캐릭터 카드", hypa: "하이파(장기기억) 설정",
   plugin: "플러그인(JS)", zip: "압축 묶음", json: "JSON", text: "글", binary: "바이너리", error: "읽기 실패",
 };
 
@@ -276,7 +311,9 @@ export async function parseFile(name, u8, depth = 0) {
     if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47) {
       const card = pngCard(u8);
       if (card) return mk(name, u8.length, "card", { body: wrapBody("card", card), note: "PNG 안에 들어 있던 카드" });
-      return mk(name, u8.length, "binary", { note: "PNG 그림. 카드 정보는 못 찾음" });
+      const nai = naiInfo(u8);
+      if (nai) return mk(name, u8.length, "nai", { body: nai, note: "NovelAI가 그림에 남긴 생성 정보" });
+      return mk(name, u8.length, "binary", { note: "PNG 그림. 카드·NovelAI 정보는 못 찾음" });
     }
     const img = imageKind(u8);
     if (img) return mk(name, u8.length, "binary", { note: img + " 그림. 풀지 않음" });
@@ -403,6 +440,9 @@ export function assemble(node, o) {
     if (o.lore) { const l = loreBlock(node, o); if (l) parts.push(H("로어북 (전부 이어 붙임. 실제 대화에서는 키워드에 걸린 것만 들어감)") + l); }
     return parts.join("\n\n");
   }
+  if (node.kind === "nai") {
+    return [H("프롬프트") + b.prompt, H("빼는 것") + b.uc, ...b.chars.map((c, i) => H(`인물 ${i + 1}`) + c.text + (c.neg ? `\n빼는 것: ${c.neg}` : ""))].filter((x) => x.trim().length > 4).join("\n\n");
+  }
   if (node.kind === "hypa") {
     const s = b.settings || {};
     return [H("요약(기억 추출) 프롬프트") + (s.summarizationPrompt || ""), H("재요약(기억 합치기) 프롬프트") + (s.reSummarizationPrompt || "")]
@@ -504,6 +544,8 @@ export function outline(node) {
       ["eval(", n0(sig(/\beval\s*\(/g))], ["new Function", n0(sig(/new\s+Function\b/g))],
       ["localStorage", n0(sig(/localStorage/g))], ["document.cookie", n0(sig(/document\.cookie/g))],
     ] });
+  } else if (node.kind === "nai") {
+    secs.push({ title: "NovelAI 생성 정보", rows: [["모델(Source)", b.model], ["프로그램", b.software], ["프롬프트", n0(b.prompt.length) + "자"], ["빼는 것", n0(b.uc.length) + "자"], ["인물별 프롬프트", b.chars.length + "명"], ...Object.entries(b.params).map(([k, v]) => [k, String(v)])] });
   } else if (node.kind === "zip") {
     secs.push({ title: "묶음 안의 파일 " + node.children.length + "개", rows: node.children.map((c) => [c.name, `${c.label} · ${n0(c.size)}바이트${c.note ? " · " + c.note : ""}`]) });
   } else if (node.kind === "json") {
@@ -558,4 +600,96 @@ export function forJjal(node, o) {
   }
   out.lore = node.kind === "card" || node.kind === "module" ? loreOf(node).filter((e) => !e.folder && e.content.trim()) : [];
   return out;
+}
+
+// ── 블록으로 펼치기 (보관소) ────────────────────────────────
+// 파일이 가진 단위 그대로 하나씩: 프리셋 블록, 카드 칸, 로어북 항목, 정규식, NovelAI 프롬프트 칸 …
+// 블록 한 개: { title, kind, text, meta? }. kind는 화면의 배지. text는 복사·넣기에 그대로 쓰는 글.
+export function splitText(text) {
+  const t = String(text || "").replace(/\r\n/g, "\n").trim();
+  if (!t) return [];
+  const fences = [...t.matchAll(/```([\w-]*)\n([\s\S]*?)```/g)];
+  if (fences.length) {
+    const out = [];
+    let last = 0;
+    for (const m of fences) {
+      const before = t.slice(last, m.index).trim();
+      if (before) out.push({ title: before.split("\n")[0].slice(0, 40), kind: "글", text: before });
+      out.push({ title: m[1] || "코드 블록", kind: m[1] || "블록", text: m[2].trim() });
+      last = m.index + m[0].length;
+    }
+    const rest = t.slice(last).trim();
+    if (rest) out.push({ title: rest.split("\n")[0].slice(0, 40), kind: "글", text: rest });
+    return out;
+  }
+  if (/^#{1,3} /m.test(t)) {
+    const out = [];
+    for (const part of t.split(/\n(?=#{1,3} )/)) {
+      const m = part.match(/^#{1,3} (.+)\n?/);
+      const body = (m ? part.slice(m[0].length) : part).trim();
+      if (m || body) out.push({ title: (m ? m[1] : body.split("\n")[0]).slice(0, 60), kind: m ? "제목" : "글", text: body || (m ? m[1] : "") });
+    }
+    return out;
+  }
+  const paras = t.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+  return paras.map((x) => ({ title: x.split("\n")[0].slice(0, 40), kind: "글", text: x }));
+}
+
+export function blocksOf(node) {
+  const b = node.body, out = [];
+  const add = (title, kind, text, meta) => { if (typeof text === "string" && text.trim()) out.push({ title: String(title || kind).slice(0, 80), kind, text, ...(meta ? { meta } : {}) }); };
+  const lore = () => loreOf(node).filter((e) => !e.folder && e.content.trim()).forEach((e) => add(e.name || "(이름 없음)", e.always ? "로어북·상시" : "로어북", e.content, e.keys.join(", ")));
+  if (node.kind === "preset") {
+    if (Array.isArray(b.promptTemplate)) for (const k of b.promptTemplate) {
+      if (k.type === "cache") continue;
+      const text = SLOT_TYPES.has(k.type) ? String(k.innerFormat ?? "") : k.type === "chat" ? "" : String(k.text ?? "");
+      add(k.name || k.type, `${k.type}${k.role ? "·" + k.role : k.role2 ? "·" + k.role2 : ""}`, text || (SLOT_TYPES.has(k.type) || k.type === "chat" ? `[[${k.name || k.type}]]` : ""));
+    }
+    add("mainPrompt 칸", "옛 칸", b.mainPrompt);
+    add("jailbreak 칸", "옛 칸", b.jailbreak);
+    add("globalNote 칸", "옛 칸", b.globalNote);
+    for (const r of Array.isArray(b.regex) ? b.regex : []) add(`정규식: ${r.comment || "(이름 없음)"}`, `정규식·${r.type || ""}`, `찾기: ${r.in ?? ""}\n바꾸기: ${r.out ?? ""}`);
+    add("사용자 토글 정의", "토글", b.customPromptTemplateToggle);
+    add("토글 기본값", "토글", b.templateDefaultVariables);
+  } else if (node.kind === "card") {
+    const d = b.data || {};
+    for (const [f, t] of [["description", "설명"], ["personality", "성격"], ["scenario", "시나리오"], ["system_prompt", "시스템 프롬프트"], ["first_mes", "첫 메시지"], ["mes_example", "예시 대화"], ["post_history_instructions", "후행 지시"], ["creator_notes", "만든이 메모"]]) add(t, "카드", d[f]);
+    (d.alternate_greetings || []).forEach((g, i) => add(`다른 첫 메시지 ${i + 1}`, "카드", g));
+    const sd = d.extensions?.risuai?.sdData;
+    if (Array.isArray(sd)) add("그림 프롬프트 칸(sdData)", "그림", sd.filter(([, v]) => String(v || "").trim()).map(([k, v]) => `${k}: ${v}`).join("\n"));
+    lore();
+  } else if (node.kind === "module") {
+    add(b.name || "모듈", "모듈", [b.name, b.description].filter(Boolean).join("\n"));
+    lore();
+    for (const r of Array.isArray(b.regex) ? b.regex : []) add(`정규식: ${r.comment || "(이름 없음)"}`, "정규식", `찾기: ${r.in ?? ""}\n바꾸기: ${r.out ?? ""}`);
+    for (const t of Array.isArray(b.trigger) ? b.trigger : []) for (const e of Array.isArray(t.effect) ? t.effect : []) add(`트리거: ${t.comment || t.type || ""} · ${e.type}`, "트리거(실행 안 함)", typeof e.code === "string" ? e.code : JSON.stringify(e));
+  } else if (node.kind === "hypa") {
+    const st = b.settings || {};
+    add("요약(기억 추출) 프롬프트", "하이파", st.summarizationPrompt);
+    add("재요약(기억 합치기) 프롬프트", "하이파", st.reSummarizationPrompt);
+    const rest = Object.fromEntries(Object.entries(st).filter(([k]) => !/Prompt$/.test(k)));
+    add("숫자 설정", "설정", JSON.stringify(rest, null, 2));
+  } else if (node.kind === "nai") {
+    add("프롬프트", "NAI·프롬프트", b.prompt);
+    add("빼는 것", "NAI·빼는 것", b.uc);
+    b.chars.forEach((c, i) => { add(`인물 ${i + 1}`, "NAI·인물", c.text); add(`인물 ${i + 1} 빼는 것`, "NAI·빼는 것", c.neg); });
+    if (Object.keys(b.params).length) add("생성 설정", "설정", JSON.stringify(b.params, null, 2));
+  } else if (node.kind === "plugin") {
+    const meta = [...node.text.slice(0, 3000).matchAll(/^\s*\/\/@([\w-]+)\s+(.*)$/gm)].map((m) => `${m[1]}: ${m[2].trim()}`).join("\n");
+    add("플러그인 머리말", "플러그인", meta);
+    add("코드 전체 (읽기만, 실행 안 함)", "코드", node.text);
+  } else if (node.kind === "json") {
+    add("JSON", "JSON", JSON.stringify(node.body, null, 2));
+  } else if (node.kind === "text") {
+    out.push(...splitText(node.text));
+  }
+  return out;
+}
+
+// 보관소에 넣을 것: 묶음(zip)은 안의 파일을 하나씩, 블록이 없는 것(그림·실패)은 뺀다.
+export function vaultItems(node, prefix = "") {
+  if (node.kind === "zip") return node.children.flatMap((c) => vaultItems(c, prefix + node.name + "/"));
+  if (/(^|\/)x_meta\//.test(node.name)) return []; // charx의 그림 종류 표시 한 줄. 보관할 것이 없다
+  const blocks = blocksOf(node);
+  return blocks.length ? [{ name: prefix + node.name, kind: node.kind, label: node.label, size: node.size, blocks }] : [];
 }
