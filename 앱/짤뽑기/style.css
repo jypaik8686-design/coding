@@ -293,3 +293,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 .slot textarea { min-height: 46px; overflow: hidden; resize: none; }
 .slot .acts2 { margin-top: 6px; }
 .slot .acts2 .line { margin: 0; }
+
+/* 2026-11-19 프리셋 그림 */
+.pthumb { width: 36px; height: 36px; object-fit: cover; border-radius: 8px; flex: none; background: var(--line); }
+.pimgbox { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); display: grid; gap: 8px; }
+.pbig { width: 100%; max-height: 320px; object-fit: contain; border-radius: 10px; background: var(--line); }
+.wgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.wk { display: grid; gap: 4px; }
+.wk a { display: block; border-radius: 8px; overflow: hidden; background: var(--line); color: var(--dim); font-size: 11px; text-align: center; }
+.wk img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wk button { min-height: 36px; padding: 0 6px; font-size: 12px; }
+#screen > .hint + .grid { margin-top: 12px; }
