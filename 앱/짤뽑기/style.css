@@ -456,3 +456,16 @@ main > .sec:last-of-type { border-bottom: 1px solid var(--line); }
 .tabs a svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 .tabs a[aria-current="page"] { font-weight: 500; }
 @media (prefers-reduced-motion: reduce) { .sec > summary::after { transition: none; } }
+
+/* 2026-11-21 편의: 칸 아래 프리셋 칩, 보관함 여러 장 고르기, 끝나면 그림 자리로 */
+.pchips { display: flex; gap: 6px; margin-top: 8px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.pchips::-webkit-scrollbar { display: none; }
+.pchips .chip { flex: none; min-height: 36px; padding: 0 12px; font-size: 13px; white-space: nowrap; }
+figure.result, p.error { scroll-margin-top: 64px; }
+.kbar { position: sticky; top: calc(var(--bar) + env(safe-area-inset-top)); z-index: 5; display: flex; align-items: center; gap: 6px; margin: 0 -4px 6px; padding: 8px 4px; background: var(--bg); border-bottom: 1px solid color-mix(in srgb, var(--gold) 35%, transparent); }
+.kbar b { margin-right: auto; font-size: 14px; color: var(--gold); font-variant-numeric: tabular-nums; }
+.kday .mini { margin-left: auto; }
+.kgrid a { -webkit-touch-callout: none; user-select: none; }
+.kgrid.picking a { opacity: .55; }
+.kgrid.picking a.sel { opacity: 1; outline: 2px solid var(--gold); outline-offset: -2px; }
+.kgrid.picking a.sel::after { content: "✓"; position: absolute; right: 5px; top: 5px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--gold); color: #141114; font-size: 13px; font-weight: 800; }
