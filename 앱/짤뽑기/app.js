@@ -1561,11 +1561,14 @@ function slotsPanel() {
   const row = (key, n, title, hint, val, ph) => `<div class="slot">${head(key, n, title, save(key))}${area(key, val, ph)}</div>`;
   const full = composePrompt(sl, d.taste.style, s);
   const negAll = joinTags([d.taste.negative, d.draft.neg]);
+  // 1~4순위(인물·화풍)는 그림마다 잘 안 바뀌어서 접어 둔다. 제목 옆에 지금 들어 있는 글 앞부분을 보여 준다.
+  const fixedHint = [sl.count, d.taste.style, sl.traits, sl.outfit].map(tg).filter(Boolean).join(", ");
   return `
+    ${sec("fixed", "인물·화풍", `1~4순위 · ${fixedHint || "비어 있음"}`, `
     ${row("count", "1순위", "인원수·성별", "", sl.count, "1girl, solo")}
     ${row("style", "2순위", "화풍·작가", "‘화풍·작가’ 탭과 같은 칸", d.taste.style, "{painterly}, artist:이름")}
     ${row("traits", "3순위", "캐릭터 고유 특징", "체형, 머리, 눈 색, 표정", sl.traits, "silver hair, long hair, blue eyes")}
-    ${row("outfit", "4순위", "의상·장신구", "", sl.outfit, "black suit, necktie")}
+    ${row("outfit", "4순위", "의상·장신구", "", sl.outfit, "black suit, necktie")}`)}
     ${row("pose", "5순위", "포즈·시선·구도", "", sl.pose, "crossed arms, from below, upper body")}
     ${row("bg", "6순위", "배경·조명·분위기·이펙트", "", sl.bg, "palace, backlighting")}
     ${tg(sl.rest) ? row("rest", "그 밖에", "칸을 나누기 전의 글", "위 칸으로 옮겨 적고 비워도 됨", sl.rest, "") : ""}
@@ -1683,20 +1686,9 @@ const SCREENS = {
     const [w, h] = sizeOf(s);
     const nChars = draft.chars.filter((c) => tidy(c.text)).length;
     const nRefs = refPlan(s) ? refs.filter((r) => r.on).length : 0;
+    // 2026-11-21 재배치: 그림 자리가 맨 위, 뽑기 버튼은 아래에 떠 있음, 1~4순위는 접힘 (짤뽑기·짤뽑기공유 같이 고침)
     return `
       ${s.token.trim() ? "" : `<p class="notice">NovelAI 토큰이 아직 없음. <a href="#/taste/conn">‘화풍·작가’ 탭 ‘연결’ 칸</a>에서 넣어야 뽑힘.</p>`}
-      ${aiPanel()}
-      ${slotsPanel()}
-      <div class="seg seg4" role="group" aria-label="크기">
-        ${[...Object.keys(SIZES), "직접"].map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${k === "직접" ? `${w}×${h}` : SIZES[k].join("×")}</small></button>`).join("")}
-      </div>
-      ${s.size === "직접" ? `<div class="two"><label>가로 <span class="hint">64 단위</span><input id="customW" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${w}"></label><label>세로<input id="customH" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${h}"></label></div>` : ""}
-      <div class="seedrow seed3"><input id="seed" type="number" inputmode="numeric" min="0" max="4294967295" placeholder="시드 (비우면 무작위)" aria-label="시드" value="${Number.isInteger(draft.seed) ? draft.seed : ""}"><button type="button" class="ghost" id="seedRand">무작위</button><label class="line"><input type="checkbox" id="seedLock" ${draft.seedLock ? "checked" : ""}> 고정</label></div>
-      ${notes.length ? `<p class="hint warn">Anlas가 들 수 있음 (문서 기준, 이 앱에서 차감은 재 보지 않음): ${esc(notes.join(" · "))}</p>` : ""}
-      ${busy
-        ? `<button type="button" id="stop" class="ghost big">${esc(phase || "뽑는 중…")} 눌러서 취소</button>`
-        : `<button type="button" id="go" class="big">뽑기${nChars || nRefs || (draft.i2i.on && src) ? ` <small>(${[nChars ? `인물 ${nChars}` : "", nRefs ? `참고 ${nRefs}` : "", draft.i2i.on && src ? "이미지→이미지" : ""].filter(Boolean).join(" · ")})</small>` : ""}</button>`}
-      ${errMsg ? `<p class="error" role="alert">${esc(errMsg)}</p>` : ""}
       ${now ? `
         <figure class="result">
           <img src="${now.url}" alt="방금 뽑은 그림" width="${now.rec.w}" height="${now.rec.h}">
@@ -1711,16 +1703,28 @@ const SCREENS = {
         </div>
         <div class="acts">
           <button type="button" id="useSeed" class="ghost">시드 고정</button>
-          <button type="button" id="toI2i" class="ghost">이미지→이미지</button>
+          <button type="button" id="toI2i" class="ghost">변형하기</button>
           <button type="button" id="toRef" class="ghost">참고 그림</button>
         </div>
-` : ""}
+` : `<div class="stage" style="aspect-ratio:${w}/${h}"><p>뽑은 그림이 여기 뜸</p><small>아래 칸을 채우고 ‘뽑기’</small></div>`}
       ${histStrip()}
+      ${errMsg ? `<p class="error" role="alert">${esc(errMsg)}</p>` : ""}
+      ${slotsPanel()}
+      <div class="seg seg4" role="group" aria-label="크기">
+        ${[...Object.keys(SIZES), "직접"].map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${k === "직접" ? `${w}×${h}` : SIZES[k].join("×")}</small></button>`).join("")}
+      </div>
+      ${s.size === "직접" ? `<div class="two"><label>가로 <span class="hint">64 단위</span><input id="customW" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${w}"></label><label>세로<input id="customH" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${h}"></label></div>` : ""}
+      <div class="seedrow seed3"><input id="seed" type="number" inputmode="numeric" min="0" max="4294967295" placeholder="시드 (비우면 무작위)" aria-label="시드" value="${Number.isInteger(draft.seed) ? draft.seed : ""}"><button type="button" class="ghost" id="seedRand">무작위</button><label class="line"><input type="checkbox" id="seedLock" ${draft.seedLock ? "checked" : ""}> 고정</label></div>
+      ${notes.length ? `<p class="hint warn">Anlas가 들 수 있음 (문서 기준, 이 앱에서 차감은 재 보지 않음): ${esc(notes.join(" · "))}</p>` : ""}
+      <div class="gobar">${busy
+        ? `<button type="button" id="stop" class="ghost big">${esc(phase || "뽑는 중…")} 눌러서 취소</button>`
+        : `<button type="button" id="go" class="big">뽑기${nChars || nRefs || (draft.i2i.on && src) ? ` <small>(${[nChars ? `인물 ${nChars}` : "", nRefs ? `참고 ${nRefs}` : "", draft.i2i.on && src ? "이미지→이미지" : ""].filter(Boolean).join(" · ")})</small>` : ""}</button>`}</div>
+      ${aiPanel()}
       ${sec("chars", "인물별 프롬프트", nChars ? `${nChars}명` : "", charsInner())}
       ${sec("ref", "참고 그림", nRefs ? `${s.refMode === "precise" ? "정밀 참조" : "바이브"} ${nRefs}장` : "", refInner())}
       ${sec("i2i", "이미지→이미지", draft.i2i.on && src ? "켬" : "", i2iInner())}
       ${sec("adv", "생성 설정", `${SAMPLERS[s.sampler] || s.sampler} · ${s.steps}스텝 · 강도 ${s.scale}`, advInner())}
-      ${sec("preset", "프리셋 · 쓸 만한 프롬프트", "인물·그림체·자세·빼는 것", presetInner())}`;
+      ${sec("preset", "프리셋", "인물·그림체·자세·빼는 것", presetInner())}`;
   },
 
   ai() {
