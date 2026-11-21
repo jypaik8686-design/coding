@@ -334,9 +334,67 @@ async function prepRef(file) {
   return { full, thumb: await thumbOf(full) };
 }
 
+// NovelAI 바이브 파일(.naiv4vibe, 묶음은 .naiv4vibebundle). 안이 JSON이다:
+// { identifier, type, image(base64), thumbnail(data URL), name, encodings: { "v4-5full": { <해시>: { encoding(base64), params: { information_extracted } } } }, importInfo: { model, information_extracted, strength } }
+// 꼴은 RisuAI 소스(database.svelte.ts의 NAIVibeData, stableDiff.ts)에서 확인(2026-11-21). 묶음의 `vibes` 배열은 확인 못 해 있으면 읽는다.
+// 파일에 든 인코딩을 그대로 enc에 넣으므로 그 모델·정보량으로는 다시 인코딩하지 않는다(Anlas 안 듦).
+const VIBE_MODEL = { "v4-5full": "nai-diffusion-4-5-full", "v4-5curated": "nai-diffusion-4-5-curated", v4full: "nai-diffusion-4-full", v4curated: "nai-diffusion-4-curated-preview" };
+const isVibeFile = (f) => /\.naiv4vibe(bundle)?$/i.test(f.name || "");
+const b64Blob = async (v, type = "image/png") => (await fetch(/^data:/.test(v) ? v : `data:${type};base64,${v}`)).blob();
+async function vibeRows(text) {
+  const j = JSON.parse(text);
+  const list = Array.isArray(j) ? j : Array.isArray(j?.vibes) ? j.vibes : [j];
+  const rows = [];
+  for (const v of list) {
+    if (!v || typeof v !== "object" || !v.encodings || typeof v.encodings !== "object") continue;
+    const enc = {}; let firstInfo = null;
+    for (const [mk, set] of Object.entries(v.encodings)) {
+      const model = VIBE_MODEL[mk] || mk;
+      for (const e of Object.values(set || {})) {
+        if (typeof e?.encoding !== "string" || !e.encoding) continue;
+        const info = clamp(e.params?.information_extracted, 0, 1, 1);
+        enc[`${model}|${info}`] = e.encoding;
+        if (firstInfo == null) firstInfo = info;
+      }
+    }
+    if (!Object.keys(enc).length) continue;
+    const wantInfo = clamp(v.importInfo?.information_extracted, 0, 1, firstInfo ?? 1);
+    const info = Object.keys(enc).some((k) => k.endsWith(`|${wantInfo}`)) ? wantInfo : firstInfo;
+    // 그림: 원본이 있으면 그것, 없으면 썸네일, 둘 다 없으면 빈 칸 그림. 원본이 없는 바이브는 든 인코딩으로만 쓸 수 있다(encOnly).
+    let pic = null, encOnly = true;
+    try { if (typeof v.image === "string" && v.image.length > 100) { pic = await prepRef(await b64Blob(v.image)); encOnly = false; } } catch { pic = null; encOnly = true; }
+    if (!pic) { try { if (typeof v.thumbnail === "string" && v.thumbnail.length > 100) pic = await prepRef(await b64Blob(v.thumbnail, "image/jpeg")); } catch { pic = null; } }
+    if (!pic) {
+      const c = document.createElement("canvas"); c.width = 96; c.height = 128;
+      const g = c.getContext("2d"); g.fillStyle = "#2a2428"; g.fillRect(0, 0, 96, 128); g.fillStyle = "#c9a45c"; g.font = "14px sans-serif"; g.textAlign = "center"; g.fillText("vibe", 48, 68);
+      const blob = await new Promise((ok) => c.toBlob(ok, "image/png"));
+      pic = { full: blob, thumb: blob };
+    }
+    rows.push({ id: crypto.randomUUID(), name: String(v.name || "바이브").replace(/\.(png|jpe?g|webp|naiv4vibe)$/i, "").slice(0, 40), at: Date.now() + rows.length, on: false, strength: clamp(v.importInfo?.strength, 0, 1, 0.6), info, fid: 0.5, kind: "character&style", full: pic.full, thumb: pic.thumb, enc, ...(encOnly ? { encOnly: true } : {}), vibe: true });
+  }
+  return rows;
+}
+
 async function addRefs(files) {
   errMsg = "";
   for (const f of files) {
+    if (isVibeFile(f) || /\.json$/i.test(f.name || "")) {
+      try {
+        const rows = await vibeRows(await f.text());
+        if (!rows.length) throw new Error("바이브 인코딩이 안 들어 있음");
+        let n = 0;
+        for (const row of rows) {
+          if (refs.length >= LIB_MAX) { errMsg = `서랍은 ${LIB_MAX}장까지. 안 쓰는 것을 ‘서랍 정리’에서 지우기.`; break; }
+          row.on = refsOn() < MAX_REFS;
+          await refPut(row);
+          refs.push({ ...row, url: URL.createObjectURL(row.thumb) });
+          n++;
+        }
+        const models = [...new Set(rows.flatMap((r) => Object.keys(r.enc).map((k) => MODELS[k.split("|")[0]]?.이름 || k.split("|")[0])))].join(", ");
+        toast(`바이브 ${n}개를 서랍에 넣음 (든 인코딩: ${models}). 그 모델에서는 다시 인코딩 안 함`);
+      } catch (e) { errMsg = `‘${f.name}’은 바이브 파일로 못 읽음 (${e?.message || e}).`; }
+      continue;
+    }
     if (refs.length >= LIB_MAX) { errMsg = `서랍은 ${LIB_MAX}장까지. 안 쓰는 것을 ‘서랍 정리’에서 지우기.`; break; }
     try {
       const { full, thumb } = await prepRef(f);
@@ -456,6 +514,7 @@ async function failText(res) {
 async function encodeRef(r, model, token, signal) {
   const k = `${model}|${r.info}`;
   if (r.enc?.[k]) return r.enc[k];
+  if (r.encOnly) throw new Error(`바이브 ‘${r.name}’에는 원본 그림이 없어서 새로 인코딩을 못 함. 파일에 든 것: ${Object.keys(r.enc || {}).map((x) => { const [m, i] = x.split("|"); return `${MODELS[m]?.이름 || m} 정보량 ${i}`; }).join(", ") || "없음"}. 모델이나 정보량을 거기에 맞추기.`);
   phase = `참고 그림 인코딩 중 (${refs.filter((x) => x.on).indexOf(r) + 1}/${refs.filter((x) => x.on).length})…`;
   render();
   const res = await fetch(VIBE_API, {
@@ -1452,7 +1511,7 @@ function refInner() {
         <label>충실도 <output id="rf-${r.id}">${r.fid ?? 0.5}</output><input type="range" min="0" max="1" step="0.05" value="${r.fid ?? 0.5}" data-rfid="${r.id}"></label>
         <label>무엇을 따라 할까<select data-rkind="${r.id}"><option value="character&style" ${r.kind !== "character" ? "selected" : ""}>캐릭터와 화풍</option><option value="character" ${r.kind === "character" ? "selected" : ""}>캐릭터만</option></select></label>` : ""}
         <label>정보량 <span class="hint">0~1${mode === "vibe" ? ", 바꾸면 다시 인코딩" : ""}</span><input type="number" inputmode="decimal" min="0" max="1" step="0.1" value="${r.info}" data-rinfo="${r.id}"></label>
-        ${mode === "vibe" ? `<p class="hint">${r.enc?.[key(r)] ? "인코딩 있음 (다시 안 함)" : "다음 뽑기에서 인코딩 — 문서 기준 2 Anlas"}</p>` : ""}
+        ${mode === "vibe" ? `<p class="hint">${r.enc?.[key(r)] ? `인코딩 있음 (다시 안 함${r.vibe ? ", 바이브 파일" : ""})` : r.encOnly ? "이 모델·정보량의 인코딩이 파일에 없음. 원본 그림이 없어 새로 못 함" : "다음 뽑기에서 인코딩 — 문서 기준 2 Anlas"}</p>` : ""}
         <button type="button" class="ghost" data-roff="${r.id}">끄기 (서랍에 남음)</button>
       </div>
     </li>`;
@@ -1468,8 +1527,9 @@ function refInner() {
     ${on.length ? `<ul class="refs">${on.map(row).join("")}</ul>` : `<p class="hint">켜 둔 그림 없음. 아래 서랍에서 눌러 켜기.</p>`}
     <div class="slothead rdh"><label>서랍 <span class="hint">${off.length}장 · 누르면 켜짐 (${on.length}/${MAX_REFS})</span></label>${refs.length ? `<button type="button" class="ghost mini" id="refEdit">${ui.refEdit ? "정리 끝" : "서랍 정리"}</button>` : ""}</div>
     ${off.length ? `<ul class="rgrid ${ui.refEdit ? "edit" : ""}">${off.map(tile).join("")}</ul>` : ""}
-    <input id="refFile" type="file" accept="image/*" multiple hidden>
-    <button type="button" class="ghost" id="addRef" ${refs.length >= LIB_MAX ? "disabled" : ""}>＋ 서랍에 그림 넣기 (${refs.length}/${LIB_MAX})</button>
+    <input id="refFile" type="file" multiple hidden>
+    <button type="button" class="ghost" id="addRef" ${refs.length >= LIB_MAX ? "disabled" : ""}>＋ 서랍에 그림·바이브 파일 넣기 (${refs.length}/${LIB_MAX})</button>
+    <p class="hint">NovelAI에서 내려받은 바이브 파일(.naiv4vibe)도 됨. 파일에 든 인코딩을 그대로 써서 그 모델·정보량으로는 Anlas가 안 듦.</p>
     ${mode === "vibe" && sum > 1 ? `<p class="hint warn">켜 둔 강도 합이 ${sum.toFixed(2)}임. 1을 넘으면 프롬프트를 덜 듣는 경향이 있음(문서).</p>` : ""}
     <p class="hint">${mode === "precise" ? "정밀 참조는 바이브와 같이 못 쓰고, 한 장 뽑을 때마다 5 Anlas가 더 듦(문서). 참고 그림은 검은 여백을 넣어 1024×1536 등에 맞춰 보냄. 서 있는 전신, 단순 배경이 잘 됨." : "바이브는 인코딩을 한 번 하면 저장해 둠."} 긴 변 1024px로 줄여 이 폰에만 저장되고, 뽑을 때 NovelAI 서버로 같이 감.</p>`;
 }
