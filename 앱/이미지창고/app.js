@@ -339,7 +339,8 @@ const SCREENS = {
       <div class="chips" id="chips"></div>
       <div id="selbar"></div>
       <div class="status" id="status"></div>
-      <div class="grid" id="grid" style="--cols:${S.ui.cols}"></div>`;
+      <div class="grid" id="grid" style="--cols:${S.ui.cols}"></div>
+      <div id="more" style="height:1px"></div>`;
   },
 
   add() {
@@ -499,7 +500,7 @@ function drawSelbar(list) {
     const ch = [];
     for (const m of S.metas) if (S.picked.has(m.id)) { const before = m.tags.join("\n"); m.tags = fn(m.tags, ts); if (m.tags.join("\n") !== before) ch.push(m); }
     await putMany(ch);
-    toast(`${ch.length}장${msg}`); inp.value = ""; drawList();
+    toast(`${ch.length}장${msg}`); inp.value = ""; drawList(true);
   };
   $("#bulkAdd").onclick = () => bulk((a, ts) => [...new Set([...a, ...ts])], "에 붙임");
   $("#bulkRm").onclick = () => bulk((a, ts) => a.filter((t) => !ts.includes(t)), "에서 뗌");
@@ -507,36 +508,57 @@ function drawSelbar(list) {
     if (!confirm(`${S.picked.size}장을 지움. 되돌릴 수 없음.`)) return;
     const ids = [...S.picked]; await delMany(ids); ids.forEach(forget);
     S.metas = S.metas.filter((m) => !S.picked.has(m.id)); S.picked.clear();
-    toast(`${ids.length}장 지움`); drawList();
+    toast(`${ids.length}장 지움`); drawList(true);
   };
   $("#pickAll").onclick = () => {
     if (S.picked.size && list.every((m) => S.picked.has(m.id))) S.picked.clear(); else list.forEach((m) => S.picked.add(m.id));
-    drawList();
+    drawList(true);
   };
   showSugg();
 }
-let io;
-function drawGrid(list) {
+// 칸은 한 번에 PAGE개씩만 만들고, 맨 아래 표시(#more)가 가까워지면 더 붙인다.
+// 화면에서 멀어진 칸은 썸네일을 놓아 준다(src를 뗌). 8000장을 한꺼번에 그리면 태그 한 번 누를 때마다
+// 칸 8000개를 다시 만들고 본 썸네일을 전부 쥐고 있어서 폰이 멈췄다(2026-11-21 재현: 4배 느린 CPU에서 1~2초).
+const PAGE = 120;
+const G = { list: [], shown: 0 };
+let io, moreIO;
+const cellHTML = (m) => `<button type="button" class="cell ${S.picked.has(m.id) ? "picked" : ""}" data-id="${m.id}" aria-label="${esc(m.name)}">
+    <img data-src="${m.id}" alt="" decoding="async">${m.tags.length ? "" : `<span class="n">태그 없음</span>`}</button>`;
+function moreCells(n = PAGE) {
   const g = $("#grid"); if (!g) return;
+  const part = G.list.slice(G.shown, G.shown + n);
+  if (!part.length) return;
+  g.insertAdjacentHTML("beforeend", part.map(cellHTML).join(""));
+  G.shown += part.length;
+  [...g.querySelectorAll("img[data-src]:not([data-o])")].forEach((i) => { i.dataset.o = "1"; io.observe(i); });
+}
+function drawGrid(list, keep = false) {
+  const g = $("#grid"); if (!g) return;
+  io?.disconnect(); moreIO?.disconnect();
+  const want = keep ? Math.max(PAGE, G.shown) : PAGE;
+  G.list = list; G.shown = 0;
   if (!S.metas.length) { g.style.display = "block"; g.innerHTML = `<p class="empty">아직 그림 없음.<br>아래 ‘넣기’에서 갤러리 그림을 고름.</p>`; return; }
   if (!list.length) { g.style.display = "block"; g.innerHTML = `<p class="empty">맞는 그림 없음.</p>`; return; }
-  g.style.display = "";
-  g.innerHTML = list.map((m) => `<button type="button" class="cell ${S.picked.has(m.id) ? "picked" : ""}" data-id="${m.id}" aria-label="${esc(m.name)}">
-    <img data-src="${m.id}" alt="" decoding="async">${m.tags.length ? "" : `<span class="n">태그 없음</span>`}</button>`).join("");
-  io?.disconnect();
+  g.style.display = ""; g.innerHTML = "";
   io = new IntersectionObserver((ents) => {
-    for (const e of ents) if (e.isIntersecting) {
-      const img = e.target; io.unobserve(img);
-      blobURL(img.dataset.src).then((u) => { if (u) img.src = u; });
+    for (const e of ents) {
+      const img = e.target;
+      if (e.isIntersecting) { if (!img.getAttribute("src")) blobURL(img.dataset.src).then((u) => { if (u && img.isConnected) img.src = u; }); }
+      else if (img.getAttribute("src")) img.removeAttribute("src");
     }
-  }, { rootMargin: "400px" });
-  g.querySelectorAll("img[data-src]").forEach((i) => io.observe(i));
+  }, { rootMargin: "1200px 0px" });
+  moreCells(want);
+  const sentinel = $("#more");
+  if (sentinel) {
+    moreIO = new IntersectionObserver((ents) => { if (ents.some((e) => e.isIntersecting)) moreCells(); }, { rootMargin: "1600px 0px" });
+    moreIO.observe(sentinel);
+  }
 }
-function drawList() {
+function drawList(keep = false) {
   if (route().name !== "list") return;
   const list = filtered();
   $("#selBtn").textContent = S.select ? "그만" : "고르기";
-  drawChips(); drawSelbar(list); drawStatus(list); drawGrid(list);
+  drawChips(); drawSelbar(list); drawStatus(list); drawGrid(list, keep);
   setCount();
 }
 
@@ -577,10 +599,10 @@ addEventListener("hashchange", (e) => {
 // ── 화면마다 연결 ────────────────────────────────────────────
 const WIRE = {
   list() {
-    drawList();
+    drawList(true);
     const q = $("#q");
     q.addEventListener("input", () => { S.q = q.value; drawList(); });
-    $("#selBtn").addEventListener("click", () => { S.select = !S.select; if (!S.select) S.picked.clear(); drawList(); });
+    $("#selBtn").addEventListener("click", () => { S.select = !S.select; if (!S.select) S.picked.clear(); drawList(true); });
     $("#screen").onclick = (e) => {
       const chip = e.target.closest("#chips [data-t]");
       if (chip) { // 없음 → 고름 → 뺌 → 없음
@@ -603,7 +625,7 @@ const WIRE = {
     let lp;
     $("#grid").addEventListener("pointerdown", (e) => {
       const cell = e.target.closest(".cell"); if (!cell || S.select) return;
-      lp = setTimeout(() => { S.select = true; S.picked.add(cell.dataset.id); lp = "fired"; drawList(); navigator.vibrate?.(20); }, 500);
+      lp = setTimeout(() => { S.select = true; S.picked.add(cell.dataset.id); lp = "fired"; drawList(true); navigator.vibrate?.(20); }, 500);
     });
     const cancel = () => { if (lp !== "fired") clearTimeout(lp); };
     ["pointerup", "pointerleave", "pointercancel", "pointermove"].forEach((ev) => $("#grid").addEventListener(ev, (e) => {
