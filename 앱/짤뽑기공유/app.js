@@ -40,7 +40,8 @@ const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, s
 // log 항목 하나: { id, scene, style, negative, seed, model, w, h, steps, scale, at, verdict, refs? }
 //   verdict: null(안 고름) | "keep"(보관) | "drop"(버림)
 //   refs: 이 그림에 쓴 참고 그림 [{s: 강도, i: 정보량}]. 옛 항목에는 없다 (없으면 0장).
-// chat 항목 하나: { role: "user" | "model", text, at }. 비서 대화. 40개를 넘으면 앞에서부터 버린다.
+// chat 항목 하나: { role: "user" | "model", text, at, done? }. 비서 대화. 40개를 넘으면 앞에서부터 버린다.
+//   done: 그 답에서 칸에 넣은 블록 번호들(2026-11-21). 옛 항목에는 없다 (없으면 아무것도 안 넣은 것으로 읽는다).
 // settings 새 칸: sampler / noise(스케줄) / cfgRescale / variety / customW·customH(size가 "직접"일 때) / refMode("vibe"|"precise")
 // draft 새 칸: chars [{id, text, neg, pos}] 인물별 프롬프트(pos: null=AI가 정함, 0~24=5x5 칸 번호), i2i {on, strength, noise} (원본 그림은 IndexedDB "src")
 // presets 항목: { id, name, text, to: "scene"|"style"|"neg" } 사용자가 저장한 프롬프트
@@ -1022,6 +1023,7 @@ async function ask(text, opts = {}) {
     const out = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("").trim();
     if (!out) throw new Error(`빈 답이 옴 (${c?.finishReason || j.promptFeedback?.blockReason || "이유 모름"}). 말을 바꿔 다시 보내기.`);
     d.chat.push({ role: "model", text: out, at: Date.now() });
+    scrollAi = true; // 새 답의 첫머리로
     if (fileImg) clearAttach(); // 사진은 보낸 한 번만. 실패하면 남겨 두어 다시 보낼 수 있다
     while (d.chat.length > CHAT_MAX) d.chat.shift();
     store.persist();
@@ -1131,10 +1133,14 @@ function applyBlock(kind, v) {
 // 비서 한 메시지를 HTML로. i는 chat 안의 번호. 블록 버튼의 data-blk는 "i:j"
 function msgHtml(m, i) {
   if (m.role === "user") return `<div class="msg me">${esc(m.text)}${m.img ? `<small class="att">${m.img === "file" ? "사진 첨부" : "방금 그림 첨부"}</small>` : ""}</div>`;
-  const parts = parseBlocks(m.text).map((b, j) => {
+  const blocks = parseBlocks(m.text), done = Array.isArray(m.done) ? m.done : [];
+  const usable = blocks.map((b, j) => (b.t === "code" && BLOCK_LABEL[b.lang] ? j : -1)).filter((j) => j >= 0);
+  const parts = blocks.map((b, j) => {
     if (b.t === "text") return b.v.trim() ? `<p class="mt">${esc(b.v.trim())}</p>` : "";
     const id = `${i}:${j}`;
-    const btn = BLOCK_LABEL[b.lang] ? `<button type="button" data-blk="${id}" data-kind="${b.lang}">${BLOCK_LABEL[b.lang]}</button>` : "";
+    const btn = BLOCK_LABEL[b.lang] ? (done.includes(j)
+      ? `<button type="button" class="ghost done" data-blk="${id}" data-kind="${b.lang}" aria-label="${BLOCK_LABEL[b.lang]} (넣음, 누르면 다시 넣음)">✓ 넣음</button>`
+      : `<button type="button" data-blk="${id}" data-kind="${b.lang}">${BLOCK_LABEL[b.lang]}</button>`) : "";
     let check = "";
     if (b.lang === "scene" || b.lang === "char") {
       const c = checkTags(b.v);
@@ -1144,7 +1150,12 @@ function msgHtml(m, i) {
     }
     return `<div class="code"><pre>${esc(b.v)}</pre><div class="acts2">${btn}<button type="button" class="ghost" data-copy="${id}">복사</button></div>${check}</div>`;
   }).join("");
-  return `<div class="msg ai">${parts || esc(m.text)}</div>`;
+  const left = usable.filter((j) => !done.includes(j)).length;
+  const all = usable.length >= 2
+    ? `<div class="acts2 putall">${left
+      ? `<button type="button" data-blkall="${i}">전부 넣기 <small>(${left === usable.length ? `${usable.length}개` : `남은 ${left}개`})</small></button>`
+      : `<button type="button" class="ghost done" data-blkall="${i}" data-again="1">✓ 전부 넣음 <small>(다시 넣기)</small></button>`}</div>` : "";
+  return `<div class="msg ai">${parts || esc(m.text)}${all}</div>`;
 }
 
 // ── 화면 ────────────────────────────────────────────────────
@@ -1936,14 +1947,37 @@ function wireAsk() {
     ask(QUICK[b.dataset.quick], { image: ui.withImg && !!now });
   }));
   const blockOf = (id) => { const [i, j] = id.split(":").map(Number); return parseBlocks(d.chat[i]?.text || "")[j]?.v; };
+  // 넣은 블록 표시: chat[i].done에 블록 번호를 남긴다. 되돌리면 넣기 전 표시로 돌린다.
+  const markDone = (i, js) => { const m = d.chat[i]; if (!m) return null; const was = Array.isArray(m.done) ? [...m.done] : []; m.done = [...new Set([...was, ...js])]; return () => { m.done = was; }; };
   document.querySelectorAll("[data-blk]").forEach((el) => el.addEventListener("click", () => {
     const v = blockOf(el.dataset.blk); if (!v) return;
     const before = snapBlocks();
     const msg = applyBlock(el.dataset.kind, v);
     if (msg == null) return;
-    toast(msg, snapBlocks() !== before ? () => restoreBlocks(before) : null);
+    const [bi, bj] = el.dataset.blk.split(":").map(Number);
+    const changed = snapBlocks() !== before;
+    const unmark = changed ? markDone(bi, [bj]) : null;
+    toast(msg, changed ? () => { unmark?.(); restoreBlocks(before); } : null);
     store.persist();
     if (el.dataset.kind === "scene" && route()[0] === "ai") location.hash = "#/gen"; else render();
+  }));
+  // 한 답의 블록을 한 번에 넣는다. 이번 그림 → 인물 → 빼는 것 → 설정 → 화풍·작가(확인창) 순서. 되돌리기 한 번에 전부 돌아간다.
+  const ORDER = ["scene", "char", "negative", "params", "style"];
+  document.querySelectorAll("[data-blkall]").forEach((el) => el.addEventListener("click", () => {
+    const i = +el.dataset.blkall, m = d.chat[i]; if (!m) return;
+    const again = el.dataset.again === "1", done = Array.isArray(m.done) ? m.done : [];
+    const todo = parseBlocks(m.text).map((b, j) => ({ b, j }))
+      .filter(({ b, j }) => b.t === "code" && BLOCK_LABEL[b.lang] && (again || !done.includes(j)))
+      .sort((x, y) => ORDER.indexOf(x.b.lang) - ORDER.indexOf(y.b.lang) || x.j - y.j);
+    if (!todo.length) return;
+    const before = snapBlocks(), msgs = [], ok = [];
+    for (const { b, j } of todo) { const r = applyBlock(b.lang, b.v); if (r != null) { msgs.push(r); ok.push(j); } }
+    if (!ok.length) return;
+    const changed = snapBlocks() !== before;
+    const unmark = changed ? markDone(i, ok) : null;
+    toast(`${ok.length}개 넣음: ${msgs.join(" · ")}`, changed ? () => { unmark?.(); restoreBlocks(before); } : null);
+    store.persist();
+    if (todo.some((x) => x.b.lang === "scene") && route()[0] === "ai") location.hash = "#/gen"; else render();
   }));
   document.querySelectorAll("[data-copy]").forEach((el) => el.addEventListener("click", async () => {
     let v = blockOf(el.dataset.copy); if (!v) return;
@@ -1952,7 +1986,7 @@ function wireAsk() {
     try { await navigator.clipboard.writeText(v); el.textContent = "복사함"; }
     catch { el.textContent = "복사 못 함 — 길게 눌러 직접 복사"; }
   }));
-  if (scrollAi && route()[0] === "ai") { scrollAi = false; scrollTo({ top: document.body.scrollHeight }); }
+  if (scrollAi && route()[0] === "ai") { scrollAi = false; const ms = document.querySelectorAll("#screen > .chat > .msg"); const last = ms[ms.length - 1]; if (last) last.scrollIntoView({ block: "start" }); else scrollTo({ top: 0 }); }
   else scrollAi = false;
 }
 
@@ -2428,7 +2462,9 @@ function wire(name, arg, seq) {
   }
 }
 
-addEventListener("hashchange", () => { errMsg = ""; askErr = ""; ui.bq = ""; ui.vShow = 40; ui.vOpen = new Set(); render(); });
+// 탭을 바꾸면 그 탭 맨 위에서 시작한다(전에는 앞 탭의 스크롤 위치가 남아 비서 탭이 대화 중간에서 열렸다). 비서 탭만 마지막 대화로 간다.
+addEventListener("hashchange", () => { errMsg = ""; askErr = ""; ui.bq = ""; ui.vShow = 40; ui.vOpen = new Set(); if (route()[0] === "ai") scrollAi = true; else scrollTo({ top: 0 }); render(); });
+if (route()[0] === "ai") scrollAi = true;
 render();
 loadRefs().then(render); loadSrc().then(render); loadPimgs().then(render); loadVault().then(render);
 // 참고 그림은 IndexedDB에서 읽어 와야 해서 한 박자 늦게 그린다
