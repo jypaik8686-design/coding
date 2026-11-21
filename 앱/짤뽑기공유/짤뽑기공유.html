@@ -1242,17 +1242,16 @@ function pasteToPiece(text) {
 }
 
 async function shareImage(blob, rec) {
-  const name = `짤-${rec.seed}.png`;
-  const file = new File([blob], name, { type: "image/png" });
-  if (navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file] }); return; }
-    catch (e) { if (e.name === "AbortError") return; }
-  }
+  const name = `jjal-${rec.seed ?? Date.now()}.png`; // 한글 이름은 크로미움이 무시하고 확장자 없는 ‘download’로 저장해서 영어로 둔다 (2026-11-21 확인)
+  // 2026-11-21: 공유 시트를 거치지 않고 바로 내려받는다 (사용자 요청). 폰에서는 ‘다운로드’ 폴더로 간다.
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;
+  document.body.append(a);
   a.click();
+  a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(`내려받음: ${name}`);
 }
 
 // ── 취향 통계 ────────────────────────────────────────────────
@@ -2854,7 +2853,7 @@ function wire(name, arg, seq) {
       const out = { ...d, settings: { ...d.settings, token: "", aiKey: "" } };
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: "application/json" }));
-      a.download = "짤뽑기공유.json";
+      a.download = "jjalbbopgi-share.json";
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     });
