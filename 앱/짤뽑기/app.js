@@ -1557,7 +1557,7 @@ function slotsPanel() {
   const area = (key, val, ph) => `<textarea id="slot-${key}" data-slot="${key}" rows="1" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="${esc(ph)}">${esc(val)}</textarea>`;
   // 2026-11-21 정리: 칸마다 붙던 설명 줄과 ‘…프리셋으로 저장’ 버튼 줄을 제목 줄 하나로 합쳤다. 저장은 제목 오른쪽 작은 버튼.
   const save = (key) => (SLOT_PRESET[key] ? `<button type="button" class="ghost mini" data-slotsave="${key}" aria-label="${SLOT_PRESET[key]} 프리셋으로 저장">＋ ${SLOT_PRESET[key]} 프리셋</button>` : "");
-  const head = (key, n, title, extra = "") => `<div class="slothead"><label for="slot-${key}"><b>${n}</b> ${title}</label>${extra}</div>`;
+  const head = (key, n, title, extra = "") => `<div class="slothead"><label for="slot-${key}">${/^\d/.test(n) ? `<span class="num">${parseInt(n, 10)}</span>` : `<b>${n}</b>`} ${title}</label>${extra}</div>`;
   const row = (key, n, title, hint, val, ph) => `<div class="slot">${head(key, n, title, save(key))}${area(key, val, ph)}</div>`;
   const full = composePrompt(sl, d.taste.style, s);
   const negAll = joinTags([d.taste.negative, d.draft.neg]);
@@ -1732,7 +1732,7 @@ const SCREENS = {
     const bubbles = chat.map((m, i) => msgHtml(m, i)).join("");
     return `
       ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/taste/conn">‘화풍·작가’ 탭 ‘연결’ 칸</a>에서 넣어야 대답함.</p>`}
-      ${chat.length ? "" : `<p class="empty">그리고 싶은 장면을 말로 던지면<br>NovelAI 태그 프롬프트로 바꿔 줌.<br><small>예: 금발 정장 입은 중국식 미인, 로우앵글로 내려다보는 오만한 느낌</small><br><small>자세·그림체·설정 추천과 그림 고치기는 ‘뽑기’ 탭 맨 위 AI 도우미에서도 됨.</small></p>`}
+      ${chat.length ? "" : `<p class="empty">그리고 싶은 장면을 말로 던지면<br>NovelAI 태그 프롬프트로 바꿔 줌.<br><small>예: 금발 정장 입은 중국식 미인, 로우앵글로 내려다보는 오만한 느낌</small><br><small>자세·그림체·설정 추천과 그림 고치기는 ‘뽑기’ 탭 AI 도우미에서도 됨.</small></p>`}
       <div class="chat">${bubbles}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>
       ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
       <textarea id="ask" rows="3" placeholder="장면, 인물, 분위기를 한국어로" autocomplete="off">${esc(askDraft)}</textarea>
