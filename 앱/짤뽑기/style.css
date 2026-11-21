@@ -325,3 +325,9 @@ button.mini { min-height: 36px; padding: 0 10px; font-size: 13px; white-space: n
 label.line.mini { margin: 0; font-size: 14px; white-space: nowrap; }
 .seed3 { grid-template-columns: 1fr auto auto; align-items: center; margin-top: 12px; }
 .seed3 .line { margin: 0; white-space: nowrap; }
+
+/* 2026-11-21 비서: 넣은 블록 표시, 전부 넣기, 말풍선으로 스크롤할 때 머리줄에 안 가리게 */
+.chat .msg { scroll-margin-top: calc(var(--bar) + 12px); }
+button.done { color: var(--dim); }
+.putall { border-top: 1px dashed var(--line); padding-top: 10px; margin-top: 10px; }
+.putall button { flex: 1 1 auto; }
