@@ -169,3 +169,9 @@ ul.tags li button { min-height: 36px; padding: 0 10px; font-size: 13px; }
 .seg button { min-height: 40px; }
 .stack { display: grid; gap: 10px; }
 textarea { min-height: 80px; resize: vertical; }
+.check2 { display: flex; gap: 10px; align-items: center; font-size: 14px; }
+.check2 input { width: 22px; height: 22px; flex: none; }
+details.nai { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; display: grid; gap: 8px; }
+details.nai summary { font-weight: 600; cursor: pointer; min-height: 30px; display: flex; align-items: center; }
+details.nai[open] { display: grid; gap: 8px; }
+.naiText { margin: 4px 0 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; max-height: 9.5em; overflow: auto; color: var(--ink); }

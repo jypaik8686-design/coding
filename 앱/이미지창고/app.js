@@ -2,14 +2,17 @@
 // 그림 원본과 썸네일은 IndexedDB(이 기기·이 브라우저에만), 화면 설정은 localStorage.
 // 화면: 창고(#/list) · 넣기(#/add) · 태그(#/tags) · 설정(#/settings) · 한 장(#/img/<id>)
 
+import { naiInfo } from "../해체기/risu.js"; // NovelAI PNG 안의 프롬프트 읽기. 짤뽑기와 같은 코드. 해체기 폴더를 옮기면 이 줄도 고친다.
+
 const DB_NAME = "이미지창고";
 const UI_KEY = "이미지창고/v1/ui";
 const THUMB = 360; // 썸네일 긴 변(px)
 
 // ── 데이터 모양 ──────────────────────────────────────────────
-// meta: { id, hash, name, type, size, w, h, tags: [], memo, at }
+// meta: { id, hash, name, type, size, w, h, tags: [], memo, at, nai? }
+//   nai(NovelAI PNG만, 옛 항목엔 없음): { prompt, uc, chars: [{ text, neg }], params: { seed, steps, … }, model }
 // blob: { id, full: Blob, thumb: Blob }
-const SHAPE_UI = () => ({ cols: 3, sort: "new", tagSort: "count" });
+const SHAPE_UI = () => ({ cols: 3, sort: "new", tagSort: "count", naiTags: true });
 
 // ── IndexedDB ───────────────────────────────────────────────
 let dbp;
@@ -122,18 +125,49 @@ async function makeThumb(blob) {
   if (!thumb || thumb.type !== "image/webp") thumb = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.82));
   return { thumb, w, h };
 }
-async function sha(blob) {
-  const d = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+async function sha(buf) {
+  const d = await crypto.subtle.digest("SHA-256", buf);
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+// ── NovelAI 프롬프트 → 태그 ──────────────────────────────────
+// 늘 붙는 품질 태그와 인원수 태그는 태그 목록만 어지럽혀서 뺀다.
+const SKIP_TAGS = new Set([
+  "masterpiece", "best quality", "amazing quality", "great quality", "good quality", "normal quality", "high quality",
+  "very aesthetic", "aesthetic", "highres", "absurdres", "incredibly absurdres", "ultra detailed", "detailed",
+  "no text", "location", "very awa", "girl", "boy", "other", "year 2024", "year 2025", "year 2026", "solo", "multiple girls", "multiple boys",
+]);
+function promptTags(prompt) {
+  return [...new Set(String(prompt || "")
+    .replace(/-?\d*\.?\d+::/g, ",")      // V4 가중치 1.2::태그::
+    .replace(/::/g, ",")
+    .replace(/[{}\[\]()]/g, "")
+    .split(/[,|\n]/)
+    .map((t) => normTag(t.replace(/_/g, " ").replace(/:\s*\d*\.?\d+\s*$/, "")))
+    .filter((t) => t && t.length <= 40 && !SKIP_TAGS.has(t) && !/^\d+\+?(girl|boy|other)s?$/.test(t)))].slice(0, 60);
+}
+function readNai(buf) {
+  try {
+    const n = naiInfo(new Uint8Array(buf));
+    if (!n) return null;
+    return { prompt: n.prompt, uc: n.uc, chars: n.chars || [], params: n.params || {}, model: n.model || "" };
+  } catch { return null; }
+}
+// NovelAI 그림에 붙일 태그 전부: 바탕 프롬프트 + 인물별 프롬프트 + "novelai"
+const naiTagsOf = (nai) => nai ? ["novelai", ...promptTags([nai.prompt, ...(nai.chars || []).map((c) => c.text)].join(","))] : [];
+
 // 새 그림 한 장 넣기. 같은 그림(해시)이 있으면 태그만 더하고 false.
-async function addImage(blob, name, tags = [], extra = {}) {
-  const hash = await sha(blob);
+// opt.naiTags: NovelAI PNG면 프롬프트를 태그로 더할지 (기본은 설정값)
+async function addImage(blob, name, tags = [], extra = {}, opt = {}) {
+  const buf = await blob.arrayBuffer();
+  const hash = await sha(buf);
+  const nai = extra.nai || readNai(buf);
+  if (nai) { addImage.nai = (addImage.nai || 0) + 1; if (opt.naiTags ?? S.ui.naiTags) tags = [...tags, ...naiTagsOf(nai)]; }
   const same = S.metas.find((m) => m.hash === hash);
   if (same) {
     const before = same.tags.length;
     same.tags = [...new Set([...same.tags, ...tags])];
-    if (same.tags.length !== before) await putMany([same]);
+    if (same.tags.length !== before || (nai && !same.nai)) { if (nai && !same.nai) same.nai = nai; await putMany([same]); }
     return false;
   }
   const { thumb, w, h } = await makeThumb(blob);
@@ -142,6 +176,7 @@ async function addImage(blob, name, tags = [], extra = {}) {
     type: blob.type || guessType(name), size: blob.size, w, h,
     tags: [...new Set(tags)], memo: extra.memo || "", at: extra.at || Date.now(),
   };
+  if (nai) meta.nai = nai;
   await putNew(meta, { id: meta.id, full: blob, thumb });
   S.metas.push(meta);
   S.metas.sort((a, b) => b.at - a.at);
@@ -277,6 +312,23 @@ function wireTagInput(id, onPick, exclude = () => []) {
 }
 
 // ── 화면 ────────────────────────────────────────────────────
+// 한 장 화면의 NovelAI 칸. 칸마다 복사.
+function naiBox(m) {
+  const n = m.nai, p = n.params || {};
+  const rows = [["프롬프트", n.prompt], ...(n.chars || []).map((c, i) => [`인물 ${i + 1}`, c.text]), ["빼는 것", n.uc]].filter(([, v]) => v && v.trim());
+  const vals = [["시드", p.seed], ["스텝", p.steps], ["강도", p.scale], ["샘플러", p.sampler], ["크기", p.width && `${p.width}×${p.height}`], ["모델", n.model]].filter(([, v]) => v !== undefined && v !== "" && v !== null);
+  return `<details class="nai"><summary>NovelAI 생성 정보</summary>
+    ${rows.map(([k, v], i) => `<div class="naiRow"><div class="status" style="margin:0"><b class="grow">${k}</b>
+      <button type="button" class="ghost" data-copy="${i}">복사</button></div><p class="naiText">${esc(v)}</p></div>`).join("")}
+    ${vals.length ? `<p class="info">${vals.map(([k, v]) => `${k} ${esc(v)}`).join(" · ")}</p>` : ""}
+    <button type="button" class="ghost" id="naiAdd">프롬프트를 태그로 붙이기</button>
+  </details>`;
+}
+const naiCopyText = (m, i) => {
+  const n = m.nai;
+  return [n.prompt, ...(n.chars || []).map((c) => c.text), n.uc].filter((v) => v && v.trim())[i] || "";
+};
+
 const SCREENS = {
   list() {
     return `
@@ -303,6 +355,8 @@ const SCREENS = {
         <h2>같이 붙일 태그</h2>
         ${tagInputHTML("addTag")}
         <div class="chips wrap" id="addChips"></div>
+        <label class="check2"><input type="checkbox" id="naiTags" ${S.ui.naiTags ? "checked" : ""}>
+          NovelAI 그림이면 프롬프트를 태그로 붙이기</label>
         <div class="bar2" id="prog" hidden><i></i></div>
         <button type="button" id="save" ${n && !S.busy ? "" : "disabled"}>${n ? `${n}장 넣기` : "넣기"}</button>
         ${n ? `<button type="button" class="ghost" id="clear">고른 것 비우기</button>` : ""}
@@ -351,6 +405,9 @@ const SCREENS = {
         <label class="drop" for="zip" style="padding:18px 16px"><b>ZIP 넣기</b>
           <span>백업 ZIP이면 태그까지 되살림, 그냥 그림 ZIP이면 그림만 넣음</span>
           <input id="zip" type="file" accept=".zip,application/zip"></label>
+        <h2 style="margin-top:10px">NovelAI 그림</h2>
+        <p class="hint">PNG 안에 남은 프롬프트를 읽음. 이 기능 전에 넣은 그림은 여기서 한 번 읽어야 함.</p>
+        <button type="button" class="ghost" id="naiScan" ${S.metas.length ? "" : "disabled"}>넣어 둔 그림에서 프롬프트 읽기</button>
         <button type="button" class="ghost" id="tagsJson" ${S.metas.length ? "" : "disabled"}>태그 목록만 내려받기 (JSON)</button>
         <h2 style="margin-top:10px">지우기</h2>
         <button type="button" class="danger" id="reset" ${S.metas.length ? "" : "disabled"}>그림 전부 지우기</button>
@@ -371,6 +428,7 @@ const SCREENS = {
         ${tagInputHTML("imgTag", "태그 더하기")}
         <label for="memo" class="hint">메모</label>
         <textarea id="memo" placeholder="출처, 쓸 곳 등">${esc(m.memo || "")}</textarea>
+        ${m.nai ? naiBox(m) : ""}
         <p class="info">${esc(m.name)}<br>${m.w ? `${m.w}×${m.h} · ` : ""}${size(m.size)} · ${day(m.at)}</p>
         <button type="button" class="ghost" id="dl">원본 내려받기</button>
         <button type="button" class="danger" id="del">이 그림 지우기</button>
@@ -557,6 +615,7 @@ const WIRE = {
     const ti = wireTagInput("addTag", (ts) => { ts.forEach((t) => chosen.add(t)); drawChosen(); }, () => [...chosen]);
     $("#addChips").addEventListener("click", (e) => { const b = e.target.closest("[data-t]"); if (b) { chosen.delete(b.dataset.t); drawChosen(); ti.refresh(); } });
     drawChosen();
+    $("#naiTags").addEventListener("change", (e) => { S.ui.naiTags = e.target.checked; saveUI(); });
     $("#files").addEventListener("change", (e) => {
       const fs = [...e.target.files].filter((f) => f.type.startsWith("image/") || /\.(heic|heif|avif|webp)$/i.test(f.name));
       S.pending.push(...fs); render();
@@ -573,7 +632,7 @@ const WIRE = {
       const tags = [...chosen];
       S.busy = true; $("#save").disabled = true;
       const prog = $("#prog"); prog.hidden = false;
-      let added = 0, dup = 0, bad = 0;
+      let added = 0, dup = 0, bad = 0; addImage.nai = 0;
       for (let i = 0; i < S.pending.length; i++) {
         const f = S.pending[i];
         try { (await addImage(f, f.name, tags, { at: Date.now() - i })) ? added++ : dup++; }
@@ -582,7 +641,7 @@ const WIRE = {
         $("#save").textContent = `넣는 중 ${i + 1}/${S.pending.length}`;
       }
       S.pending = []; S.busy = false; chosen.clear();
-      toast([`${added}장 넣음`, dup && `${dup}장은 이미 있음`, bad && `${bad}장 실패`].filter(Boolean).join(" · "));
+      toast([`${added}장 넣음`, dup && `${dup}장은 이미 있음`, addImage.nai && `NovelAI ${addImage.nai}장`, bad && `${bad}장 실패`].filter(Boolean).join(" · "));
       if (bad && !added && !dup) { render(); return; }
       S.inc.clear(); S.exc.clear(); S.untagged = false; S.q = ""; listScroll = 0;
       location.hash = "#/list";
@@ -639,7 +698,7 @@ const WIRE = {
       try {
         const files = [];
         for (const m of S.metas) { const r = await getBlob(m.id); if (r) files.push({ name: `images/${m.id}.${extOf(m.type, m.name)}`, blob: r.full, at: m.at }); }
-        const meta = { app: "이미지창고", v: 1, at: Date.now(), items: S.metas.map(({ id, name, type, w, h, tags, memo, at }) => ({ id, name, type, w, h, tags, memo, at, file: `images/${id}.${extOf(type, name)}` })) };
+        const meta = { app: "이미지창고", v: 1, at: Date.now(), items: S.metas.map(({ id, name, type, w, h, tags, memo, at, nai }) => ({ id, name, type, w, h, tags, memo, at, ...(nai ? { nai } : {}), file: `images/${id}.${extOf(type, name)}` })) };
         files.unshift({ name: "meta.json", blob: new Blob([JSON.stringify(meta, null, 1)], { type: "application/json" }) });
         download(await makeZip(files, step), `imagestore-${stamp()}.zip`);
         toast(`${S.metas.length}장 묶음`);
@@ -667,14 +726,34 @@ const WIRE = {
             const type = it.type || guessType(it.name);
             if (b.type !== type) b = new Blob([b], { type });
             const fresh = !(it.id && byId(it.id));
+            const keep = { memo: it.memo, at: it.at, ...(it.nai ? { nai: it.nai } : {}) };
             const ok = await addImage(b, it.name, (it.tags || []).map(normTag).filter(Boolean),
-              fresh ? { id: it.id, memo: it.memo, at: it.at } : { memo: it.memo, at: it.at });
+              fresh ? { id: it.id, ...keep } : keep, { naiTags: metaEnt ? false : undefined });
             ok ? added++ : dup++;
           } catch (err) { console.warn(it.name, err); bad++; }
           step(i + 1, items.length);
         }
         toast([`${added}장 넣음`, dup && `${dup}장은 이미 있음`, bad && `${bad}장 실패`].filter(Boolean).join(" · "));
       } catch (err) { console.warn(err); toast("ZIP을 못 읽음: " + err.message); }
+      render();
+    });
+    $("#naiScan").addEventListener("click", async (e) => {
+      e.target.disabled = true;
+      const todo = S.metas.filter((m) => !m.nai && /png/i.test(m.type));
+      let found = 0, tagged = 0;
+      for (let i = 0; i < todo.length; i++) {
+        const m = todo[i];
+        e.target.textContent = `읽는 중 ${i + 1}/${todo.length}`;
+        try {
+          const r = await getBlob(m.id); if (!r) continue;
+          const nai = readNai(await r.full.arrayBuffer()); if (!nai) continue;
+          m.nai = nai; found++;
+          if (S.ui.naiTags) { const n = m.tags.length; m.tags = [...new Set([...m.tags, ...naiTagsOf(nai)])]; if (m.tags.length > n) tagged++; }
+          await putMany([m]);
+        } catch (err) { console.warn(m.name, err); }
+        step(i + 1, todo.length);
+      }
+      toast(todo.length ? `PNG ${todo.length}장 중 NovelAI ${found}장${S.ui.naiTags && found ? ` · ${tagged}장에 태그 붙임` : ""}` : "새로 읽을 PNG 없음");
       render();
     });
     $("#tagsJson").addEventListener("click", () => {
@@ -712,6 +791,14 @@ const WIRE = {
       m.tags = m.tags.filter((t) => t !== b.dataset.t); await putMany([m]); drawMine(); ti.refresh();
     });
     $("#memo").addEventListener("change", async (e) => { m.memo = e.target.value; await putMany([m]); toast("메모 저장"); });
+    document.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(naiCopyText(m, +b.dataset.copy)); toast("복사함"); }
+      catch { toast("복사 못 함 (브라우저가 막음)"); }
+    }));
+    $("#naiAdd")?.addEventListener("click", async () => {
+      const n = m.tags.length; m.tags = [...new Set([...m.tags, ...naiTagsOf(m.nai)])];
+      await putMany([m]); drawMine(); ti.refresh(); toast(`태그 ${m.tags.length - n}개 더함`);
+    });
     $("#dl").addEventListener("click", async () => {
       const r = await getBlob(id); if (!r) return;
       const base = m.name.replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "") || "image";
