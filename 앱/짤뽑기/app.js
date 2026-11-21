@@ -823,6 +823,93 @@ function naiMeta(u8) {
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : undefined);
   return { prompt, uc, seed: Number.isInteger(num(c.seed)) ? num(c.seed) : null, steps: num(c.steps), scale: num(c.scale), sampler: c.sampler, noise: c.noise_schedule, cr: num(c.cfg_rescale), model: String(t.Source || "").slice(0, 60) };
 }
+// ── 파일을 바로 넣기 (2026-11-21, 사용자: JSON 같은 파일을 바로 못 넣어 불편) ─────────
+// 파일 하나에서 이번 그림에 넣을 것을 읽는다: { scene, neg, chars[], set{} }. 못 읽으면 null(보관소로 보낸다).
+// 읽는 것: NovelAI PNG(안에 든 생성 정보), JSON(prompt·input / uc·negative_prompt / slots / parameters / v4 캡션), 글(‘Negative prompt:’ 줄로 나눔).
+async function readForSlots(name, u8) {
+  const out = { scene: "", neg: "", chars: [], set: {} };
+  const take = (o) => {
+    for (const [k, to] of [["seed", "seed"], ["steps", "steps"], ["scale", "scale"], ["sampler", "sampler"], ["noise_schedule", "noise"], ["noise", "noise"], ["cfg_rescale", "cr"], ["cr", "cr"]]) if (o?.[k] != null && out.set[to] == null) out.set[to] = o[k];
+  };
+  const meta = naiMeta(u8);
+  if (meta) {
+    out.scene = meta.prompt; out.neg = meta.uc; take(meta);
+    let c = {};
+    try { c = JSON.parse(pngTexts(u8)?.Comment || "{}") || {}; } catch { c = {}; }
+    const negs = c.v4_negative_prompt?.caption?.char_captions || [];
+    (c.v4_prompt?.caption?.char_captions || []).forEach((x, i) => { if (tidy(x?.char_caption || "")) out.chars.push({ text: tidy(x.char_caption), neg: tidy(negs[i]?.char_caption || "") }); });
+    return out;
+  }
+  if (u8[0] === 0x89 && u8[1] === 0x50) return null; // 생성 정보가 없는 PNG
+  let text;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(u8); } catch { return null; } // 글이 아닌 파일(zip·카드 등)은 보관소가 펼친다
+  if (/^\s*[{[]/.test(text)) {
+    let j;
+    try { j = JSON.parse(text); } catch { j = null; }
+    if (Array.isArray(j)) j = j.find((x) => x && typeof x === "object") || null;
+    if (j && typeof j === "object") {
+      const p = j.parameters && typeof j.parameters === "object" ? j.parameters : {};
+      const str1 = (...v) => v.find((x) => typeof x === "string" && x.trim()) || "";
+      if (j.slots && typeof j.slots === "object") out.scene = ["count", "traits", "outfit", "pose", "bg"].filter((k) => tidy(j.slots[k] || "")).map((k) => `${k}: ${tidy(j.slots[k])}`).join("\n") + (tidy(j.slots.rest || "") ? `\n${tidy(j.slots.rest)}` : "");
+      else out.scene = str1(j.prompt, j.input, j.positive, j.positive_prompt, j.scene, j.caption, j.v4_prompt?.caption?.base_caption, p.v4_prompt?.caption?.base_caption, p.prompt);
+      out.neg = str1(j.nd, j.uc, j.negative_prompt, j.negative, j.neg, p.negative_prompt, p.uc, j.v4_negative_prompt?.caption?.base_caption, p.v4_negative_prompt?.caption?.base_caption);
+      const cc = j.v4_prompt?.caption?.char_captions || p.v4_prompt?.caption?.char_captions || p.characterPrompts || j.characterPrompts || j.chars || [];
+      if (Array.isArray(cc)) for (const x of cc) { const t = tidy(typeof x === "string" ? x : x?.char_caption || x?.prompt || x?.text || ""); if (t) out.chars.push({ text: t, neg: tidy(x?.uc || x?.neg || "") }); }
+      take(j); take(p);
+      return out.scene || out.neg || out.chars.length ? out : null;
+    }
+  }
+  const t = text.trim();
+  if (!t || t.length > 6000) return null; // 긴 글은 프롬프트 한 덩어리가 아닐 가능성이 크다
+  const m = t.match(/^([\s\S]*?)\n\s*(?:negative prompt|negative|빼는 것|uc)\s*:\s*([\s\S]*)$/i);
+  out.scene = (m ? m[1] : t).trim();
+  if (m) out.neg = m[2].split(/\n\s*(?:steps|seed|sampler)\s*:/i)[0].trim();
+  return out;
+}
+// 고른 파일을 이번 그림 칸에 바로 넣는다. 못 읽는 꼴이면 보관소에 펼쳐 그 화면으로 간다.
+async function fileToSlots(f) {
+  const d = store.data, s = d.settings;
+  let u8;
+  try {
+    if (f.size > 150 * 1024 * 1024) throw new Error("150MB 넘음");
+    u8 = new Uint8Array(await f.arrayBuffer());
+  } catch (e) { return toast(`‘${f.name}’을 못 읽음 (${e?.message || e})`); }
+  const got = await readForSlots(f.name, u8).catch(() => null);
+  if (!got) {
+    try {
+      const rows = await vaultAdd(await parseFile(f.name, u8), "파일");
+      if (!rows.length) return toast(`‘${f.name}’에서 넣을 글을 못 찾음`);
+      toast(`프롬프트 한 덩어리가 아니라서 보관소에 펼침 (${rows.reduce((a, r) => a + r.blocks.length, 0)}블록). 넣을 블록을 고르기`);
+      location.hash = `#/vault/${rows[0].id}`;
+    } catch (e) { toast(`‘${f.name}’을 못 읽음 (${e?.message || e})`); }
+    return;
+  }
+  const before = snapBlocks(), done = [];
+  if (tidy(got.scene)) { applyBlock("scene", got.scene, "file"); d.draft.chars = []; done.push("그림 칸"); } // 파일의 그림이 이번 그림을 통째로 대신한다. 옛 인물 칸도 비운다
+  if (tidy(got.neg)) { d.draft.neg = tagsMinus(got.neg, d.taste.negative); done.push("빼는 것"); }
+  if (got.chars.length && supportsChars(s)) { d.draft.chars = got.chars.slice(0, MAX_CHARS).map((c) => ({ id: crypto.randomUUID(), text: c.text, neg: c.neg || "", pos: null, from: "file" })); ui.open.chars = true; done.push(`인물 ${d.draft.chars.length}명`); }
+  const g = got.set;
+  if (Number.isInteger(Number(g.seed)) && g.seed !== "" && g.seed != null) { d.draft.seed = Number(g.seed); d.draft.seedLock = true; done.push(`시드 ${g.seed}`); }
+  if (g.steps != null) s.steps = clamp(g.steps, 1, MAX_STEPS, 28);
+  if (g.scale != null) s.scale = clamp(g.scale, 0, 10, 5);
+  if (SAMPLERS[g.sampler]) s.sampler = g.sampler;
+  if (NOISES.includes(g.noise)) s.noise = g.noise;
+  if (g.cr != null) s.cfgRescale = clamp(g.cr, 0, 1, 0);
+  if (g.steps != null || g.scale != null || SAMPLERS[g.sampler]) done.push("생성 값");
+  if (!done.length) return toast(`‘${f.name}’에서 넣을 것을 못 찾음`);
+  toast(`‘${f.name.slice(0, 24)}’에서 넣음: ${done.join(" · ")}`, () => restoreBlocks(before));
+  store.save();
+}
+// 비서에게 붙일 파일을 글로 바꾼다. 보관소와 같은 펼치기를 쓴다(JSON·글·카드·NovelAI PNG·zip).
+const DOC_MAX = 40000;
+async function fileToDoc(f) {
+  const u8 = new Uint8Array(await f.arrayBuffer());
+  const items = vaultItems(await parseFile(f.name, u8));
+  const full = items.flatMap((it) => it.blocks.map((b) => `## ${items.length > 1 ? it.name + " / " : ""}${b.title}\n${b.text}`)).join("\n\n").trim();
+  if (!full) return null;
+  return { name: (f.name || "파일").slice(0, 40), text: full.slice(0, DOC_MAX), len: full.length, cut: full.length > DOC_MAX };
+}
+
 const IN_MAX = 25 * 1024 * 1024; // 받은 그림 한 장 한도 (이 앱이 정한 값)
 async function importImages(files) {
   let n = 0, withMeta = 0;
@@ -1057,9 +1144,10 @@ async function ask(text, opts = {}) {
   const nowImg = !fileImg && opts.image && now ? now.blob : null;
   const imgBlob = fileImg || nowImg, imgKind = fileImg ? "file" : nowImg ? "now" : null;
   // 서랍 그림도 보여 주기(체크했을 때만 구글로 감): 켜 둔 것부터 12장까지, 썸네일 크기로.
+  const doc = ui.attachDoc;
   const libShow = ui.withRefs ? [...refs].sort((a, b) => (b.on ? 1 : 0) - (a.on ? 1 : 0)).slice(0, 12) : [];
   askDraft = "";
-  d.chat.push({ role: "user", text, at: Date.now(), ...(imgKind ? { img: imgKind } : {}), ...(libShow.length ? { rn: libShow.length } : {}) });
+  d.chat.push({ role: "user", text, at: Date.now(), ...(imgKind ? { img: imgKind } : {}), ...(libShow.length ? { rn: libShow.length } : {}), ...(doc ? { doc: doc.name } : {}) });
   while (d.chat.length > CHAT_MAX) d.chat.shift();
   store.persist();
   asking = new AbortController();
@@ -1079,6 +1167,7 @@ async function ask(text, opts = {}) {
       const last = i === hist.length - 1;
       const parts = [{ text: last && cand.length ? `${m.text}\n\n[사전 후보]\n${cand.join("\n")}` : m.text }];
       if (last && img) parts.unshift({ inline_data: { mime_type: "image/jpeg", data: img } });
+      if (last && doc) parts.push({ text: `[붙인 파일: ${doc.name}${doc.cut ? ` (앞 ${DOC_MAX}자만)` : ""}]\n${doc.text}` });
       if (last) for (const lp of libParts) parts.push(lp);
       return { role: m.role, parts };
     });
@@ -1094,6 +1183,7 @@ async function ask(text, opts = {}) {
     if (!out) throw new Error(`빈 답이 옴 (${c?.finishReason || j.promptFeedback?.blockReason || "이유 모름"}). 말을 바꿔 다시 보내기.`);
     d.chat.push({ role: "model", text: out, at: Date.now() });
     scrollAi = true; // 새 답의 첫머리로
+    if (doc && ui.attachDoc === doc) ui.attachDoc = null; // 파일도 보낸 한 번만
     if (fileImg) clearAttach(); // 사진은 보낸 한 번만. 실패하면 남겨 두어 다시 보낼 수 있다
     while (d.chat.length > CHAT_MAX) d.chat.shift();
     store.persist();
@@ -1149,12 +1239,13 @@ function applyChar(text) {
 const SETTING_KEYS = ["sampler", "steps", "scale", "cfgRescale", "noise", "variety", "size"];
 function snapBlocks() {
   const d = store.data;
-  return JSON.stringify({ slots: d.draft.slots, lock: d.draft.seedLock, chars: d.draft.chars, style: d.taste.style, neg: d.taste.negative, nd: d.draft.neg, refs: refs.map((r) => [r.id, r.on, r.strength, r.info]), rm: d.settings.refMode, set: Object.fromEntries(SETTING_KEYS.map((k) => [k, d.settings[k]])) });
+  return JSON.stringify({ slots: d.draft.slots, lock: d.draft.seedLock, chars: d.draft.chars, style: d.taste.style, neg: d.taste.negative, nd: d.draft.neg, seed: d.draft.seed, refs: refs.map((r) => [r.id, r.on, r.strength, r.info]), rm: d.settings.refMode, set: Object.fromEntries(SETTING_KEYS.map((k) => [k, d.settings[k]])) });
 }
 function restoreBlocks(json) {
   const d = store.data, o = JSON.parse(json);
   d.draft.slots = o.slots; syncScene(); d.draft.seedLock = o.lock; d.draft.chars = o.chars; d.taste.style = o.style; d.taste.negative = o.neg; d.draft.neg = o.nd ?? "";
   Object.assign(d.settings, o.set);
+  if ("seed" in o) d.draft.seed = o.seed;
   if (o.rm) d.settings.refMode = o.rm;
   for (const [id, on, st, info] of o.refs || []) { const r = refs.find((x) => x.id === id); if (r && (r.on !== on || r.strength !== st || r.info !== info)) { r.on = on; r.strength = st; r.info = info; refPut(rowOf(r)).catch(() => {}); } }
   store.save();
@@ -1240,7 +1331,7 @@ function applyBlock(kind, v, from = "") {
 
 // 비서 한 메시지를 HTML로. i는 chat 안의 번호. 블록 버튼의 data-blk는 "i:j"
 function msgHtml(m, i) {
-  if (m.role === "user") return `<div class="msg me">${esc(m.text)}${m.img ? `<small class="att">${m.img === "file" ? "사진 첨부" : "방금 그림 첨부"}</small>` : ""}${m.rn ? `<small class="att">서랍 그림 ${m.rn}장 첨부</small>` : ""}</div>`;
+  if (m.role === "user") return `<div class="msg me">${esc(m.text)}${m.img ? `<small class="att">${m.img === "file" ? "사진 첨부" : "방금 그림 첨부"}</small>` : ""}${m.rn ? `<small class="att">서랍 그림 ${m.rn}장 첨부</small>` : ""}${m.doc ? `<small class="att">파일 첨부: ${esc(m.doc)}</small>` : ""}</div>`;
   const blocks = parseBlocks(m.text), done = Array.isArray(m.done) ? m.done : [];
   const usable = blocks.map((b, j) => (b.t === "code" && BLOCK_LABEL[b.lang] ? j : -1)).filter((j) => j >= 0);
   const parts = blocks.map((b, j) => {
@@ -1294,8 +1385,9 @@ function attachBar() {
         : `<p class="hint">방금 뽑은 그림이 없어서 ‘방금 그림 보여 주기’는 꺼져 있음. 새로 고쳤거나 버린 뒤에는 없어짐. 뽑으면 체크칸이 생김.</p>`}
       ${f ? `<div class="srcrow"><img src="${f.url}" alt="고른 사진"><div><span class="hint">${esc(f.name)} — 다음 질문에 한 번 보냄 (구글로 감)</span><button type="button" class="ghost sm" id="askUnpick">빼기</button></div></div>` : ""}
       ${refs.length ? `<label class="line"><input type="checkbox" id="withRefs" ${ui.withRefs ? "checked" : ""}> 참고 그림 서랍도 보여 주기 <span class="hint">${Math.min(refs.length, 12)}장이 작게 줄어 구글로 감. 안 보여 줘도 이름은 비서가 앎</span></label>` : ""}
-      <input id="askFile" type="file" accept="image/*" hidden>
-      <button type="button" class="ghost sm" id="askPick">${f ? "다른 사진 고르기" : "사진 골라서 보여 주기"}</button>
+      ${ui.attachDoc ? `<div class="docrow"><span class="hint">파일 ‘${esc(ui.attachDoc.name)}’ — ${ui.attachDoc.len.toLocaleString()}자${ui.attachDoc.cut ? `, 앞 ${DOC_MAX.toLocaleString()}자만` : ""}. 다음 질문에 한 번 보냄 (구글로 감)</span><button type="button" class="ghost sm" id="askUndoc">빼기</button></div>` : ""}
+      <input id="askFile" type="file" hidden>
+      <button type="button" class="ghost sm" id="askPick">${f || ui.attachDoc ? "다른 사진·파일 고르기" : "사진·파일 붙이기"}</button>
     </div>`;
 }
 function clearAttach() { if (ui.attachFile) { URL.revokeObjectURL(ui.attachFile.url); ui.attachFile = null; } }
@@ -1761,7 +1853,8 @@ function slotsPanel() {
       <div class="acts2"><button type="button" class="ghost sm" id="negDef" ${tidy(d.taste.negative) === tidy(DEFAULT_NEG) ? "disabled" : ""}>처음 값으로</button></div></div>
     <p class="hint">‘화풍·작가’ 탭의 같은 칸과 이어져 있음.</p>`)}
     ${sec("sprev", "완성된 프롬프트 보기", "", `<p class="hint">칸이 1→7순위로 이어 붙어 NovelAI로 감. 같은 태그는 먼저 나온 것만 남음.</p><p class="hint" id="scount">${full.length}자</p><pre class="pprev" id="sprevtxt">${esc(full) || "(비어 있음)"}</pre><p class="hint">빼는 것 전체</p><pre class="pprev" id="snegtxt">${esc(negAll) || "(비어 있음)"}</pre>`)}
-    <div class="acts2"><button type="button" class="ghost sm" id="saveScene">칸 전부 프리셋으로</button><button type="button" class="ghost sm" id="slotsClear">칸 비우기</button></div>`;
+    <div class="acts2"><button type="button" class="ghost sm" id="saveScene">칸 전부 프리셋으로</button><button type="button" class="ghost sm" id="slotsClear">칸 비우기</button><button type="button" class="ghost sm" id="slotPick">파일에서 넣기</button><input id="slotFile" type="file" hidden></div>
+    <p class="hint">‘파일에서 넣기’: JSON·글·NovelAI PNG를 고르면 프롬프트·빼는 것·인물·시드가 칸에 바로 들어감. 여러 덩어리가 든 파일은 보관소에 펼쳐짐.</p>`;
 }
 function wireSlots() {
   const d = store.data, s = d.settings;
@@ -1785,6 +1878,8 @@ function wireSlots() {
       store.persist(); prev();
     });
   });
+  on("slotPick", "click", () => $("slotFile").click());
+  on("slotFile", "change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) fileToSlots(f); });
   on("qualityOn", "change", (e) => { s.quality = e.target.checked; store.persist(); prev(); });
   on("qualityDef", "click", () => { s.qualityText = ""; store.save(); });
   on("slotsClear", "click", () => {
@@ -2142,15 +2237,22 @@ function wireAsk() {
   on("withImg", "change", (e) => { ui.withImg = e.target.checked; });
   on("withRefs", "change", (e) => { ui.withRefs = e.target.checked; });
   on("askPick", "click", () => $("askFile").click());
-  on("askFile", "change", (e) => {
+  on("askFile", "change", async (e) => {
     const f = e.target.files[0]; e.target.value = "";
     if (!f) return;
-    if (!/^image\//.test(f.type) && !/\.(jpe?g|png|webp|gif|heic|heif|avif)$/i.test(f.name)) { askErr = "그림 파일이 아님."; return render(); }
-    clearAttach();
-    ui.attachFile = { blob: f, name: (f.name || "사진").slice(0, 40), url: URL.createObjectURL(f) };
+    const isImg = /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|heic|heif|avif)$/i.test(f.name);
     askErr = "";
+    // 그림은 그림으로 보여 주고, 그 밖의 파일(JSON·글·카드)은 안의 글을 붙인다. NovelAI PNG는 그림과 안에 든 생성 정보를 둘 다 붙인다.
+    let doc = null;
+    if (!isImg || /\.png$/i.test(f.name) || f.type === "image/png") {
+      try { if (f.size > 150 * 1024 * 1024) throw new Error("150MB 넘음"); doc = await fileToDoc(f); } catch (err) { if (!isImg) { askErr = `‘${f.name}’을 못 읽음 (${err?.message || err}).`; return render(); } }
+    }
+    if (!isImg && !doc) { askErr = `‘${f.name}’에서 읽을 글을 못 찾음.`; return render(); }
+    clearAttach(); ui.attachDoc = doc;
+    if (isImg) ui.attachFile = { blob: f, name: (f.name || "사진").slice(0, 40), url: URL.createObjectURL(f) };
     render();
   });
+  on("askUndoc", "click", () => { ui.attachDoc = null; render(); });
   on("askUnpick", "click", () => { clearAttach(); render(); });
   on("send", "click", () => { const t = askDraft.trim(); if (t) ask(t, { image: ui.withImg && !!now }); });
   on("stopAsk", "click", () => asking?.abort());
