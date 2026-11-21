@@ -6,6 +6,7 @@ import { naiInfo } from "../해체기/risu.js"; // NovelAI PNG 안의 프롬프�
 
 const DB_NAME = "이미지창고";
 const UI_KEY = "이미지창고/v1/ui";
+const DRIVE_KEY = "이미지창고/v1/drive"; // { apiKey, clientId, appId } — 사용자가 설정 화면에서 넣는다. 저장소에는 적지 않는다.
 const THUMB = 360; // 썸네일 긴 변(px)
 
 // ── 데이터 모양 ──────────────────────────────────────────────
@@ -257,6 +258,71 @@ async function readZip(file) { // → [{ name, blob() }]
   return out;
 }
 
+// ── 구글 드라이브에서 고르기 (Google Picker + drive.file) ──────────
+// 근거: developers.google.com/workspace/drive/picker/guides/web-picker-sample (2026-09-03 갱신본, 2026-11-21 읽음)
+// drive.file 권한은 사용자가 피커에서 고른 파일만 열 수 있다. 드라이브 전체는 못 본다.
+function drive() {
+  try { return { apiKey: "", clientId: "", appId: "", ...JSON.parse(localStorage.getItem(DRIVE_KEY) || "{}") }; }
+  catch { return { apiKey: "", clientId: "", appId: "" }; }
+}
+function saveDrive(d) { try { localStorage.setItem(DRIVE_KEY, JSON.stringify(d)); } catch {} }
+const driveReady = () => { const d = drive(); return !!(d.apiKey && d.clientId && d.appId); };
+const loadScript = (src) => new Promise((ok, no) => {
+  if (document.querySelector(`script[src="${src}"]`)) return ok();
+  const sc = document.createElement("script"); sc.src = src; sc.async = true;
+  sc.onload = ok; sc.onerror = () => no(new Error("구글 스크립트를 못 받음(망 확인)"));
+  document.head.append(sc);
+});
+let driveToken = null; // { token, until }
+async function driveAuth() {
+  await Promise.all([loadScript("https://accounts.google.com/gsi/client"), loadScript("https://apis.google.com/js/api.js")]);
+  await new Promise((ok, no) => window.gapi.load("picker", { callback: ok, onerror: () => no(new Error("피커를 못 불러옴")) }));
+  if (driveToken && driveToken.until > Date.now() + 60000) return driveToken.token;
+  return new Promise((ok, no) => {
+    const tc = window.google.accounts.oauth2.initTokenClient({
+      client_id: drive().clientId,
+      scope: "https://www.googleapis.com/auth/drive.file",
+      callback: (r) => {
+        if (r.error) return no(new Error(r.error_description || r.error));
+        driveToken = { token: r.access_token, until: Date.now() + (r.expires_in || 3600) * 1000 };
+        ok(r.access_token);
+      },
+      error_callback: (e) => no(new Error(e?.type === "popup_closed" ? "로그인 창이 닫힘 (값이 틀리면 구글 창에 이유가 나옴)" : e?.message || "로그인 실패")),
+    });
+    tc.requestAccessToken({ prompt: driveToken ? "" : "consent" });
+  });
+}
+async function pickFromDrive(onStep) {
+  const token = await driveAuth();
+  const d = drive(), P = window.google.picker;
+  const docs = await new Promise((ok) => {
+    const view = new P.DocsView(P.ViewId.DOCS_IMAGES).setIncludeFolders(true).setSelectFolderEnabled(false);
+    new P.PickerBuilder()
+      .enableFeature(P.Feature.MULTISELECT_ENABLED)
+      .setDeveloperKey(d.apiKey).setAppId(d.appId).setOAuthToken(token)
+      .addView(view)
+      .setLocale("ko")
+      .setCallback((r) => {
+        if (r[P.Response.ACTION] === P.Action.PICKED) ok(r[P.Response.DOCUMENTS] || []);
+        else if (r[P.Response.ACTION] === P.Action.CANCEL) ok([]);
+      })
+      .build().setVisible(true);
+  });
+  const out = [];
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    onStep?.(i + 1, docs.length);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(doc[P.Document.ID])}?alt=media`,
+      { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { console.warn("드라이브 받기 실패", res.status, doc[P.Document.NAME]); continue; }
+    const blob = await res.blob();
+    const name = doc[P.Document.NAME] || "drive-image";
+    out.push(new File([blob], name, { type: doc[P.Document.MIME_TYPE] || blob.type || guessType(name) }));
+  }
+  if (out.length < docs.length) toast(`${docs.length - out.length}장은 못 받음`);
+  return out;
+}
+
 // ── 작은 도구 ───────────────────────────────────────────────
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -351,6 +417,8 @@ const SCREENS = {
           <span>${n ? `${size(S.pending.reduce((s, f) => s + f.size, 0))} · 다시 누르면 더 고름` : "갤러리에서 여러 장 한꺼번에"}</span>
           <input id="files" type="file" accept="image/*" multiple>
         </label>
+        <button type="button" class="ghost" id="drivePick">구글 드라이브에서 고르기</button>
+        ${driveReady() ? "" : `<p class="hint">드라이브는 설정의 ‘구글 드라이브’ 칸에 값 세 개를 넣어야 열림.</p>`}
         ${n ? `<div class="thumbs" id="pthumbs"></div>` : ""}
         <h2>같이 붙일 태그</h2>
         ${tagInputHTML("addTag")}
@@ -405,6 +473,15 @@ const SCREENS = {
         <label class="drop" for="zip" style="padding:18px 16px"><b>ZIP 넣기</b>
           <span>백업 ZIP이면 태그까지 되살림, 그냥 그림 ZIP이면 그림만 넣음</span>
           <input id="zip" type="file" accept=".zip,application/zip"></label>
+        <h2 style="margin-top:10px">구글 드라이브</h2>
+        <p class="hint">‘넣기’에서 드라이브 그림을 고르려면 구글 클라우드 프로젝트의 값 세 개가 필요함. 이 기기에만 저장되고 구글 말고는 어디에도 안 보냄.</p>
+        <label class="hint" for="dApi">API 키</label>
+        <input id="dApi" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="AIza…" value="${esc(drive().apiKey)}">
+        <label class="hint" for="dClient">OAuth 클라이언트 ID</label>
+        <input id="dClient" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="….apps.googleusercontent.com" value="${esc(drive().clientId)}">
+        <label class="hint" for="dApp">프로젝트 번호</label>
+        <input id="dApp" type="text" inputmode="numeric" autocomplete="off" placeholder="숫자" value="${esc(drive().appId)}">
+        <p class="hint">${driveReady() ? "✓ 값 셋 다 있음" : "✗ 아직 비어 있는 칸이 있음"}</p>
         <h2 style="margin-top:10px">NovelAI 그림</h2>
         <p class="hint">PNG 안에 남은 프롬프트를 읽음. 이 기능 전에 넣은 그림은 여기서 한 번 읽어야 함.</p>
         <button type="button" class="ghost" id="naiScan" ${S.metas.length ? "" : "disabled"}>넣어 둔 그림에서 프롬프트 읽기</button>
@@ -616,6 +693,15 @@ const WIRE = {
     $("#addChips").addEventListener("click", (e) => { const b = e.target.closest("[data-t]"); if (b) { chosen.delete(b.dataset.t); drawChosen(); ti.refresh(); } });
     drawChosen();
     $("#naiTags").addEventListener("change", (e) => { S.ui.naiTags = e.target.checked; saveUI(); });
+    $("#drivePick").addEventListener("click", async (e) => {
+      if (!driveReady()) { toast("설정에서 드라이브 값 세 개를 먼저 넣음"); location.hash = "#/settings"; return; }
+      const btn = e.currentTarget; btn.disabled = true; btn.textContent = "드라이브 여는 중…";
+      try {
+        const files = await pickFromDrive((i, n) => { btn.textContent = `드라이브에서 받는 중 ${i}/${n}`; });
+        if (files.length) { S.pending.push(...files); toast(`드라이브에서 ${files.length}장 받음`); }
+      } catch (err) { console.warn("드라이브", err); toast("드라이브: " + (err.message || err)); }
+      render();
+    });
     $("#files").addEventListener("change", (e) => {
       const fs = [...e.target.files].filter((f) => f.type.startsWith("image/") || /\.(heic|heif|avif|webp)$/i.test(f.name));
       S.pending.push(...fs); render();
@@ -737,6 +823,9 @@ const WIRE = {
       } catch (err) { console.warn(err); toast("ZIP을 못 읽음: " + err.message); }
       render();
     });
+    for (const [id, k] of [["dApi", "apiKey"], ["dClient", "clientId"], ["dApp", "appId"]]) {
+      $("#" + id).addEventListener("change", (e) => { const d = drive(); d[k] = e.target.value.trim(); saveDrive(d); render(); });
+    }
     $("#naiScan").addEventListener("click", async (e) => {
       e.target.disabled = true;
       const todo = S.metas.filter((m) => !m.nai && /png/i.test(m.type));
