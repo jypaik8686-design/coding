@@ -418,7 +418,7 @@ function vaultPut(b, to) {
   }
   const snap = snapBlocks();
   let msg;
-  if (to === "scene" || to === "char") msg = applyBlock(to, text);
+  if (to === "scene" || to === "char") msg = applyBlock(to, text, "v");
   else if (to === "style") { d.taste.style = mergeTags(d.taste.style, text, false); msg = "화풍·작가에 더함"; }
   else if (to === "neg") { d.draft.neg = mergeTags(d.draft.neg, text, false); msg = "이번 빼는 것에 더함"; }
   else if (to.startsWith("slot:")) { const k = to.slice(5); d.draft.slots[k] = mergeTags(d.draft.slots[k], text, false); syncScene(); d.draft.seedLock = false; msg = `${SLOT_NAMES[k]} 칸에 더함`; }
@@ -651,6 +651,9 @@ async function generate() {
   busy = new AbortController();
   phase = "";
   render();
+  // 뽑는 동안 화면이 꺼지지 않게 잡아 둔다. 못 잡아도(지원 안 함·절전 모드) 그냥 뽑는다.
+  let lock = null, okDone = false;
+  try { lock = await navigator.wakeLock?.request("screen"); } catch { lock = null; }
   try {
     const ex = { used };
     if (plan === "vibe") {
@@ -677,6 +680,7 @@ async function generate() {
     d.log.unshift(rec);
     trimLog();
     store.persist();
+    okDone = true;
   } catch (e) {
     if (e.name === "AbortError") errMsg = "취소함. (서버가 이미 받았으면 그 한 장은 계산됐을 수 있음)";
     else if (e instanceof TypeError) errMsg = "서버에 닿지 못함. 망이 끊겼는지 보기.";
@@ -684,7 +688,12 @@ async function generate() {
   } finally {
     busy = null;
     phase = "";
+    lock?.release?.().catch(() => {});
     render();
+    // 끝난 것을 알린다: 짧은 진동, 뽑기 화면이면 그림(실패면 오류 줄)으로 올라가고 다른 탭이면 알림 한 줄.
+    try { navigator.vibrate?.(okDone ? 60 : [40, 60, 40]); } catch { /* 진동 없는 기기 */ }
+    if (route()[0] === "gen" || !SCREENS[route()[0]]) document.querySelector(okDone ? "figure.result" : "p.error")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    else toast(okDone ? "그림이 나옴. ‘뽑기’ 탭에서 보기" : `뽑기 실패: ${errMsg}`);
   }
 }
 
@@ -726,6 +735,44 @@ async function judge(verdict) {
     }, () => URL.revokeObjectURL(entry.url));
   }
   store.save();
+}
+
+// 보관함에서 여러 장을 한꺼번에 (2026-11-21). 지운 것은 알림의 ‘되돌리기’(9초) 동안 기억해 둔다.
+async function removeKeptMany(ids) {
+  const d = store.data, rows = [], recs = [];
+  for (const id of ids) {
+    const row = await imgGet(id).catch(() => null);
+    if (row) rows.push(row);
+    await imgDel(id).catch(() => {});
+    const rec = d.log.find((r) => r.id === id);
+    if (rec) { recs.push(rec); rec.verdict = "drop"; }
+    const hi = hist.findIndex((h) => h.rec.id === id);
+    if (hi >= 0) { const [h] = hist.splice(hi, 1); if (now === h) now = null; URL.revokeObjectURL(h.url); }
+  }
+  ui.ksel = null;
+  toast(`${ids.length}장 지움`, async () => {
+    for (const row of rows) await imgPut(row).catch(() => {});
+    for (const rec of recs) rec.verdict = "keep";
+    store.save();
+  });
+  store.save();
+}
+// 고른 그림을 한 장씩 차례로 내려받는다. 브라우저가 처음에 ‘여러 파일 내려받기’를 허락할지 물을 수 있다.
+async function saveKeptMany(ids) {
+  let n = 0;
+  for (const id of ids) {
+    const row = await imgGet(id).catch(() => null);
+    if (!row?.full) continue;
+    const rec = store.data.log.find((r) => r.id === id) || {};
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(row.full);
+    a.download = `jjal-${rec.seed ?? "x"}-${id.slice(0, 4)}.png`;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+    n++;
+    await new Promise((r) => setTimeout(r, 350));
+  }
+  toast(n === ids.length ? `${n}장 내려받음` : `${n}장 내려받음 · ${ids.length - n}장은 그림 파일이 없음`);
 }
 
 async function removeKept(id) {
@@ -1104,9 +1151,15 @@ function parseSceneBlock(v) {
 }
 
 // kind, 블록 글을 칸에 넣는다. 돌려주는 것은 사용자에게 알릴 한 줄 (null이면 아무것도 안 함)
-function applyBlock(kind, v) {
+// from: 블록이 나온 곳(비서 답·보관소 항목)의 표시. 인물 칸에 남겨 두고, 다른 곳에서 온 새 그림·새 인물이 들어오면 옛 인물 칸을 뺀다 (2026-11-21, 사용자 요청).
+function applyBlock(kind, v, from = "") {
   const d = store.data;
-  if (kind === "scene") { d.draft.slots = parseSceneBlock(v); syncScene(); d.draft.seedLock = false; return "이번 그림 칸들을 바꿈"; }
+  const dropOld = () => { const n = d.draft.chars.length; d.draft.chars = d.draft.chars.filter((c) => from && c.from === from); return n - d.draft.chars.length; };
+  if (kind === "scene") {
+    d.draft.slots = parseSceneBlock(v); syncScene(); d.draft.seedLock = false;
+    const gone = dropOld();
+    return `이번 그림 칸들을 바꿈${gone ? ` · 옛 인물 ${gone}명 뺌` : ""}`;
+  }
   if (kind === "style") {
     if (!confirm(`화풍·작가를 바꿈. 앞으로 모든 그림에 붙음.\n\n지금 값: ${tidy(d.taste.style).slice(0, 140) || "(비어 있음)"}`)) return null;
     d.taste.style = tidy(v);
@@ -1115,12 +1168,15 @@ function applyBlock(kind, v) {
   if (kind === "negative") { d.draft.neg = tidy(v); return "이번 빼는 것 칸을 바꿈"; }
   if (kind === "char") {
     if (!supportsChars(d.settings)) return "이 모델은 인물별 프롬프트가 안 됨 (V4 이상)";
-    if (d.draft.chars.length >= MAX_CHARS) return `인물은 ${MAX_CHARS}명까지`;
     const c = applyChar(v);
     if (!c) return "인물 태그가 비어 있음";
-    d.draft.chars.push(c);
+    const gone = dropOld();
+    const same = d.draft.chars.findIndex((x) => tidy(x.text) === c.text); // 같은 블록을 다시 누르면 겹쳐 넣지 않고 그 칸을 새로 쓴다
+    if (same < 0 && d.draft.chars.length >= MAX_CHARS) return `인물은 ${MAX_CHARS}명까지`;
+    if (from) c.from = from;
+    if (same >= 0) d.draft.chars[same] = c; else d.draft.chars.push(c);
     ui.open.chars = true;
-    return "인물 칸을 더함";
+    return `인물 칸을 ${same >= 0 ? "새로 씀" : "더함"}${gone ? ` · 옛 인물 ${gone}명 뺌` : ""}`;
   }
   if (kind === "params") {
     const done = applyParams(v);
@@ -1459,6 +1515,49 @@ function usePreset(p, mode) {
   return `이번 빼는 것에 ‘${p.name}’을 ${mode === "replace" ? `넣음. 이전 값: ${old.slice(0, 90)}${old.length > 90 ? "…" : ""}` : "더함"}`;
 }
 
+// 칸 아래 프리셋 칩 (2026-11-21, 사용자: 프리셋 쓰기가 번거로움). 누르면 그 칸에 더하고, 켜진 것을 다시 누르면 그 태그만 뺀다.
+// 인물·의상은 하나만 켜진다: 다른 것을 누르면 먼저 켜져 있던 것의 태그(와 그 금지 태그)가 빠진다. 인물은 금지 태그도 같이 넣는다.
+const CHIP_KIND = { traits: "인물", outfit: "의상", pose: "자세·구도", style: "그림체", neg: "빼는 것" };
+const CHIP_ONE = new Set(["인물", "의상"]);
+const chipTarget = (p) => (p.to === "style" ? store.data.taste.style : p.to === "neg" ? store.data.draft.neg : store.data.draft.slots[SLOT_KEYS.includes(p.slot) ? p.slot : "rest"]);
+const chipBody = (p) => (p.to === "scene" && p.slot === "traits" ? splitCount(p.text).rest : p.text); // 인물은 인원수 태그를 빼고 견준다(그건 1순위 칸에 있다)
+function chipOn(p) {
+  const want = tg(chipBody(p)).toLowerCase().split(", ").filter(Boolean);
+  if (!want.length) return false;
+  const have = new Set(tg(chipTarget(p)).toLowerCase().split(", "));
+  return want.every((t) => have.has(t));
+}
+function chipOff(p) {
+  const d = store.data;
+  if (p.to === "style") d.taste.style = tagsMinus(d.taste.style, p.text);
+  else if (p.to === "neg") d.draft.neg = tagsMinus(d.draft.neg, p.text);
+  else { const k = SLOT_KEYS.includes(p.slot) ? p.slot : "rest"; d.draft.slots[k] = tagsMinus(d.draft.slots[k], chipBody(p)); syncScene(); }
+  if (p.neg && p.to !== "neg") d.draft.neg = tagsMinus(d.draft.neg, p.neg);
+}
+function chipRow(slotKey) {
+  const kind = CHIP_KIND[slotKey];
+  const list = kind ? presetEntries(kind).filter((e) => !e.hidden && tidy(e.p.text || "") && (e.p.to === "scene" ? e.p.slot === slotKey : true)) : [];
+  if (!list.length) return "";
+  return `<div class="pchips" role="group" aria-label="${kind} 프리셋">${list.map((e) => `<button type="button" class="chip ${chipOn(e.p) ? "on" : ""}" data-pchip="${esc(e.key)}" aria-pressed="${chipOn(e.p)}">${esc(e.p.name) || "이름 없음"}</button>`).join("")}</div>`;
+}
+function chipToggle(key) {
+  const d = store.data, p = presetByKey(key); if (!p) return;
+  const kind = key.startsWith("own:") ? p.kind : key.match(/^b:([^:]+):/)?.[1];
+  const snap = JSON.stringify({ slots: d.draft.slots, lock: d.draft.seedLock, style: d.taste.style, nd: d.draft.neg });
+  let msg;
+  if (chipOn(p)) { chipOff(p); msg = `‘${p.name}’을 뺌`; }
+  else {
+    const out = [];
+    if (CHIP_ONE.has(kind)) for (const e of presetEntries(kind)) if (e.key !== key && !e.hidden && chipOn(e.p)) { chipOff(e.p); out.push(e.p.name); }
+    usePreset(p, "add");
+    if (kind === "인물" && tidy(p.neg || "")) usePreset(p, "neg");
+    autoRef(key, p);
+    msg = `‘${p.name}’을 넣음${kind === "인물" && tidy(p.neg || "") ? " (금지 태그도)" : ""}${out.length ? ` · ‘${out.join("’, ‘")}’은 뺌` : ""}`;
+  }
+  toast(msg, () => { const o = JSON.parse(snap); d.draft.slots = o.slots; syncScene(); d.draft.seedLock = o.lock; d.taste.style = o.style; d.draft.neg = o.nd; store.save(); });
+  store.save();
+}
+
 // ── 단어 사전 (비서 탭) ──────────────────────────────────────
 // 기본 사전(tags.json)에 없는 내 낱말은 ‘내 단어’에 적어 둔다. 비서에게 말할 때 낱말이 들어 있으면 그 태그가 [사전 후보]로 붙는다.
 function dictStatus() {
@@ -1557,7 +1656,7 @@ function slotsPanel() {
   // 2026-11-21 정리: 칸마다 붙던 설명 줄과 ‘…프리셋으로 저장’ 버튼 줄을 제목 줄 하나로 합쳤다. 저장은 제목 오른쪽 작은 버튼.
   const save = (key) => (SLOT_PRESET[key] ? `<button type="button" class="ghost mini" data-slotsave="${key}" aria-label="${SLOT_PRESET[key]} 프리셋으로 저장">＋ ${SLOT_PRESET[key]} 프리셋</button>` : "");
   const head = (key, n, title, extra = "") => `<div class="slothead"><label for="slot-${key}">${/^\d/.test(n) ? `<span class="num">${parseInt(n, 10)}</span>` : `<b>${n}</b>`} ${title}</label>${extra}</div>`;
-  const row = (key, n, title, hint, val, ph) => `<div class="slot">${head(key, n, title, save(key))}${area(key, val, ph)}</div>`;
+  const row = (key, n, title, hint, val, ph) => `<div class="slot">${head(key, n, title, save(key))}${area(key, val, ph)}${chipRow(key)}</div>`;
   const full = composePrompt(sl, d.taste.style, s);
   const negAll = joinTags([d.taste.negative, d.draft.neg]);
   // 1~4순위(인물·화풍)는 그림마다 잘 안 바뀌어서 접어 둔다. 제목 옆에 지금 들어 있는 글 앞부분을 보여 준다.
@@ -1572,7 +1671,7 @@ function slotsPanel() {
     ${row("bg", "6순위", "배경·조명·분위기·이펙트", "", sl.bg, "palace, backlighting")}
     ${tg(sl.rest) ? row("rest", "그 밖에", "칸을 나누기 전의 글", "위 칸으로 옮겨 적고 비워도 됨", sl.rest, "") : ""}
     <div class="slot">${head("neg", "빼는 것", "이번 그림")}
-      ${area("neg", d.draft.neg, "earrings, gloves")}</div>
+      ${area("neg", d.draft.neg, "earrings, gloves")}${chipRow("neg")}</div>
     ${sec("always", "늘 붙는 것", `품질 태그 ${s.quality ? "붙임" : "안 붙임"} · 기본 빼는 것 ${tg(d.taste.negative) ? tg(d.taste.negative).split(", ").length + "개" : "없음"}`, `
     <div class="slot">${head("quality", "7순위", "품질 태그", `<label class="line mini"><input type="checkbox" id="qualityOn" ${s.quality ? "checked" : ""}> 붙이기</label>`)}
       ${area("quality", qText(s), "")}
@@ -1623,6 +1722,7 @@ function wireSlots() {
     toast("기본 빼는 것을 처음 값으로", () => { d.taste.negative = before; store.save(); });
     store.save();
   });
+  document.querySelectorAll("[data-pchip]").forEach((b) => b.addEventListener("click", () => chipToggle(b.dataset.pchip)));
   // 칸 하나를 그 종류의 프리셋으로 (#4). 캐릭터는 1순위 인원수 태그도 같이 담는다(넣을 때 다시 1순위로 나뉨).
   document.querySelectorAll("[data-slotsave]").forEach((b) => b.addEventListener("click", () => {
     const k = b.dataset.slotsave, kind = SLOT_PRESET[k];
@@ -1780,9 +1880,12 @@ const SCREENS = {
     const dayKey = (at) => { if (!at) return "날짜 모름"; const d0 = new Date(), d = new Date(at); const diff = Math.round((new Date(d0.toDateString()) - new Date(d.toDateString())) / 864e5); return diff === 0 ? "오늘" : diff === 1 ? "어제" : d.toLocaleDateString("ko-KR", { month: "long", day: "numeric" }); };
     const groups = [];
     for (const r of kept) { const g = dayKey(r.at); if (groups.at(-1)?.g === g) groups.at(-1).list.push(r); else groups.push({ g, list: [r] }); }
-    const addBtn = `<input id="inFile" type="file" accept="image/*" multiple hidden><div class="acts2 ktop"><button type="button" class="ghost sm" id="inAdd">＋ 받은 그림 넣기</button></div>`;
-    return `${addBtn}${groups.map(({ g, list }) => `<h2 class="kday">${esc(g)} <small>${list.length}장</small></h2><div class="kgrid">${list.map((r) =>
-      `<a href="#/keep/${r.id}" data-thumb="${r.id}" aria-label="${r.ext ? "받은 그림" : `시드 ${r.seed} 그림`}">${r.ext ? `<span class="kbadge">받음</span>` : ""}</a>`).join("")}</div>`).join("")}<p class="hint kfoot">NovelAI PNG면 안에 든 프롬프트·시드를 읽어 ‘다시 뽑기’가 됨. 받은 그림은 취향 통계에 안 셈.</p>`;
+    const sel = ui.ksel;
+    const addBtn = sel
+      ? `<div class="kbar"><b id="kselN">${sel.size}장 고름</b><button type="button" class="ghost sm" id="kAll">${sel.size === kept.length ? "전부 풀기" : "전부"}</button><button type="button" class="ghost sm" id="kSave">저장</button><button type="button" class="ghost sm danger" id="kDel">지우기</button><button type="button" class="ghost sm" id="kOff">취소</button></div>`
+      : `<input id="inFile" type="file" accept="image/*" multiple hidden><div class="acts2 ktop"><button type="button" class="ghost sm" id="kOn">고르기</button><button type="button" class="ghost sm" id="inAdd">＋ 받은 그림 넣기</button></div>`;
+    return `${addBtn}${groups.map(({ g, list }, gi) => `<h2 class="kday">${esc(g)} <small>${list.length}장</small>${sel ? `<button type="button" class="ghost mini" data-kday="${gi}">이 날 전부</button>` : ""}</h2><div class="kgrid ${sel ? "picking" : ""}" data-kg="${gi}">${list.map((r) =>
+      `<a href="#/keep/${r.id}" class="${sel?.has(r.id) ? "sel" : ""}" data-thumb="${r.id}" aria-label="${r.ext ? "받은 그림" : `시드 ${r.seed} 그림`}">${r.ext ? `<span class="kbadge">받음</span>` : ""}</a>`).join("")}</div>`).join("")}<p class="hint kfoot">NovelAI PNG면 안에 든 프롬프트·시드를 읽어 ‘다시 뽑기’가 됨. 받은 그림은 취향 통계에 안 셈.</p>`;
   },
 
   vault(id) {
@@ -1963,13 +2066,14 @@ function wireAsk() {
   }));
   const blockOf = (id) => { const [i, j] = id.split(":").map(Number); return parseBlocks(d.chat[i]?.text || "")[j]?.v; };
   // 넣은 블록 표시: chat[i].done에 블록 번호를 남긴다. 되돌리면 넣기 전 표시로 돌린다.
+  const fromOf = (i) => `m:${d.chat[i]?.at || i}`;
   const markDone = (i, js) => { const m = d.chat[i]; if (!m) return null; const was = Array.isArray(m.done) ? [...m.done] : []; m.done = [...new Set([...was, ...js])]; return () => { m.done = was; }; };
   document.querySelectorAll("[data-blk]").forEach((el) => el.addEventListener("click", () => {
     const v = blockOf(el.dataset.blk); if (!v) return;
     const before = snapBlocks();
-    const msg = applyBlock(el.dataset.kind, v);
-    if (msg == null) return;
     const [bi, bj] = el.dataset.blk.split(":").map(Number);
+    const msg = applyBlock(el.dataset.kind, v, fromOf(bi));
+    if (msg == null) return;
     const changed = snapBlocks() !== before;
     const unmark = changed ? markDone(bi, [bj]) : null;
     toast(msg, changed ? () => { unmark?.(); restoreBlocks(before); } : null);
@@ -1986,7 +2090,7 @@ function wireAsk() {
       .sort((x, y) => ORDER.indexOf(x.b.lang) - ORDER.indexOf(y.b.lang) || x.j - y.j);
     if (!todo.length) return;
     const before = snapBlocks(), msgs = [], ok = [];
-    for (const { b, j } of todo) { const r = applyBlock(b.lang, b.v); if (r != null) { msgs.push(r); ok.push(j); } }
+    for (const { b, j } of todo) { const r = applyBlock(b.lang, b.v, fromOf(i)); if (r != null) { msgs.push(r); ok.push(j); } }
     if (!ok.length) return;
     const changed = snapBlocks() !== before;
     const unmark = changed ? markDone(i, ok) : null;
@@ -2397,7 +2501,32 @@ function wire(name, arg, seq) {
     on("inAdd", "click", () => $("inFile").click());
     on("inFile", "change", (e) => { const f = [...e.target.files]; e.target.value = ""; if (f.length) importImages(f); });
   }
-  if (name === "keep" && !arg) fillThumbs(seq);
+  if (name === "keep" && !arg) {
+    fillThumbs(seq);
+    // 여러 장 고르기: ‘고르기’ 버튼이나 그림을 길게 눌러 들어간다. 고르는 동안 누르면 열리지 않고 표시만 바뀐다(썸네일을 다시 안 그리게 화면은 그대로 두고 표시만 고침).
+    const cells = [...document.querySelectorAll(".kgrid a[data-thumb]")];
+    const sync = () => {
+      const n = ui.ksel?.size || 0;
+      cells.forEach((a) => a.classList.toggle("sel", !!ui.ksel?.has(a.dataset.thumb)));
+      if ($("kselN")) $("kselN").textContent = `${n}장 고름`;
+      if ($("kAll")) $("kAll").textContent = n === cells.length ? "전부 풀기" : "전부";
+    };
+    on("kOn", "click", () => { ui.ksel = new Set(); render(); });
+    on("kOff", "click", () => { ui.ksel = null; render(); });
+    on("kAll", "click", () => { ui.ksel = ui.ksel.size === cells.length ? new Set() : new Set(cells.map((a) => a.dataset.thumb)); sync(); });
+    document.querySelectorAll("[data-kday]").forEach((b) => b.addEventListener("click", () => {
+      const ids = [...document.querySelectorAll(`[data-kg="${b.dataset.kday}"] a[data-thumb]`)].map((a) => a.dataset.thumb);
+      const all = ids.every((id) => ui.ksel.has(id));
+      ids.forEach((id) => (all ? ui.ksel.delete(id) : ui.ksel.add(id)));
+      sync();
+    }));
+    cells.forEach((a) => {
+      a.addEventListener("click", (e) => { if (!ui.ksel) return; e.preventDefault(); const id = a.dataset.thumb; if (!ui.ksel.delete(id)) ui.ksel.add(id); sync(); });
+      a.addEventListener("contextmenu", (e) => { e.preventDefault(); if (ui.ksel) return; ui.ksel = new Set([a.dataset.thumb]); render(); });
+    });
+    on("kSave", "click", () => { const ids = [...ui.ksel]; if (!ids.length) return toast("고른 그림이 없음"); saveKeptMany(ids); });
+    on("kDel", "click", () => { const ids = [...ui.ksel]; if (!ids.length) return toast("고른 그림이 없음"); if (confirm(`고른 ${ids.length}장을 보관함에서 지움.`)) removeKeptMany(ids); });
+  }
   if (name === "keep" && arg) {
     const rec = d.log.find((r) => r.id === arg);
     let blob = null;
@@ -2487,7 +2616,7 @@ function wire(name, arg, seq) {
 }
 
 // 탭을 바꾸면 그 탭 맨 위에서 시작한다(전에는 앞 탭의 스크롤 위치가 남아 비서 탭이 대화 중간에서 열렸다). 비서 탭만 마지막 대화로 간다.
-addEventListener("hashchange", () => { errMsg = ""; askErr = ""; ui.bq = ""; ui.vShow = 40; ui.vOpen = new Set(); if (route()[0] === "ai") scrollAi = true; else scrollTo({ top: 0 }); render(); });
+addEventListener("hashchange", () => { errMsg = ""; askErr = ""; ui.bq = ""; ui.vShow = 40; ui.vOpen = new Set(); if (route()[0] === "ai") scrollAi = true; else scrollTo({ top: 0 }); if (route()[0] !== "keep") ui.ksel = null; render(); });
 if (route()[0] === "ai") scrollAi = true;
 render();
 loadRefs().then(render); loadSrc().then(render); loadPimgs().then(render); loadVault().then(render);
