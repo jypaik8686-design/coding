@@ -494,3 +494,10 @@ figure.result, p.error { scroll-margin-top: 64px; }
 .rgrid .rt button { position: relative; }
 .rgrid .noai { position: absolute; left: 3px; top: 3px; padding: 1px 5px; border-radius: 6px; background: rgba(0,0,0,.72); color: var(--dim); font-size: 10px; font-style: normal; }
 .rgrid .rt.edit { grid-template-columns: 48px 1fr auto auto; }
+.rgrid .rt.on img { outline: 2px solid var(--gold); outline-offset: -2px; }
+.rgrid .rt.on button { color: var(--gold); }
+.rgrid .rt.on button::after { content: "✓"; position: absolute; right: 4px; top: 4px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: var(--gold); color: #141114; font-size: 12px; font-weight: 800; }
+.rgrid:not(.edit) .rt:not(.on) img { opacity: .6; }
+.rdh .mini + .mini { margin-left: 4px; }
+.rdh { margin-top: 12px; }
+.rgrid + .refs, .rgrid + p.hint { margin-top: 4px; }
