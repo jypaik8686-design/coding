@@ -996,7 +996,7 @@ function checkTags(text) {
 }
 
 function parseBlocks(text) {
-  const out = [], re = /```([a-z]*)\n?([\s\S]*?)```/gi;
+  const out = [], re = /```[ \t]*([a-z]*)[^\n`]*\n?([\s\S]*?)```/gi;
   let last = 0, m;
   while ((m = re.exec(text))) {
     if (m.index > last) out.push({ t: "text", v: text.slice(last, m.index) });
@@ -1015,14 +1015,23 @@ function stateText() {
   const slotLines = [["1순위 인원수·성별", sl.count], ["2순위 화풍·작가", taste.style], ["3순위 캐릭터 특징", sl.traits], ["4순위 의상·장신구", sl.outfit], ["5순위 포즈·시선·구도", sl.pose], ["6순위 배경·조명·분위기·이펙트", sl.bg], ...(tg(sl.rest) ? [["그 밖에(칸을 못 나눈 글)", sl.rest]] : []), ["7순위 품질 태그", s.quality ? qText(s) : "꺼짐(안 붙임)"]].map(([n, v]) => `  ${n}: ${tg(v) || "(비어 있음)"}`).join("\n");
   const plan = refPlan(s);
   const presetLine = PRESET_KINDS.map((k) => { const names = presetEntries(k).filter((e) => !e.hidden && e.p.name).map((e) => e.p.name); return names.length ? `${k}[${names.join(", ")}]` : ""; }).filter(Boolean).join(" / ");
-  const lib = refs.length ? refs.map((r) => `  [${refCode(r)}] ${r.name} — ${r.on ? `켜짐, 강도 ${r.strength}, 정보량 ${r.info}` : "꺼짐"}`).join("\n") : "";
-  return `\n\n## 참고 그림 서랍 (지금)\n- 방식: ${s.refMode === "precise" ? "정밀 참조" : "바이브"}, 한 번에 ${MAX_REFS}장까지 켬${plan ? "" : " (지금 모델은 참고 그림을 안 보냄)"}\n${lib || "  (비어 있음)"}\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 프롬프트 칸(앱이 1→7순위로 이어 붙여 보냄):\n${slotLines}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 기본 빼는 것(모든 그림, 사용자만 고침): ${tidy(taste.negative) || "(비어 있음)"}\n- 이번 빼는 것(negative 블록이 통째로 바꾸는 칸): ${tidy(draft.neg) || "(비어 있음)"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg && !ui.attachFile ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}${ui.attachFile ? "\n- 첨부: 사용자가 고른 사진 한 장을 이 메시지에 붙임" : ""}\n- 프리셋(사용자가 눌러 쓰는 것): ${presetLine || "없음"}`;
+  return `\n\n## 앱 상태 (지금)\n- 모델: ${modelId(s)} (바이브 ${supportsVibe(s) ? "됨" : "안 됨"}, 정밀 참조 ${supportsPrecise(s) ? "됨" : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"})\n- 프롬프트 칸(앱이 1→7순위로 이어 붙여 보냄):\n${slotLines}\n- 인물별 프롬프트:${chars ? "\n" + chars : " 없음"}\n- 기본 빼는 것(모든 그림, 사용자만 고침): ${tidy(taste.negative) || "(비어 있음)"}\n- 이번 빼는 것(negative 블록이 통째로 바꾸는 칸): ${tidy(draft.neg) || "(비어 있음)"}\n- 생성 설정: 샘플러 ${s.sampler}, 스텝 ${s.steps}, 프롬프트 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, 노이즈 스케줄 ${s.noise}, Variety+ ${s.variety ? "켬" : "끔"}, 크기 ${w}x${h}\n- 시드: ${Number.isInteger(draft.seed) ? draft.seed : "없음"}${draft.seedLock ? " (고정)" : ""}\n- 참고 그림: ${plan ? `${plan === "vibe" ? "바이브" : "정밀 참조"} ${refs.filter((r) => r.on).length}장` : "안 씀"}\n- 이미지→이미지: ${draft.i2i.on && src ? `켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "끔"}${now ? `\n- 방금 뽑은 그림: 시드 ${now.rec.seed}, 그림은 ${ui.withImg && !ui.attachFile ? "이 메시지에 첨부함" : "안 보여 줌"}` : ""}${ui.attachFile ? "\n- 첨부: 사용자가 고른 사진 한 장을 이 메시지에 붙임" : ""}\n- 프리셋(사용자가 눌러 쓰는 것): ${presetLine || "없음"}`;
 }
 
 // 제미니에 보내는 지시문 전체: 켠 조각들(+내 조각) + (켰다면) 앱 상태. 사전 후보는 질문마다 달라서 질문 쪽에 붙는다.
+// 참고 그림 서랍과 refs 블록 쓰는 법. 지시문 조각을 사용자가 고쳐 두면 새 기본 글이 안 들어가므로(2026-11-21: 블록이 안 나옴) 조각과 따로 늘 붙인다.
+function refsText() {
+  const s = store.data.settings;
+  if (!refs.length) return "";
+  const lib = refs.map((r) => `- [${refCode(r)}] ${r.name} — ${r.on ? `켜짐, 강도 ${r.strength}, 정보량 ${r.info}` : "꺼짐"}`).join("\n");
+  const can = refPlan(s);
+  return `\n\n## 참고 그림 서랍 (지금)\n사용자가 앱에 넣어 둔 참고 그림(바이브)이다. 대괄호 안 네 글자가 그 그림의 이름표다. 방식: ${s.refMode === "precise" ? "정밀 참조" : "바이브"}, 한 번에 ${MAX_REFS}장까지 켠다.\n${lib}\n\n${can
+    ? `이번 그림에 쓸 참고 그림은 네가 여기서 고른다. 프롬프트(scene 블록)를 줄 때, 그리고 사용자가 바이브·참고 그림·분위기·화풍을 말할 때는 답에 refs 코드 블록을 반드시 하나 넣는다. 블록 첫 줄은 정확히 \`\`\`refs 이고, 안에는 한 줄에 하나씩 \`이름표: 강도\` 또는 \`이름표: 강도 정보량\`만 쓴다. 예:\n\`\`\`refs\n${refCode(refs[0])}: 0.6\n\`\`\`\n적은 것만 켜지고 나머지는 꺼진다. 강도는 0~1, 바이브는 켠 것의 합이 1 이하. 이름표는 위 목록에 있는 것만 쓴다. 맞는 그림이 없으면 \`none\` 한 줄만 쓰고 이유를 한 줄로 말한다. 그림을 같이 받았으면(\`[서랍 그림 이름표]\` 글 뒤에 붙어 옴) 본 것을 근거로, 못 받았으면 이름만 보고 골랐다고 밝힌다.`
+    : "지금 모델은 참고 그림을 안 보내므로 refs 블록을 쓰지 않는다. 쓰려면 V4.5 Full로 바꾸라고 알린다."}`;
+}
 function fullPersona() {
   const d = store.data;
-  return buildPersona(d.persona) + (d.persona.auto.state ? stateText() : "");
+  return buildPersona(d.persona) + refsText() + (d.persona.auto.state ? stateText() : "");
 }
 
 async function geminiFail(res) {
@@ -1254,7 +1263,7 @@ function msgHtml(m, i) {
     ? `<div class="acts2 putall">${left
       ? `<button type="button" data-blkall="${i}">전부 넣기 <small>(${left === usable.length ? `${usable.length}개` : `남은 ${left}개`})</small></button>`
       : `<button type="button" class="ghost done" data-blkall="${i}" data-again="1">✓ 전부 넣음 <small>(다시 넣기)</small></button>`}</div>` : "";
-  return `<div class="msg ai">${parts || esc(m.text)}${all}</div>`;
+  return `<div class="msg ai">${all}${parts || esc(m.text)}</div>`;
 }
 
 // ── 화면 ────────────────────────────────────────────────────

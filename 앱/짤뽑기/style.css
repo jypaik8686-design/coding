@@ -484,3 +484,8 @@ figure.result, p.error { scroll-margin-top: 64px; }
 .pchips .pkl { flex: none; align-self: center; width: 38px; font-size: 11px; color: var(--dim); }
 .pchips .chip.add { border-style: dashed; color: var(--dim); }
 .padd { margin-top: 8px; }
+
+/* 2026-11-21: 알림이 뽑기 버튼을 가려서 위(제목 줄 아래)로 옮김. 전부 넣기는 답 맨 위 */
+.toast { bottom: auto; top: calc(var(--bar) + env(safe-area-inset-top) + 8px); }
+.msg.ai > .putall:first-child { margin: 0 0 10px; }
+.msg.ai > .putall:first-child { border-top: 0; padding-top: 0; border-bottom: 1px dashed var(--line); padding-bottom: 10px; }
