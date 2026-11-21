@@ -469,3 +469,18 @@ figure.result, p.error { scroll-margin-top: 64px; }
 .kgrid.picking a { opacity: .55; }
 .kgrid.picking a.sel { opacity: 1; outline: 2px solid var(--gold); outline-offset: -2px; }
 .kgrid.picking a.sel::after { content: "✓"; position: absolute; right: 5px; top: 5px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--gold); color: #141114; font-size: 13px; font-weight: 800; }
+
+/* 2026-11-21 참고 그림 서랍, 프리셋 바로 추가 */
+.ref .rname { min-height: 38px; padding: 6px 10px; font-size: 14px; }
+.rdh { margin-top: 14px; }
+.rgrid { list-style: none; margin: 8px 0 12px; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.rgrid .rt button { display: grid; gap: 4px; width: 100%; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--dim); font-size: 11px; font-weight: 400; text-align: center; }
+.rgrid img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px; background: var(--line); display: block; }
+.rgrid .rt span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rgrid.edit { grid-template-columns: 1fr; }
+.rgrid .rt.edit { display: grid; grid-template-columns: 48px 1fr auto; gap: 8px; align-items: center; }
+.rgrid .rt.edit img { width: 48px; }
+.rgrid .rt.edit input { min-height: 40px; padding: 6px 10px; font-size: 14px; }
+.pchips .pkl { flex: none; align-self: center; width: 38px; font-size: 11px; color: var(--dim); }
+.pchips .chip.add { border-style: dashed; color: var(--dim); }
+.padd { margin-top: 8px; }
