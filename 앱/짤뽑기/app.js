@@ -299,6 +299,8 @@ const MAX_REFS = 4; // 한 번에 켜 쓰는 장수. 이 앱이 정한 한도. N
 const LIB_MAX = 60; // 서랍에 넣어 두는 장수 (2026-11-21: 자주 쓰는 바이브를 넣어 두고 골라 켠다)
 const refCode = (r) => r.id.slice(0, 4); // 비서가 서랍 그림을 가리키는 짧은 이름
 const refsOn = () => refs.filter((r) => r.on).length;
+// 비서가 써도 되는 서랍 그림 (2026-11-21, 사용자가 고름). ai가 false인 그림은 비서에게 이름도 그림도 안 가고, refs 블록이 켜지도 끄지도 않는다. 옛 항목은 칸이 없어 써도 되는 것으로 읽는다.
+const aiRefs = () => refs.filter((r) => r.ai !== false);
 const supportsVibe = (s) => /^nai-diffusion-4/.test(modelId(s)); // V5는 400으로 거절됨 (art 확인 2026-11-17)
 const supportsPrecise = (s) => /^nai-diffusion-4-5/.test(modelId(s)); // 정밀 참조는 V4.5 전용 (문서). V4.5 Full에서 200 확인 (2026-11-18)
 const supportsChars = (s) => /^nai-diffusion-(4|5)/.test(modelId(s)); // 인물별 프롬프트는 V4 이상 (문서)
@@ -1168,11 +1170,12 @@ function stateText() {
 // 참고 그림 서랍과 refs 블록 쓰는 법. 지시문 조각을 사용자가 고쳐 두면 새 기본 글이 안 들어가므로(2026-11-21: 블록이 안 나옴) 조각과 따로 늘 붙인다.
 function refsText() {
   const s = store.data.settings;
-  if (!refs.length) return "";
-  const lib = refs.map((r) => `- [${refCode(r)}] ${r.name} — ${r.on ? `켜짐, 강도 ${r.strength}, 정보량 ${r.info}` : "꺼짐"}`).join("\n");
+  const pool = aiRefs();
+  if (!pool.length) return "";
+  const lib = pool.map((r) => `- [${refCode(r)}] ${r.name} — ${r.on ? `켜짐, 강도 ${r.strength}, 정보량 ${r.info}` : "꺼짐"}`).join("\n");
   const can = refPlan(s);
   return `\n\n## 참고 그림 서랍 (지금)\n사용자가 앱에 넣어 둔 참고 그림(바이브)이다. 대괄호 안 네 글자가 그 그림의 이름표다. 방식: ${s.refMode === "precise" ? "정밀 참조" : "바이브"}, 한 번에 ${MAX_REFS}장까지 켠다.\n${lib}\n\n${can
-    ? `이번 그림에 쓸 참고 그림은 네가 여기서 고른다. 프롬프트(scene 블록)를 줄 때, 그리고 사용자가 바이브·참고 그림·분위기·화풍을 말할 때는 답에 refs 코드 블록을 반드시 하나 넣는다. 블록 첫 줄은 정확히 \`\`\`refs 이고, 안에는 한 줄에 하나씩 \`이름표: 강도\` 또는 \`이름표: 강도 정보량\`만 쓴다. 예:\n\`\`\`refs\n${refCode(refs[0])}: 0.6\n\`\`\`\n적은 것만 켜지고 나머지는 꺼진다. 강도는 0~1, 바이브는 켠 것의 합이 1 이하. 이름표는 위 목록에 있는 것만 쓴다. 맞는 그림이 없으면 \`none\` 한 줄만 쓰고 이유를 한 줄로 말한다. 그림을 같이 받았으면(\`[서랍 그림 이름표]\` 글 뒤에 붙어 옴) 본 것을 근거로, 못 받았으면 이름만 보고 골랐다고 밝힌다.`
+    ? `이번 그림에 쓸 참고 그림은 네가 여기서 고른다. 프롬프트(scene 블록)를 줄 때, 그리고 사용자가 바이브·참고 그림·분위기·화풍을 말할 때는 답에 refs 코드 블록을 반드시 하나 넣는다. 블록 첫 줄은 정확히 \`\`\`refs 이고, 안에는 한 줄에 하나씩 \`이름표: 강도\` 또는 \`이름표: 강도 정보량\`만 쓴다. 예:\n\`\`\`refs\n${refCode(pool[0])}: 0.6\n\`\`\`\n적은 것만 켜지고 나머지는 꺼진다. 강도는 0~1, 바이브는 켠 것의 합이 1 이하. 이름표는 위 목록에 있는 것만 쓴다. 맞는 그림이 없으면 \`none\` 한 줄만 쓰고 이유를 한 줄로 말한다. 그림을 같이 받았으면(\`[서랍 그림 이름표]\` 글 뒤에 붙어 옴) 본 것을 근거로, 못 받았으면 이름만 보고 골랐다고 밝힌다.`
     : "지금 모델은 참고 그림을 안 보내므로 refs 블록을 쓰지 않는다. 쓰려면 V4.5 Full로 바꾸라고 알린다."}`;
 }
 function fullPersona() {
@@ -1204,7 +1207,7 @@ async function ask(text, opts = {}) {
   const imgBlob = fileImg || nowImg, imgKind = fileImg ? "file" : nowImg ? "now" : null;
   // 서랍 그림도 보여 주기(체크했을 때만 구글로 감): 켜 둔 것부터 12장까지, 썸네일 크기로.
   const doc = ui.attachDoc;
-  const libShow = ui.withRefs ? [...refs].sort((a, b) => (b.on ? 1 : 0) - (a.on ? 1 : 0)).slice(0, 12) : [];
+  const libShow = ui.withRefs ? aiRefs().sort((a, b) => (b.on ? 1 : 0) - (a.on ? 1 : 0)).slice(0, 12) : [];
   askDraft = "";
   d.chat.push({ role: "user", text, at: Date.now(), ...(imgKind ? { img: imgKind } : {}), ...(libShow.length ? { rn: libShow.length } : {}), ...(doc ? { doc: doc.name } : {}) });
   while (d.chat.length > CHAT_MAX) d.chat.shift();
@@ -1358,17 +1361,18 @@ function applyBlock(kind, v, from = "") {
     const s = d.settings;
     if (!supportsVibe(s)) return "이 모델은 참고 그림이 안 됨 (V4.5 Full에서만)";
     const picks = new Map(); let mode = null, bad = 0;
+    const room = MAX_REFS - refs.filter((r) => r.on && r.ai === false).length; // 내가 켜 둔 ‘비서가 못 씀’ 그림은 그대로 두고 남는 자리만 쓴다
     for (const line of String(v).split("\n")) {
       const mm = line.match(/^\s*mode\s*:\s*(vibe|precise)\s*$/i);
       if (mm) { mode = mm[1].toLowerCase(); continue; }
       const m = line.match(/^\s*\[?([0-9a-f]{4})\]?\s*[:=]?\s*([\d.]+)?(?:[\s,]+([\d.]+))?/i);
       if (!m) continue;
-      const r = refs.find((x) => refCode(x) === m[1].toLowerCase());
+      const r = aiRefs().find((x) => refCode(x) === m[1].toLowerCase());
       if (!r) { bad++; continue; }
-      if (picks.size < MAX_REFS) picks.set(r, { s: m[2], i: m[3] });
+      if (picks.size < room) picks.set(r, { s: m[2], i: m[3] });
     }
     if (!picks.size && !/^\s*(none|없음)\s*$/im.test(v)) return bad ? "블록이 가리키는 그림이 서랍에 없음 (지웠거나 옛 답)" : "참고 그림 블록을 못 읽음";
-    for (const r of refs) {
+    for (const r of aiRefs()) {
       const pk = picks.get(r);
       if (!pk && !r.on) continue;
       r.on = !!pk;
@@ -1443,7 +1447,7 @@ function attachBar() {
         ? `<label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> 방금 뽑은 그림도 같이 보여 주기 <span class="hint">체크하면 이 그림이 구글로 감</span></label>`
         : `<p class="hint">방금 뽑은 그림이 없어서 ‘방금 그림 보여 주기’는 꺼져 있음. 새로 고쳤거나 버린 뒤에는 없어짐. 뽑으면 체크칸이 생김.</p>`}
       ${f ? `<div class="srcrow"><img src="${f.url}" alt="고른 사진"><div><span class="hint">${esc(f.name)} — 다음 질문에 한 번 보냄 (구글로 감)</span><button type="button" class="ghost sm" id="askUnpick">빼기</button></div></div>` : ""}
-      ${refs.length ? `<label class="line"><input type="checkbox" id="withRefs" ${ui.withRefs ? "checked" : ""}> 참고 그림 서랍도 보여 주기 <span class="hint">${Math.min(refs.length, 12)}장이 작게 줄어 구글로 감. 안 보여 줘도 이름은 비서가 앎</span></label>` : ""}
+      ${aiRefs().length ? `<label class="line"><input type="checkbox" id="withRefs" ${ui.withRefs ? "checked" : ""}> 참고 그림 서랍도 보여 주기 <span class="hint">비서용으로 둔 ${Math.min(aiRefs().length, 12)}장이 작게 줄어 구글로 감. 안 보여 줘도 이름은 비서가 앎${aiRefs().length < refs.length ? `. ${refs.length - aiRefs().length}장은 비서에게 안 감` : ""}</span></label>` : refs.length ? `<p class="hint">서랍 그림 ${refs.length}장이 전부 ‘비서가 못 씀’이라 비서는 참고 그림을 고르지 못함.</p>` : ""}
       ${ui.attachDoc ? `<div class="docrow"><span class="hint">파일 ‘${esc(ui.attachDoc.name)}’ — ${ui.attachDoc.len.toLocaleString()}자${ui.attachDoc.cut ? `, 앞 ${DOC_MAX.toLocaleString()}자만` : ""}. 다음 질문에 한 번 보냄 (구글로 감)</span><button type="button" class="ghost sm" id="askUndoc">빼기</button></div>` : ""}
       <input id="askFile" type="file" hidden>
       <button type="button" class="ghost sm" id="askPick">${f || ui.attachDoc ? "다른 사진·파일 고르기" : "사진·파일 붙이기"}</button>
@@ -1512,20 +1516,22 @@ function refInner() {
         <label>무엇을 따라 할까<select data-rkind="${r.id}"><option value="character&style" ${r.kind !== "character" ? "selected" : ""}>캐릭터와 화풍</option><option value="character" ${r.kind === "character" ? "selected" : ""}>캐릭터만</option></select></label>` : ""}
         <label>정보량 <span class="hint">0~1${mode === "vibe" ? ", 바꾸면 다시 인코딩" : ""}</span><input type="number" inputmode="decimal" min="0" max="1" step="0.1" value="${r.info}" data-rinfo="${r.id}"></label>
         ${mode === "vibe" ? `<p class="hint">${r.enc?.[key(r)] ? `인코딩 있음 (다시 안 함${r.vibe ? ", 바이브 파일" : ""})` : r.encOnly ? "이 모델·정보량의 인코딩이 파일에 없음. 원본 그림이 없어 새로 못 함" : "다음 뽑기에서 인코딩 — 문서 기준 2 Anlas"}</p>` : ""}
+        <label class="line"><input type="checkbox" data-rai="${r.id}" ${r.ai !== false ? "checked" : ""}> 비서가 써도 됨</label>
         <button type="button" class="ghost" data-roff="${r.id}">끄기 (서랍에 남음)</button>
       </div>
     </li>`;
   const on = refs.filter((r) => r.on), off = refs.filter((r) => !r.on);
   const tile = (r) => (ui.refEdit
-    ? `<li class="rt edit"><img src="${r.url}" alt=""><input type="text" data-rname="${r.id}" value="${esc(r.name)}" aria-label="이름" autocomplete="off"><button type="button" class="ghost sm danger" data-rdel="${r.id}">지우기</button></li>`
-    : `<li class="rt"><button type="button" data-rpick="${r.id}" aria-label="${esc(r.name)} 켜기"><img src="${r.url}" alt=""><span>${esc(r.name)}</span></button></li>`);
+    ? `<li class="rt edit"><img src="${r.url}" alt=""><input type="text" data-rname="${r.id}" value="${esc(r.name)}" aria-label="이름" autocomplete="off"><label class="line mini"><input type="checkbox" data-rai="${r.id}" ${r.ai !== false ? "checked" : ""}> 비서</label><button type="button" class="ghost sm danger" data-rdel="${r.id}">지우기</button></li>`
+    : `<li class="rt"><button type="button" data-rpick="${r.id}" aria-label="${esc(r.name)} 켜기"><img src="${r.url}" alt="">${r.ai === false ? `<i class="noai">비서 ✕</i>` : ""}<span>${esc(r.name)}</span></button></li>`);
   return `
     <div class="seg seg2" role="group" aria-label="참고 방식">
       <button type="button" class="${mode === "vibe" ? "on" : ""}" data-rmode="vibe">바이브<small>화풍·색·분위기</small></button>
       <button type="button" class="${mode === "precise" ? "on" : ""}" data-rmode="precise" ${supportsPrecise(s) ? "" : "disabled"}>정밀 참조<small>${supportsPrecise(s) ? "캐릭터·옷 모양" : "V4.5에서만"}</small></button>
     </div>
     ${on.length ? `<ul class="refs">${on.map(row).join("")}</ul>` : `<p class="hint">켜 둔 그림 없음. 아래 서랍에서 눌러 켜기.</p>`}
-    <div class="slothead rdh"><label>서랍 <span class="hint">${off.length}장 · 누르면 켜짐 (${on.length}/${MAX_REFS})</span></label>${refs.length ? `<button type="button" class="ghost mini" id="refEdit">${ui.refEdit ? "정리 끝" : "서랍 정리"}</button>` : ""}</div>
+    <div class="slothead rdh"><label>서랍 <span class="hint">${off.length}장 · 누르면 켜짐 (${on.length}/${MAX_REFS}) · 비서용 ${aiRefs().length}장</span></label>${refs.length ? `<button type="button" class="ghost mini" id="refEdit">${ui.refEdit ? "정리 끝" : "서랍 정리"}</button>` : ""}</div>
+    ${ui.refEdit && refs.length ? `<div class="acts2"><button type="button" class="ghost sm" id="raiAll">${aiRefs().length === refs.length ? "전부 비서가 못 쓰게" : "전부 비서가 쓰게"}</button></div><p class="hint">‘비서’ 체크를 뺀 그림은 비서에게 이름도 그림도 안 가고, 비서가 켜거나 끄지 못함. 직접 켜서 쓰는 것은 그대로 됨.</p>` : ""}
     ${off.length ? `<ul class="rgrid ${ui.refEdit ? "edit" : ""}">${off.map(tile).join("")}</ul>` : ""}
     <input id="refFile" type="file" multiple hidden>
     <button type="button" class="ghost" id="addRef" ${refs.length >= LIB_MAX ? "disabled" : ""}>＋ 서랍에 그림·바이브 파일 넣기 (${refs.length}/${LIB_MAX})</button>
@@ -2589,6 +2595,8 @@ function wire(name, arg, seq) {
     }));
     document.querySelectorAll("[data-rname]").forEach((el) => el.addEventListener("change", () => { const r = byId(el, "rname"); if (!r) return; r.name = el.value.trim().slice(0, 40) || "그림"; saveRef(r); }));
     on("refEdit", "click", () => { ui.refEdit = !ui.refEdit; render(); });
+    document.querySelectorAll("[data-rai]").forEach((el) => el.addEventListener("change", () => { const r = byId(el, "rai"); if (!r) return; r.ai = el.checked; saveRef(r); render(); }));
+    on("raiAll", "click", () => { const to = aiRefs().length !== refs.length; for (const r of refs) if ((r.ai !== false) !== to) { r.ai = to; saveRef(r); } render(); });
     const slider = (attr, key, outPrefix, dflt) => document.querySelectorAll(`[${attr}]`).forEach((el) => {
       const r = refs.find((x) => x.id === el.getAttribute(attr));
       el.addEventListener("input", () => { if (r) { r[key] = clamp(el.value, 0, 1, dflt); const o = $(`${outPrefix}-${r.id}`); if (o) o.textContent = r[key]; } });
