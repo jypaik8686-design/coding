@@ -1,6 +1,6 @@
 // 망 먼저, 끊기면 저장해 둔 것. 온라인이면 고친 파일이 바로 보이고, 오프라인이면 마지막으로 받은 것이 뜬다.
 // 대가: 망이 아주 느리면 첫 화면도 그만큼 느리다. 그게 문제가 되면 그때 캐시 먼저로 바꾸고 VERSION을 올려 가며 쓴다.
-const VERSION = "이미지창고-v2";
+const VERSION = "이미지창고-v3";
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icon.svg", "../해체기/risu.js"];
 
 self.addEventListener("install", (e) => {
@@ -19,7 +19,7 @@ self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   if (new URL(e.request.url).origin !== location.origin) return; // 밖으로 나가는 요청은 건드리지 않는다
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: "no-cache" }) // GitHub Pages가 max-age=600을 붙여서, 그냥 fetch면 고친 뒤 10분 동안 옛 파일이 뜬다. 매번 서버에 바뀌었는지 묻는다
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();

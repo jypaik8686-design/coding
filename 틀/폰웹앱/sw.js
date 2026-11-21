@@ -19,7 +19,7 @@ self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   if (new URL(e.request.url).origin !== location.origin) return; // 밖으로 나가는 요청은 건드리지 않는다
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: "no-cache" }) // GitHub Pages가 max-age=600을 붙여서, 그냥 fetch면 고친 뒤 10분 동안 옛 파일이 뜬다. 매번 서버에 바뀌었는지 묻는다
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();
