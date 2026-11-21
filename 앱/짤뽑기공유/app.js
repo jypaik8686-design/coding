@@ -1419,7 +1419,7 @@ function presetInner() {
   return `
     <div class="chips pk">${PKINDS.map((k) => `<button type="button" class="chip ${k === kind ? "on" : ""}" data-pkind="${k}">${k}</button>`).join("")}</div>
     ${list}
-    <p class="hint">확정 = NovelAI 문서에서 옮긴 것. 가안 = 이 앱이 짠 것이고, 태그는 사전에서 게시물 수를 확인함. 고친 것은 이 폰에만 저장되고, ‘기본값으로’로 되돌림. 인물은 이번 그림 맨 앞에, 의상은 4순위에, 자세·구도는 5순위에 더해짐. 빼는 것은 ‘이번 빼는 것’ 칸에 들어감. 뽑기 칸 아래 ‘프리셋으로 저장’으로 캐릭터·의상·포즈 칸을 바로 저장함.</p>`;
+    <p class="hint">확정 = NovelAI 문서에서 옮긴 것. 가안 = 이 앱이 짠 것이고, 태그는 사전에서 게시물 수를 확인함. 고친 것은 이 폰에만 저장되고, ‘기본값으로’로 되돌림. 인물은 이번 그림 맨 앞에, 의상은 4순위에, 자세·구도는 5순위에 더해짐. 빼는 것은 ‘이번 빼는 것’ 칸에 들어감. 뽑기 칸 제목 옆 ‘＋ … 프리셋’으로 캐릭터·의상·포즈 칸을 바로 저장함.</p>`;
 }
 
 function tagsMinus(a, b) { const no = new Set(tg(b).toLowerCase().split(", ")); return tg(a).split(", ").filter((t) => t && !no.has(t.toLowerCase())).join(", "); }
@@ -1543,12 +1543,13 @@ function personaEditor() {
 function slotsPanel() {
   const d = store.data, sl = d.draft.slots, s = d.settings;
   const area = (key, val, ph) => `<textarea id="slot-${key}" data-slot="${key}" rows="1" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="${esc(ph)}">${esc(val)}</textarea>`;
-  const save = (key) => (SLOT_PRESET[key] ? `<div class="acts2"><button type="button" class="ghost sm" data-slotsave="${key}">${SLOT_PRESET[key]} 프리셋으로 저장</button></div>` : "");
-  const row = (key, n, title, hint, val, ph) => `<div class="slot"><label for="slot-${key}"><b>${n}</b> ${title}${hint ? ` <span class="hint">${hint}</span>` : ""}</label>${area(key, val, ph)}${save(key)}</div>`;
+  // 2026-11-21 정리: 칸마다 붙던 설명 줄과 ‘…프리셋으로 저장’ 버튼 줄을 제목 줄 하나로 합쳤다. 저장은 제목 오른쪽 작은 버튼.
+  const save = (key) => (SLOT_PRESET[key] ? `<button type="button" class="ghost mini" data-slotsave="${key}" aria-label="${SLOT_PRESET[key]} 프리셋으로 저장">＋ ${SLOT_PRESET[key]} 프리셋</button>` : "");
+  const head = (key, n, title, extra = "") => `<div class="slothead"><label for="slot-${key}"><b>${n}</b> ${title}</label>${extra}</div>`;
+  const row = (key, n, title, hint, val, ph) => `<div class="slot">${head(key, n, title, save(key))}${area(key, val, ph)}</div>`;
   const full = composePrompt(sl, d.taste.style, s);
   const negAll = joinTags([d.taste.negative, d.draft.neg]);
   return `
-    <p class="hint">아래 칸이 1→7순위 순서로 이어 붙어 NovelAI로 감. 영어 태그, 쉼표로. 같은 태그는 먼저 나온 것만 남음. 프리셋은 자기 칸에만 들어감.</p>
     ${row("count", "1순위", "인원수·성별", "", sl.count, "1girl, solo")}
     ${row("style", "2순위", "화풍·작가", "‘화풍·작가’ 탭과 같은 칸", d.taste.style, "{painterly}, artist:이름")}
     ${row("traits", "3순위", "캐릭터 고유 특징", "체형, 머리, 눈 색, 표정", sl.traits, "silver hair, long hair, blue eyes")}
@@ -1556,17 +1557,19 @@ function slotsPanel() {
     ${row("pose", "5순위", "포즈·시선·구도", "", sl.pose, "crossed arms, from below, upper body")}
     ${row("bg", "6순위", "배경·조명·분위기·이펙트", "", sl.bg, "palace, backlighting")}
     ${tg(sl.rest) ? row("rest", "그 밖에", "칸을 나누기 전의 글", "위 칸으로 옮겨 적고 비워도 됨", sl.rest, "") : ""}
-    <div class="slot"><label for="slot-quality"><b>7순위</b> 기본 퀄리티 태그 <span class="hint">모델별 기본 글. 고치면 이 폰에 저장</span></label>
-      ${area("quality", qText(s), "")}
-      <div class="acts2"><label class="line"><input type="checkbox" id="qualityOn" ${s.quality ? "checked" : ""}> 붙이기</label><button type="button" class="ghost sm" id="qualityDef" ${tg(s.qualityText) ? "" : "disabled"}>기본값으로</button></div>
-    </div>
-    <div class="slot"><label for="slot-neg"><b>빼는 것</b> 이번 그림 <span class="hint">프리셋·비서가 넣는 곳. 칸 비우기로 같이 비워짐</span></label>
+    <div class="slot">${head("neg", "빼는 것", "이번 그림")}
       ${area("neg", d.draft.neg, "earrings, gloves")}</div>
-    <div class="slot"><label for="slot-negbase"><b>빼는 것</b> 기본 <span class="hint">모든 그림에 붙음. ‘화풍·작가’ 탭과 같은 칸</span></label>
+    ${sec("always", "늘 붙는 것", `품질 태그 ${s.quality ? "붙임" : "안 붙임"} · 기본 빼는 것 ${tg(d.taste.negative) ? tg(d.taste.negative).split(", ").length + "개" : "없음"}`, `
+    <div class="slot">${head("quality", "7순위", "품질 태그", `<label class="line mini"><input type="checkbox" id="qualityOn" ${s.quality ? "checked" : ""}> 붙이기</label>`)}
+      ${area("quality", qText(s), "")}
+      <div class="acts2"><button type="button" class="ghost sm" id="qualityDef" ${tg(s.qualityText) ? "" : "disabled"}>모델 기본값으로</button></div>
+    </div>
+    <div class="slot">${head("negbase", "빼는 것", "기본 (모든 그림)")}
       ${area("negbase", d.taste.negative, "lowres, bad anatomy")}
-      <div class="acts2"><button type="button" class="ghost sm" id="negDef" ${tidy(d.taste.negative) === tidy(DEFAULT_NEG) ? "disabled" : ""}>기본값으로</button></div></div>
-    ${sec("sprev", "완성된 프롬프트 보기", "", `<p class="hint" id="scount">${full.length}자</p><pre class="pprev" id="sprevtxt">${esc(full) || "(비어 있음)"}</pre><p class="hint">빼는 것 전체</p><pre class="pprev" id="snegtxt">${esc(negAll) || "(비어 있음)"}</pre>`)}
-    <div class="acts2"><button type="button" class="ghost sm" id="saveScene">이 칸들을 내 프리셋으로 저장</button><button type="button" class="ghost sm" id="slotsClear">1·3~6순위 칸과 이번 빼는 것 비우기</button></div>`;
+      <div class="acts2"><button type="button" class="ghost sm" id="negDef" ${tidy(d.taste.negative) === tidy(DEFAULT_NEG) ? "disabled" : ""}>처음 값으로</button></div></div>
+    <p class="hint">‘화풍·작가’ 탭의 같은 칸과 이어져 있음.</p>`)}
+    ${sec("sprev", "완성된 프롬프트 보기", "", `<p class="hint">칸이 1→7순위로 이어 붙어 NovelAI로 감. 같은 태그는 먼저 나온 것만 남음.</p><p class="hint" id="scount">${full.length}자</p><pre class="pprev" id="sprevtxt">${esc(full) || "(비어 있음)"}</pre><p class="hint">빼는 것 전체</p><pre class="pprev" id="snegtxt">${esc(negAll) || "(비어 있음)"}</pre>`)}
+    <div class="acts2"><button type="button" class="ghost sm" id="saveScene">칸 전부 프리셋으로</button><button type="button" class="ghost sm" id="slotsClear">칸 비우기</button></div>`;
 }
 function wireSlots() {
   const d = store.data, s = d.settings;
@@ -1576,6 +1579,7 @@ function wireSlots() {
     if (n) n.textContent = joinTags([d.taste.negative, d.draft.neg]) || "(비어 있음)";
   };
   const grow = (el) => { el.style.height = "auto"; el.style.height = Math.max(el.scrollHeight + 2, 46) + "px"; };
+  document.querySelectorAll("details.sec").forEach((dt) => dt.addEventListener("toggle", () => { if (dt.open) dt.querySelectorAll("[data-slot]").forEach(grow); }));
   document.querySelectorAll("[data-slot]").forEach((el) => {
     grow(el);
     el.addEventListener("input", () => {
@@ -1675,9 +1679,7 @@ const SCREENS = {
         ${[...Object.keys(SIZES), "직접"].map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${k === "직접" ? `${w}×${h}` : SIZES[k].join("×")}</small></button>`).join("")}
       </div>
       ${s.size === "직접" ? `<div class="two"><label>가로 <span class="hint">64 단위</span><input id="customW" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${w}"></label><label>세로<input id="customH" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${h}"></label></div>` : ""}
-      <label for="seed">시드 <span class="hint">같은 시드·같은 설정이면 같은 그림</span></label>
-      <div class="seedrow"><input id="seed" type="number" inputmode="numeric" min="0" max="4294967295" placeholder="비우면 무작위" value="${Number.isInteger(draft.seed) ? draft.seed : ""}"><button type="button" class="ghost" id="seedRand">무작위</button></div>
-      <label class="line"><input type="checkbox" id="seedLock" ${draft.seedLock ? "checked" : ""}> 이 시드로 고정 <span class="hint">${draft.seedLock ? "다음 장도 같은 시드" : "끄면 매번 새 시드"}</span></label>
+      <div class="seedrow seed3"><input id="seed" type="number" inputmode="numeric" min="0" max="4294967295" placeholder="시드 (비우면 무작위)" aria-label="시드" value="${Number.isInteger(draft.seed) ? draft.seed : ""}"><button type="button" class="ghost" id="seedRand">무작위</button><label class="line"><input type="checkbox" id="seedLock" ${draft.seedLock ? "checked" : ""}> 고정</label></div>
       ${notes.length ? `<p class="hint warn">Anlas가 들 수 있음 (문서 기준, 이 앱에서 차감은 재 보지 않음): ${esc(notes.join(" · "))}</p>` : ""}
       ${busy
         ? `<button type="button" id="stop" class="ghost big">${esc(phase || "뽑는 중…")} 눌러서 취소</button>`
@@ -1700,7 +1702,7 @@ const SCREENS = {
           <button type="button" id="toI2i" class="ghost">이미지→이미지</button>
           <button type="button" id="toRef" class="ghost">참고 그림</button>
         </div>
-        <p class="hint">보관과 버림이 쌓이면 ‘화풍·작가’ 탭에 자주 고른 태그가 나옴. 안 고른 그림은 새로 고치면 사라짐.</p>` : ""}
+` : ""}
       ${histStrip()}
       ${sec("chars", "인물별 프롬프트", nChars ? `${nChars}명` : "", charsInner())}
       ${sec("ref", "참고 그림", nRefs ? `${s.refMode === "precise" ? "정밀 참조" : "바이브"} ${nRefs}장` : "", refInner())}

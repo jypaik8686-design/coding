@@ -317,3 +317,11 @@ pre.bout { white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.5 ui-m
 .vrow b { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
 .vrow .tag { margin-left: 0; }
 .vrow small { color: var(--dim); white-space: nowrap; }
+
+/* 2026-11-21 뽑기 화면 정리: 칸 제목 줄 하나에 저장 버튼, 시드 한 줄 */
+.slothead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 4px; min-height: 36px; }
+.slothead > label { margin: 0; }
+button.mini { min-height: 36px; padding: 0 10px; font-size: 13px; white-space: nowrap; flex: none; }
+label.line.mini { margin: 0; font-size: 14px; white-space: nowrap; }
+.seed3 { grid-template-columns: 1fr auto auto; align-items: center; margin-top: 12px; }
+.seed3 .line { margin: 0; white-space: nowrap; }
