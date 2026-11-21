@@ -1522,16 +1522,16 @@ function refInner() {
   const on = refs.filter((r) => r.on), off = refs.filter((r) => !r.on);
   const tile = (r) => (ui.refEdit
     ? `<li class="rt edit"><img src="${r.url}" alt=""><input type="text" data-rname="${r.id}" value="${esc(r.name)}" aria-label="이름" autocomplete="off"><label class="line mini"><input type="checkbox" data-rai="${r.id}" ${r.ai !== false ? "checked" : ""}> 비서</label><button type="button" class="ghost sm danger" data-rdel="${r.id}">지우기</button></li>`
-    : `<li class="rt"><button type="button" data-rpick="${r.id}" aria-label="${esc(r.name)} 켜기"><img src="${r.url}" alt="">${r.ai === false ? `<i class="noai">비서 ✕</i>` : ""}<span>${esc(r.name)}</span></button></li>`);
+    : `<li class="rt ${r.on ? "on" : ""}"><button type="button" data-rpick="${r.id}" aria-pressed="${!!r.on}" aria-label="${esc(r.name)} ${r.on ? "끄기" : "켜기"}"><img src="${r.url}" alt="">${r.ai === false ? `<i class="noai">비서 ✕</i>` : ""}<span>${esc(r.name)}</span></button></li>`);
   return `
     <div class="seg seg2" role="group" aria-label="참고 방식">
       <button type="button" class="${mode === "vibe" ? "on" : ""}" data-rmode="vibe">바이브<small>화풍·색·분위기</small></button>
       <button type="button" class="${mode === "precise" ? "on" : ""}" data-rmode="precise" ${supportsPrecise(s) ? "" : "disabled"}>정밀 참조<small>${supportsPrecise(s) ? "캐릭터·옷 모양" : "V4.5에서만"}</small></button>
     </div>
-    ${on.length ? `<ul class="refs">${on.map(row).join("")}</ul>` : `<p class="hint">켜 둔 그림 없음. 아래 서랍에서 눌러 켜기.</p>`}
-    <div class="slothead rdh"><label>서랍 <span class="hint">${off.length}장 · 누르면 켜짐 (${on.length}/${MAX_REFS}) · 비서용 ${aiRefs().length}장</span></label>${refs.length ? `<button type="button" class="ghost mini" id="refEdit">${ui.refEdit ? "정리 끝" : "서랍 정리"}</button>` : ""}</div>
+    <div class="slothead rdh"><label>서랍 <span class="hint">${on.length}/${MAX_REFS} 켬 · 비서용 ${aiRefs().length}</span></label>${on.length && !ui.refEdit ? `<button type="button" class="ghost mini" id="refAllOff">전부 끄기</button>` : ""}${refs.length ? `<button type="button" class="ghost mini" id="refEdit">${ui.refEdit ? "정리 끝" : "서랍 정리"}</button>` : ""}</div>
     ${ui.refEdit && refs.length ? `<div class="acts2"><button type="button" class="ghost sm" id="raiAll">${aiRefs().length === refs.length ? "전부 비서가 못 쓰게" : "전부 비서가 쓰게"}</button></div><p class="hint">‘비서’ 체크를 뺀 그림은 비서에게 이름도 그림도 안 가고, 비서가 켜거나 끄지 못함. 직접 켜서 쓰는 것은 그대로 됨.</p>` : ""}
-    ${off.length ? `<ul class="rgrid ${ui.refEdit ? "edit" : ""}">${off.map(tile).join("")}</ul>` : ""}
+    ${refs.length ? `<ul class="rgrid ${ui.refEdit ? "edit" : ""}">${refs.map(tile).join("")}</ul>` : ""}
+    ${on.length ? `<ul class="refs">${on.map(row).join("")}</ul>` : `<p class="hint">켜 둔 그림 없음. 위 서랍에서 눌러 켜기.</p>`}
     <input id="refFile" type="file" multiple hidden>
     <button type="button" class="ghost" id="addRef" ${refs.length >= LIB_MAX ? "disabled" : ""}>＋ 서랍에 그림·바이브 파일 넣기 (${refs.length}/${LIB_MAX})</button>
     <p class="hint">NovelAI에서 내려받은 바이브 파일(.naiv4vibe)도 됨. 파일에 든 인코딩을 그대로 써서 그 모델·정보량으로는 Anlas가 안 듦.</p>
@@ -2588,12 +2588,19 @@ function wire(name, arg, seq) {
     on("refFile", "change", (e) => { const f = [...e.target.files]; e.target.value = ""; addRefs(f); });
     document.querySelectorAll("[data-roff]").forEach((el) => el.addEventListener("click", () => { const r = byId(el, "roff"); if (!r) return; r.on = false; saveRef(r); render(); }));
     document.querySelectorAll("[data-rpick]").forEach((el) => el.addEventListener("click", () => {
+      // 서랍 격자에 켠 것도 같이 있어서 누르는 대로 켜지고 꺼진다 (2026-11-21, 사용자: 여러 장을 한 번에 켜고 끄게)
       const r = byId(el, "rpick"); if (!r) return;
-      if (refsOn() >= MAX_REFS) return toast(`한 번에 ${MAX_REFS}장까지 켬. 하나를 끄고 누르기`);
-      r.on = true; saveRef(r); render();
+      if (!r.on && refsOn() >= MAX_REFS) return toast(`한 번에 ${MAX_REFS}장까지 켬. 켜진 것을 눌러 끄고 누르기`);
+      r.on = !r.on; saveRef(r); render();
     }));
     document.querySelectorAll("[data-rname]").forEach((el) => el.addEventListener("change", () => { const r = byId(el, "rname"); if (!r) return; r.name = el.value.trim().slice(0, 40) || "그림"; saveRef(r); }));
     on("refEdit", "click", () => { ui.refEdit = !ui.refEdit; render(); });
+    on("refAllOff", "click", () => {
+      const was = refs.filter((r) => r.on);
+      for (const r of was) { r.on = false; saveRef(r); }
+      toast(`${was.length}장 끔`, () => { for (const r of was) { r.on = true; saveRef(r); } render(); });
+      render();
+    });
     document.querySelectorAll("[data-rai]").forEach((el) => el.addEventListener("change", () => { const r = byId(el, "rai"); if (!r) return; r.ai = el.checked; saveRef(r); render(); }));
     on("raiAll", "click", () => { const to = aiRefs().length !== refs.length; for (const r of refs) if ((r.ai !== false) !== to) { r.ai = to; saveRef(r); } render(); });
     const slider = (attr, key, outPrefix, dflt) => document.querySelectorAll(`[${attr}]`).forEach((el) => {
