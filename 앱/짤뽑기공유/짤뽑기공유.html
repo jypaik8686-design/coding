@@ -345,6 +345,30 @@ button.done { color: var(--dim); }
 .putall { border-top: 1px dashed var(--line); padding-top: 10px; margin-top: 10px; }
 .putall button { flex: 1 1 auto; }
 
+/* 2026-11-21 보관함 정리: 날짜 묶음, 같은 크기 칸 3줄, 받은 그림 표시, 상세의 이전·다음과 칸별 복사 */
+.kday { display: flex; align-items: baseline; gap: 6px; margin: 18px 0 8px; font-size: 15px; }
+.kday:first-child { margin-top: 4px; }
+.kday small { color: var(--dim); font-weight: 400; font-size: 12px; }
+.kgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.kgrid a { position: relative; aspect-ratio: 3 / 4; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--card); border-radius: 8px; color: var(--dim); font-size: 12px; text-decoration: none; }
+.kgrid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.kbadge { position: absolute; left: 4px; top: 4px; font-size: 10px; line-height: 1; padding: 3px 6px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; }
+.kgrid + .acts2 { margin-top: 20px; }
+.knav { display: flex; align-items: center; gap: 8px; }
+.knum { margin-left: auto; color: var(--dim); font-size: 13px; }
+.kpn { display: flex; gap: 4px; }
+.kpn a, .kpn span { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 10px; font-size: 22px; text-decoration: none; color: var(--accent); background: var(--card); }
+.kpn span { color: var(--line); }
+.kwhen { margin-top: 6px; }
+.kf { margin-top: 14px; }
+.kfh { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--dim); font-size: 12px; }
+.kfv { margin: 4px 0 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; background: var(--card); border-radius: 10px; padding: 10px 12px; }
+.secbody .kfv { background: var(--bg); }
+.kdel { margin: 28px 0 8px; display: flex; justify-content: center; }
+button.ghost.danger { color: var(--danger); background: var(--card); }
+.ktop { margin: 0 0 4px; justify-content: flex-end; }
+.kfoot { margin-top: 18px; }
+
 </style>
 </head>
 <body>
@@ -2126,35 +2150,41 @@ const SCREENS = {
   },
 
   keep(id) {
-    const kept =store.data.log.filter((r) => r.verdict === "keep");
+    // 2026-11-21 정리: 새 것부터, 날짜별로 묶음, 같은 크기 칸 3줄. 상세는 이전·다음, 칸마다 복사, 지우기는 맨 아래.
+    const kept = store.data.log.filter((r) => r.verdict === "keep").sort((a, b) => (b.at || 0) - (a.at || 0));
     if (id) {
-      const r = kept.find((x) => x.id === id);
+      const k = kept.findIndex((x) => x.id === id), r = kept[k];
       if (!r) return `<p class="empty">없는 그림.<br><a href="#/keep">보관함으로</a></p>`;
+      const prev = kept[k - 1], next = kept[k + 1];
+      const field = (key, label, v) => `<div class="kf"><div class="kfh"><span>${label}</span>${v ? `<button type="button" class="ghost mini" data-kcopy="${key}">복사</button>` : ""}</div><p class="kfv">${esc(v) || "—"}</p></div>`;
+      const vals = `시드 ${r.seed ?? "모름"} · ${r.w}×${r.h} · ${r.steps}스텝 · 강도 ${r.scale} · ${esc(r.model)} · ${esc(SAMPLERS[r.sampler] || "Euler Ancestral")}${r.noise ? ` · ${esc(r.noise)}` : ""}${r.cr ? ` · cfg rescale ${r.cr}` : ""}${r.vb ? " · Variety+" : ""}${r.refs?.length ? ` · ${r.mode === "precise" ? "정밀 참조" : "바이브"} ${r.refs.length}장(강도 ${r.refs.map((x) => x.s).join("·")}, 다시 뽑기에는 그림이 안 따라옴)` : ""}${r.i2i ? ` · 이미지→이미지(strength ${r.i2i.strength}, noise ${r.i2i.noise}, 바탕 그림은 안 따라옴)` : ""}`;
       return `
-        <a class="back" href="#/keep">‹ 보관함</a>
+        <nav class="knav"><a class="back" href="#/keep">‹ 보관함</a><span class="knum">${k + 1} / ${kept.length}</span>
+          <span class="kpn">${prev ? `<a href="#/keep/${prev.id}" aria-label="이전(더 새 그림)">‹</a>` : `<span aria-hidden="true">‹</span>`}${next ? `<a href="#/keep/${next.id}" aria-label="다음(더 옛 그림)">›</a>` : `<span aria-hidden="true">›</span>`}</span></nav>
         <figure class="result"><img id="full" alt="보관한 그림" width="${r.w}" height="${r.h}"></figure>
-        <div class="acts">
+        <p class="hint kwhen">${r.ext ? `받은 그림${r.name ? ` · ${esc(r.name)}` : ""} · ` : ""}${r.at ? new Date(r.at).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</p>
+        <div class="acts two">
           <button type="button" id="again">다시 뽑기</button>
           <button type="button" id="share" class="ghost">저장</button>
-          <button type="button" id="del" class="ghost">지우기</button>
-        </div>
-        <div class="acts two">
           <button type="button" id="keepI2i" class="ghost">이미지→이미지로</button>
           <button type="button" id="keepRef" class="ghost">참고 그림으로</button>
         </div>
-        ${r.ext ? `<p class="hint">받은 그림${r.name ? ` (${esc(r.name)})` : ""}. ${r.scene ? "그림 안에 든 생성 정보를 읽었음." : "생성 정보가 없는 그림."} ‘다시 뽑기’는 지금 화풍·작가를 같이 붙임.</p>` : ""}
-        <dl class="meta">
-          <dt>그림</dt><dd>${esc(r.scene) || "—"}</dd>
-          <dt>화풍·작가</dt><dd>${esc(r.style) || "—"}</dd>
-          <dt>빼는 것</dt><dd>${esc(r.negative) || "—"}</dd>
-          <dt>값</dt><dd>시드 ${r.seed ?? "모름"} · ${r.w}×${r.h} · ${r.steps}스텝 · 강도 ${r.scale} · ${esc(r.model)} · ${esc(SAMPLERS[r.sampler] || "Euler Ancestral")}${r.noise ? ` · ${esc(r.noise)}` : ""}${r.cr ? ` · cfg rescale ${r.cr}` : ""}${r.vb ? " · Variety+" : ""}${r.refs?.length ? ` · ${r.mode === "precise" ? "정밀 참조" : "바이브"} ${r.refs.length}장(강도 ${r.refs.map((x) => x.s).join("·")}, 다시 뽑기에는 그림이 안 따라옴)` : ""}${r.i2i ? ` · 이미지→이미지(strength ${r.i2i.strength}, noise ${r.i2i.noise}, 바탕 그림은 안 따라옴)` : ""}</dd>
-          ${r.chars?.length ? `<dt>인물별</dt><dd>${r.chars.map((c, i) => `${i + 1}. ${esc(c.text)}${Number.isInteger(c.pos) ? ` (칸 ${c.pos + 1})` : ""}`).join("<br>")}</dd>` : ""}
-        </dl>`;
+        ${r.ext ? `<p class="hint">${r.scene ? "그림 안에 든 생성 정보를 읽었음." : "생성 정보가 없는 그림."} ‘다시 뽑기’는 지금 화풍·작가를 같이 붙임.</p>` : ""}
+        ${field("scene", "그림", r.scene)}
+        ${r.chars?.length ? `<div class="kf"><div class="kfh"><span>인물별</span></div><p class="kfv">${r.chars.map((c, i) => `${i + 1}. ${esc(c.text)}${Number.isInteger(c.pos) ? ` (칸 ${c.pos + 1})` : ""}`).join("<br>")}</p></div>` : ""}
+        ${field("style", "화풍·작가", r.style)}
+        ${sec("kmore", "빼는 것 · 생성 값", `시드 ${r.seed ?? "모름"}`, `${field("negative", "빼는 것", r.negative)}<div class="kf"><div class="kfh"><span>값</span></div><p class="kfv">${vals}</p></div>`)}
+        <div class="kdel"><button type="button" id="del" class="ghost danger">이 그림 지우기</button></div>`;
     }
     const inBtn = `<input id="inFile" type="file" accept="image/*" multiple hidden><div class="acts2"><button type="button" class="ghost" id="inAdd">＋ 받은 그림 넣기</button></div><p class="hint">NovelAI PNG면 안에 든 프롬프트·시드를 읽어 ‘다시 뽑기’가 됨. 받은 그림은 취향 통계에 안 셈.</p>`;
     if (!kept.length) return `${inBtn}<p class="empty">아직 없음.<br>뽑은 그림에서 ‘♥ 보관’을 누르면 여기 모임.</p>`;
-    return `${inBtn}<div class="grid">${kept.map((r) =>
-      `<a href="#/keep/${r.id}" data-thumb="${r.id}" style="aspect-ratio:${r.w}/${r.h}" aria-label="시드 ${r.seed} 그림"></a>`).join("")}</div>`;
+    // 날짜별로 묶는다: 오늘 · 어제 · 11월 19일. 날짜가 없는 옛 항목은 맨 끝 ‘날짜 모름’.
+    const dayKey = (at) => { if (!at) return "날짜 모름"; const d0 = new Date(), d = new Date(at); const diff = Math.round((new Date(d0.toDateString()) - new Date(d.toDateString())) / 864e5); return diff === 0 ? "오늘" : diff === 1 ? "어제" : d.toLocaleDateString("ko-KR", { month: "long", day: "numeric" }); };
+    const groups = [];
+    for (const r of kept) { const g = dayKey(r.at); if (groups.at(-1)?.g === g) groups.at(-1).list.push(r); else groups.push({ g, list: [r] }); }
+    const addBtn = `<input id="inFile" type="file" accept="image/*" multiple hidden><div class="acts2 ktop"><button type="button" class="ghost sm" id="inAdd">＋ 받은 그림 넣기</button></div>`;
+    return `${addBtn}${groups.map(({ g, list }) => `<h2 class="kday">${esc(g)} <small>${list.length}장</small></h2><div class="kgrid">${list.map((r) =>
+      `<a href="#/keep/${r.id}" data-thumb="${r.id}" aria-label="${r.ext ? "받은 그림" : `시드 ${r.seed} 그림`}">${r.ext ? `<span class="kbadge">받음</span>` : ""}</a>`).join("")}</div>`).join("")}<p class="hint kfoot">NovelAI PNG면 안에 든 프롬프트·시드를 읽어 ‘다시 뽑기’가 됨. 받은 그림은 취향 통계에 안 셈.</p>`;
   },
 
   vault(id) {
@@ -2525,7 +2555,8 @@ function fillThumbs(seq) {
     if (!row) { a.textContent = "그림 없음"; return; }
     const u = URL.createObjectURL(row.thumb || row.full);
     thumbUrls.push(u);
-    a.innerHTML = `<img src="${u}" alt="" loading="lazy">`;
+    const badge = a.querySelector(".kbadge")?.outerHTML || "";
+    a.innerHTML = `<img src="${u}" alt="" loading="lazy">${badge}`;
   });
 }
 
@@ -2800,6 +2831,10 @@ function wire(name, arg, seq) {
       if (await toRefs(blob, label)) location.hash = "#/gen";
     });
     on("del", "click", () => { if (confirm("이 그림을 지움. 되돌릴 수 없음.")) removeKept(arg); });
+    document.querySelectorAll("[data-kcopy]").forEach((b) => b.addEventListener("click", async () => {
+      const v = String(rec?.[b.dataset.kcopy] || ""); if (!v) return;
+      try { await navigator.clipboard.writeText(v); b.textContent = "복사함"; } catch { b.textContent = "복사 못 함"; }
+    }));
   }
   if (name === "taste") {
     on("style", "input", (e) => { d.taste.style = e.target.value; store.persist(); });
