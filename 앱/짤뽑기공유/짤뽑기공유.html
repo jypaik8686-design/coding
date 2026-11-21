@@ -369,6 +369,11 @@ button.ghost.danger { color: var(--danger); background: var(--card); }
 .ktop { margin: 0 0 4px; justify-content: flex-end; }
 .kfoot { margin-top: 18px; }
 
+/* 2026-11-21 화풍·작가 탭: 접는 칸 묶음 */
+.tsecs { margin-top: 24px; display: grid; gap: 10px; }
+.tsecs .sec { scroll-margin-top: calc(var(--bar) + 12px); margin: 0; }
+.tsecs .secbody > .danger { width: 100%; margin-top: 10px; }
+
 </style>
 </head>
 <body>
@@ -1032,7 +1037,7 @@ let errMsg = "";
 async function generate() {
   const d = store.data, s = d.settings;
   errMsg = "";
-  if (!s.token.trim()) { errMsg = "토큰이 없음. ‘화풍·작가’ 탭 맨 아래에서 넣기."; return render(); }
+  if (!s.token.trim()) { errMsg = "토큰이 없음. ‘화풍·작가’ 탭 ‘연결’ 칸에서 넣기."; return render(); }
   if (!modelId(s)) { errMsg = "모델 이름이 비어 있음. ‘화풍·작가’ 탭에서 고르기."; return render(); }
   if (!sceneOf(d.draft.slots) && !tidy(d.taste.style)) { errMsg = "그릴 것이 비어 있음."; return render(); }
 
@@ -1261,7 +1266,8 @@ function tagStats() {
   for (const r of store.data.log) {
     if (r.verdict !== "keep" && r.verdict !== "drop") continue;
     if (r.ext) continue; // 밖에서 받은 그림은 내 취향이 아니므로 세지 않는다
-    const tags = new Set(`${r.scene},${r.style}`.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean));
+    // style이 없는 옛 기록에서 ‘undefined’가 태그로 세지던 것과, 취향이 아닌 인원수 태그(1girl·solo 등)를 뺀다 (2026-11-21)
+    const tags = new Set(`${r.scene || ""},${r.style || ""}`.split(",").map((t) => t.trim().toLowerCase()).filter((t) => t && !COUNT_RE.test(t)));
     for (const t of tags) {
       const c = m.get(t) || { keep: 0, drop: 0 };
       c[r.verdict]++;
@@ -1392,7 +1398,7 @@ async function ask(text, opts = {}) {
   const d = store.data, s = d.settings;
   askErr = "";
   const model = (s.aiModel === "custom" ? s.aiCustom : s.aiModel).trim().replace(/^models\//, "");
-  if (!s.aiKey.trim()) { askErr = "제미니 키가 없음. ‘화풍·작가’ 탭 맨 아래에서 넣기."; return render(); }
+  if (!s.aiKey.trim()) { askErr = "제미니 키가 없음. ‘화풍·작가’ 탭 ‘연결’ 칸에서 넣기."; return render(); }
   if (!model) { askErr = "제미니 모델 이름이 비어 있음. ‘화풍·작가’ 탭에서 고르기."; return render(); }
   // 보여 줄 그림: 사용자가 고른 사진이 있으면 그것, 없으면 체크했을 때의 방금 뽑은 그림. 한 번에 한 장.
   const fileImg = ui.attachFile?.blob || null;
@@ -1603,7 +1609,7 @@ function aiPanel() {
   const shown = [];
   if (last >= 0) { if (chat[last].role === "model" && last > 0) shown.push(last - 1); shown.push(last); }
   const body = `
-    ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/taste">‘화풍·작가’ 탭 맨 아래</a>에서 넣어야 대답함.</p>`}
+    ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/taste/conn">‘화풍·작가’ 탭 ‘연결’ 칸</a>에서 넣어야 대답함.</p>`}
     <div class="chips">
       <button type="button" class="chip" data-quick="pose">자세 3안</button>
       <button type="button" class="chip" data-quick="style">그림체 잡기</button>
@@ -2088,7 +2094,7 @@ const SCREENS = {
     const nChars = draft.chars.filter((c) => tidy(c.text)).length;
     const nRefs = refPlan(s) ? refs.filter((r) => r.on).length : 0;
     return `
-      ${s.token.trim() ? "" : `<p class="notice">NovelAI 토큰이 아직 없음. <a href="#/taste">‘화풍·작가’ 탭 맨 아래</a>에서 넣어야 뽑힘.</p>`}
+      ${s.token.trim() ? "" : `<p class="notice">NovelAI 토큰이 아직 없음. <a href="#/taste/conn">‘화풍·작가’ 탭 ‘연결’ 칸</a>에서 넣어야 뽑힘.</p>`}
       ${aiPanel()}
       ${slotsPanel()}
       <div class="seg seg4" role="group" aria-label="크기">
@@ -2131,7 +2137,7 @@ const SCREENS = {
     const { settings: s, chat } = store.data;
     const bubbles = chat.map((m, i) => msgHtml(m, i)).join("");
     return `
-      ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/taste">‘화풍·작가’ 탭 맨 아래</a>에서 넣어야 대답함.</p>`}
+      ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/taste/conn">‘화풍·작가’ 탭 ‘연결’ 칸</a>에서 넣어야 대답함.</p>`}
       ${chat.length ? "" : `<p class="empty">그리고 싶은 장면을 말로 던지면<br>NovelAI 태그 프롬프트로 바꿔 줌.<br><small>예: 비 오는 골목에서 우산 든 여자, 네온 불빛</small><br><small>자세·그림체·설정 추천과 그림 고치기는 ‘뽑기’ 탭 맨 위 AI 도우미에서도 됨.</small></p>`}
       <div class="chat">${bubbles}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>
       ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
@@ -2205,65 +2211,70 @@ const SCREENS = {
   },
 
   taste() {
+    // 2026-11-21 정리: 내 취향(화풍·작가, 자주 나온 태그)만 펼쳐 두고, 늘 붙는 것·연결·받은 것 넣기·데이터는 접는 칸으로.
     const { settings: s, taste, log } = store.data;
     const st = tagStats();
     const chip = (r, act) => `<button type="button" class="chip" ${act ? `data-add="${esc(r.tag)}"` : "disabled"}>${esc(r.tag)} <small>${r.keep}/${r.drop}</small></button>`;
+    const hasTok = !!s.token.trim(), hasKey = !!s.aiKey.trim();
+    if (ui.open.conn === undefined) ui.open.conn = !hasTok || !hasKey; // 처음 들어왔을 때 열쇠가 빠져 있으면 펼쳐 둔다
+    const modelName = s.model === "custom" ? (s.customModel || "직접 입력") : (MODELS[s.model]?.이름 || s.model);
+    const negN = tg(taste.negative) ? tg(taste.negative).split(", ").length : 0;
+    const keptN = log.filter((r) => r.verdict === "keep").length;
     return `
       <h2>화풍·작가</h2>
-      <p class="hint">뽑을 때마다 2순위로 들어가는 것(‘뽑기’ 탭의 2순위 칸과 같은 값). 화풍, 작가(artist:이름), 색감, 분위기 태그.</p>
+      <p class="hint">모든 그림에 2순위로 붙음. 뽑기 탭 2순위 칸과 같은 값.</p>
       <textarea id="style" rows="4" autocapitalize="off" autocomplete="off" spellcheck="false"
         placeholder="artist:이름, soft lighting, muted colors">${esc(taste.style)}</textarea>
-      <h2>기본 빼는 것</h2>
-      <p class="hint">모든 그림에 붙음(‘뽑기’ 탭의 ‘기본 빼는 것’ 칸과 같은 값). 이번 그림에만 뺄 것은 ‘뽑기’ 탭의 ‘이번 빼는 것’ 칸에 넣음. 프리셋·비서도 그 칸에 넣음.</p>
-      <textarea id="negative" rows="3" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(taste.negative)}</textarea>
-      <label class="line"><input type="checkbox" id="quality" ${s.quality ? "checked" : ""}> 품질 태그 자동으로 붙이기</label>
 
       <h2>고른 그림에 자주 나온 태그</h2>
       ${st.liked.length
-        ? `<p class="hint">누르면 화풍·작가에 들어감. 숫자는 보관/버림.</p><div class="chips">${st.liked.map((r) => chip(r, true)).join("")}</div>`
+        ? `<p class="hint">누르면 화풍·작가에 더함. 숫자는 보관/버림.</p><div class="chips">${st.liked.map((r) => chip(r, true)).join("")}</div>`
         : `<p class="hint">${st.judged < 4 ? `보관·버림을 ${st.judged}번 골랐음. 더 골라야 나옴.` : "아직 두 번 넘게 고른 새 태그가 없음."}</p>`}
       ${st.disliked.length ? `<h2>버린 그림에 자주 나온 태그</h2><div class="chips">${st.disliked.map((r) => chip(r, false)).join("")}</div>` : ""}
 
-      <h2>NovelAI</h2>
-      <label for="token">토큰</label>
-      <input id="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"
-        placeholder="pst-…" value="${esc(s.token)}">
-      <p class="hint">novelai.net에서 톱니바퀴 → Account → Get Persistent API Token. 이 폰에만 저장되고 NovelAI 서버로만 나감.</p>
-      <label for="model">모델</label>
-      <select id="model">
-        ${Object.entries(MODELS).map(([id, m]) => `<option value="${id}" ${s.model === id ? "selected" : ""}>${m.이름}</option>`).join("")}
-        <option value="custom" ${s.model === "custom" ? "selected" : ""}>직접 입력</option>
-      </select>
-      ${s.model === "custom" ? `<input id="customModel" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="nai-diffusion-…" value="${esc(s.customModel)}">` : ""}
-      <p class="hint">스텝·강도·샘플러 같은 생성 설정은 ‘뽑기’ 탭 맨 아래 ‘생성 설정’으로 옮김. 참고 그림(바이브·정밀 참조)과 인물별 프롬프트는 V4 이상, 정밀 참조는 V4.5 Full에서만 됨.</p>
-
-      <h2>비서 (제미니)</h2>
-      <label for="aiKey">제미니 API 키</label>
-      <input id="aiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"
-        placeholder="AIza…" value="${esc(s.aiKey)}">
-      <p class="hint">aistudio.google.com에서 발급. 이 폰에만 저장되고 구글 서버로만 나감. 비서에게 보낸 말과 화풍·작가가 구글로 감.</p>
-      <label for="aiModel">모델</label>
-      <select id="aiModel">
-        ${MODEL_CHOICES.map((m) => `<option value="${m}" ${s.aiModel === m ? "selected" : ""}>${m}</option>`).join("")}
-        <option value="custom" ${s.aiModel === "custom" ? "selected" : ""}>직접 입력</option>
-      </select>
-      ${s.aiModel === "custom" ? `<input id="aiCustom" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="gemini-…" value="${esc(s.aiCustom)}">` : ""}
-
-      <h2>받은 것 넣기</h2>
-      <input id="inFile" type="file" accept="image/*" multiple hidden>
-      <input id="jsonFile" type="file" accept="application/json,.json" hidden>
-      <div class="acts2">
-        <button type="button" class="ghost" id="inAdd">받은 그림 → 보관함</button>
-        <button type="button" class="ghost" id="jsonIn">내보낸 기록(JSON) 되살리기</button>
-      </div>
-      <label for="pasteIn">해체기에서 복사한 글 <span class="hint">카드·로어북 글을 비서가 늘 읽는 ‘내 조각’으로</span></label>
-      <textarea id="pasteIn" rows="4" autocomplete="off" spellcheck="false" placeholder="## 인물: 이름&#10;설명…"></textarea>
-      <div class="acts2"><button type="button" class="ghost" id="pasteGo">비서 내 조각으로 더하기</button></div>
-
-      <h2>데이터</h2>
-      <p class="hint">기록 ${log.length}건, 보관 ${log.filter((r) => r.verdict === "keep").length}장이 이 기기에만 있음.</p>
-      <button type="button" class="ghost" id="export">기록 내보내기 (JSON, 토큰·그림 제외)</button>
-      <button type="button" class="danger" id="reset">전부 지우기</button>`;
+      <div class="tsecs">
+      ${sec("talways", "늘 붙는 것", `품질 태그 ${s.quality ? "붙임" : "안 붙임"} · 기본 빼는 것 ${negN ? negN + "개" : "없음"}`, `
+        <label for="negative">기본 빼는 것 <span class="hint">모든 그림에 붙음</span></label>
+        <textarea id="negative" rows="3" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(taste.negative)}</textarea>
+        <label class="line"><input type="checkbox" id="quality" ${s.quality ? "checked" : ""}> 품질 태그 붙이기</label>
+        <p class="hint">이번 그림에만 뺄 것은 뽑기 탭 ‘빼는 것 이번 그림’ 칸에.</p>`)}
+      ${sec("conn", "연결", `NovelAI ${hasTok ? `✓ ${modelName}` : "✗ 토큰 없음"} · 제미니 ${hasKey ? "✓" : "✗ 키 없음"}`, `
+        <label for="token">NovelAI 토큰</label>
+        <input id="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"
+          placeholder="pst-…" value="${esc(s.token)}">
+        <p class="hint">novelai.net → 톱니바퀴 → Account → Get Persistent API Token. 이 폰에만 저장되고 NovelAI로만 나감.</p>
+        <label for="model">NovelAI 모델</label>
+        <select id="model">
+          ${Object.entries(MODELS).map(([id, m]) => `<option value="${id}" ${s.model === id ? "selected" : ""}>${m.이름}</option>`).join("")}
+          <option value="custom" ${s.model === "custom" ? "selected" : ""}>직접 입력</option>
+        </select>
+        ${s.model === "custom" ? `<input id="customModel" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="nai-diffusion-…" value="${esc(s.customModel)}">` : ""}
+        <p class="hint">참고 그림·인물별 프롬프트는 V4 이상, 정밀 참조는 V4.5 Full만. 스텝·샘플러는 뽑기 탭 ‘생성 설정’.</p>
+        <label for="aiKey">제미니 API 키 <span class="hint">비서용</span></label>
+        <input id="aiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"
+          placeholder="AIza…" value="${esc(s.aiKey)}">
+        <p class="hint">aistudio.google.com에서 발급. 이 폰에만 저장되고 구글로만 나감. 비서에게 보낸 말과 화풍·작가가 구글로 감.</p>
+        <label for="aiModel">비서 모델</label>
+        <select id="aiModel">
+          ${MODEL_CHOICES.map((m) => `<option value="${m}" ${s.aiModel === m ? "selected" : ""}>${m}</option>`).join("")}
+          <option value="custom" ${s.aiModel === "custom" ? "selected" : ""}>직접 입력</option>
+        </select>
+        ${s.aiModel === "custom" ? `<input id="aiCustom" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="gemini-…" value="${esc(s.aiCustom)}">` : ""}`)}
+      ${sec("tin", "받은 것 넣기", "그림 · 기록 · 해체기 글", `
+        <input id="inFile" type="file" accept="image/*" multiple hidden>
+        <input id="jsonFile" type="file" accept="application/json,.json" hidden>
+        <div class="acts2">
+          <button type="button" class="ghost" id="inAdd">받은 그림 → 보관함</button>
+          <button type="button" class="ghost" id="jsonIn">내보낸 기록(JSON) 되살리기</button>
+        </div>
+        <label for="pasteIn">해체기에서 복사한 글 <span class="hint">비서가 늘 읽는 ‘내 조각’으로</span></label>
+        <textarea id="pasteIn" rows="4" autocomplete="off" spellcheck="false" placeholder="## 인물: 이름&#10;설명…"></textarea>
+        <div class="acts2"><button type="button" class="ghost" id="pasteGo">비서 내 조각으로 더하기</button></div>`)}
+      ${sec("tdata", "데이터", `기록 ${log.length}건 · 보관 ${keptN}장`, `
+        <p class="hint">전부 이 기기에만 있음. 다른 폰으로 옮기려면 내보내기 → 거기서 되살리기.</p>
+        <button type="button" class="ghost" id="export">기록 내보내기 (JSON, 토큰·그림 제외)</button>
+        <button type="button" class="danger" id="reset">전부 지우기</button>`)}
+      </div>`;
   },
 };
 
@@ -2836,6 +2847,10 @@ function wire(name, arg, seq) {
     }));
   }
   if (name === "taste") {
+    if (arg === "conn") { // 다른 화면의 ‘토큰·키 없음’ 안내에서 왔을 때: 연결 칸을 펴고 그리로
+      const c = document.querySelector('details[data-sec="conn"]');
+      if (c) { c.open = true; ui.open.conn = true; c.scrollIntoView({ block: "start" }); }
+    }
     on("style", "input", (e) => { d.taste.style = e.target.value; store.persist(); });
     on("negative", "input", (e) => { d.taste.negative = e.target.value; store.persist(); });
     on("quality", "change", (e) => { d.settings.quality = e.target.checked; store.persist(); });

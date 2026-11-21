@@ -355,3 +355,8 @@ button.done { color: var(--dim); }
 button.ghost.danger { color: var(--danger); background: var(--card); }
 .ktop { margin: 0 0 4px; justify-content: flex-end; }
 .kfoot { margin-top: 18px; }
+
+/* 2026-11-21 화풍·작가 탭: 접는 칸 묶음 */
+.tsecs { margin-top: 24px; display: grid; gap: 10px; }
+.tsecs .sec { scroll-margin-top: calc(var(--bar) + 12px); margin: 0; }
+.tsecs .secbody > .danger { width: 100%; margin-top: 10px; }
