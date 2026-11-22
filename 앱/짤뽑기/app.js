@@ -239,7 +239,7 @@ let dbp = null;
 function db() {
   dbp ??= new Promise((ok, no) => {
     // 2: 참고 그림 창고 "ref". 3: 이미지→이미지 원본 창고 "src"(한 줄, id "main"). 4: 프리셋 그림 창고 "pimg". 옛 창고는 그대로 둔다.
-    // 5: 보관소 창고 "vault"(받은 프롬프트·파일을 펼친 블록).
+    // 5: 받은 자료 창고 "vault"(받은 프롬프트·파일을 펼친 블록).
     const q = indexedDB.open("짤뽑기", 5);
     q.onupgradeneeded = () => {
       for (const n of ["img", "ref", "src", "pimg", "vault"]) if (!q.result.objectStoreNames.contains(n)) q.result.createObjectStore(n, { keyPath: "id" });
@@ -457,13 +457,13 @@ async function autoRef(key, p) {
   const blob = await pimgBlob(key);
   if (blob) await toRefs(blob, name);
 }
-// ── 보관소 ─────────────────────────────────────────────────
+// ── 받은 자료 ─────────────────────────────────────────────────
 // 다른 곳에서 받은 프롬프트·파일을 파일 안의 블록 그대로 펼쳐 둔다. IndexedDB "vault" 한 줄:
 // { id, name, kind, label, size, at, src("파일"|"붙여 넣기"), blocks:[{title, kind, text, meta?}] }. 원본 파일은 안 남긴다.
 let vault = [], vaultErr = "";
 async function loadVault() {
   try { vault = ((await vaultAllRows()) || []).sort((a, b) => b.at - a.at); vaultErr = ""; }
-  catch (e) { vault = []; vaultErr = `보관소를 못 읽음 (${e?.name || e}).`; }
+  catch (e) { vault = []; vaultErr = `받은 자료를 못 읽음 (${e?.name || e}).`; }
 }
 async function vaultAdd(node, src) {
   const rows = vaultItems(node).map((it) => ({ id: crypto.randomUUID(), at: Date.now(), src, ...it }));
@@ -518,7 +518,7 @@ async function toRefs(blob, name) {
 async function failText(res) {
   let said = "";
   try { const t = await res.text(); said = (JSON.parse(t).message ?? t).toString().slice(0, 200); } catch { /* 본문 없음 */ }
-  const hint = res.status === 401 ? "토큰이 틀렸거나 만료됨. ‘화풍·작가’ 탭에서 다시 넣기."
+  const hint = res.status === 401 ? "토큰이 틀렸거나 만료됨. 설정(오른쪽 위 톱니바퀴)에서 다시 넣기."
     : res.status === 429 ? "요청이 너무 잦거나 다른 생성이 돌고 있음. 잠시 뒤 직접 다시 누르기."
     : "";
   return `${hint} (서버 ${res.status}${said ? `: ${said}` : ""})`.trim();
@@ -705,8 +705,8 @@ let errMsg = "";
 async function generate() {
   const d = store.data, s = d.settings;
   errMsg = "";
-  if (!s.token.trim()) { errMsg = "토큰이 없음. ‘화풍·작가’ 탭 ‘연결’ 칸에서 넣기."; return render(); }
-  if (!modelId(s)) { errMsg = "모델 이름이 비어 있음. ‘화풍·작가’ 탭에서 고르기."; return render(); }
+  if (!s.token.trim()) { errMsg = "토큰이 없음. 설정(오른쪽 위 톱니바퀴)에서 넣기."; return render(); }
+  if (!modelId(s)) { errMsg = "모델 이름이 비어 있음. 설정(오른쪽 위 톱니바퀴)에서 고르기."; return render(); }
   if (!sceneOf(d.draft.slots) && !tidy(d.taste.style)) { errMsg = "그릴 것이 비어 있음."; return render(); }
 
   const [w, h] = sizeOf(s);
@@ -903,7 +903,7 @@ function naiMeta(u8) {
   return { prompt, uc, seed: Number.isInteger(num(c.seed)) ? num(c.seed) : null, steps: num(c.steps), scale: num(c.scale), sampler: c.sampler, noise: c.noise_schedule, cr: num(c.cfg_rescale), model: String(t.Source || "").slice(0, 60) };
 }
 // ── 파일을 바로 넣기 (2026-11-21, 사용자: JSON 같은 파일을 바로 못 넣어 불편) ─────────
-// 파일 하나에서 이번 그림에 넣을 것을 읽는다: { scene, neg, chars[], set{} }. 못 읽으면 null(보관소로 보낸다).
+// 파일 하나에서 이번 그림에 넣을 것을 읽는다: { scene, neg, chars[], set{} }. 못 읽으면 null(받은 자료로 보낸다).
 // 읽는 것: NovelAI PNG(안에 든 생성 정보), JSON(prompt·input / uc·negative_prompt / slots / parameters / v4 캡션), 글(‘Negative prompt:’ 줄로 나눔).
 async function readForSlots(name, u8) {
   const out = { scene: "", neg: "", chars: [], set: {} };
@@ -921,7 +921,7 @@ async function readForSlots(name, u8) {
   }
   if (u8[0] === 0x89 && u8[1] === 0x50) return null; // 생성 정보가 없는 PNG
   let text;
-  try { text = new TextDecoder("utf-8", { fatal: true }).decode(u8); } catch { return null; } // 글이 아닌 파일(zip·카드 등)은 보관소가 펼친다
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(u8); } catch { return null; } // 글이 아닌 파일(zip·카드 등)은 받은 자료가 펼친다
   if (/^\s*[{[]/.test(text)) {
     let j;
     try { j = JSON.parse(text); } catch { j = null; }
@@ -945,7 +945,7 @@ async function readForSlots(name, u8) {
   if (m) out.neg = m[2].split(/\n\s*(?:steps|seed|sampler)\s*:/i)[0].trim();
   return out;
 }
-// 고른 파일을 이번 그림 칸에 바로 넣는다. 못 읽는 꼴이면 보관소에 펼쳐 그 화면으로 간다.
+// 고른 파일을 이번 그림 칸에 바로 넣는다. 못 읽는 꼴이면 받은 자료에 펼쳐 그 화면으로 간다.
 async function fileToSlots(f) {
   const d = store.data, s = d.settings;
   let u8;
@@ -958,7 +958,7 @@ async function fileToSlots(f) {
     try {
       const rows = await vaultAdd(await parseFile(f.name, u8), "파일");
       if (!rows.length) return toast(`‘${f.name}’에서 넣을 글을 못 찾음`);
-      toast(`프롬프트 한 덩어리가 아니라서 보관소에 펼침 (${rows.reduce((a, r) => a + r.blocks.length, 0)}블록). 넣을 블록을 고르기`);
+      toast(`프롬프트 한 덩어리가 아니라서 받은 자료에 펼침 (${rows.reduce((a, r) => a + r.blocks.length, 0)}블록). 넣을 블록을 고르기`);
       location.hash = `#/vault/${rows[0].id}`;
     } catch (e) { toast(`‘${f.name}’을 못 읽음 (${e?.message || e})`); }
     return;
@@ -979,7 +979,7 @@ async function fileToSlots(f) {
   toast(`‘${f.name.slice(0, 24)}’에서 넣음: ${done.join(" · ")}`, () => restoreBlocks(before));
   store.save();
 }
-// 비서에게 붙일 파일을 글로 바꾼다. 보관소와 같은 펼치기를 쓴다(JSON·글·카드·NovelAI PNG·zip).
+// 비서에게 붙일 파일을 글로 바꾼다. 받은 자료와 같은 펼치기를 쓴다(JSON·글·카드·NovelAI PNG·zip).
 const DOC_MAX = 40000;
 async function fileToDoc(f) {
   const u8 = new Uint8Array(await f.arrayBuffer());
@@ -1209,9 +1209,9 @@ function fullPersona() {
 async function geminiFail(res) {
   let said = "";
   try { said = (JSON.parse(await res.text()).error?.message ?? "").slice(0, 200); } catch { /* 본문 없음 */ }
-  const hint = res.status === 400 && /api key/i.test(said) ? "키가 틀림. ‘화풍·작가’ 탭에서 다시 넣기."
+  const hint = res.status === 400 && /api key/i.test(said) ? "키가 틀림. 설정(오른쪽 위 톱니바퀴)에서 다시 넣기."
     : res.status === 403 ? "키 권한이 없거나 막힘."
-    : res.status === 404 ? "모델 이름이 없음. ‘화풍·작가’ 탭에서 모델 고르기."
+    : res.status === 404 ? "모델 이름이 없음. 설정(오른쪽 위 톱니바퀴)에서 모델 고르기."
     : res.status === 429 ? "한도 초과. 잠시 뒤 직접 다시 보내기."
     : "";
   return `${hint} (제미니 ${res.status}${said ? `: ${said}` : ""})`.trim();
@@ -1222,8 +1222,8 @@ async function ask(text, opts = {}) {
   const d = store.data, s = d.settings;
   askErr = "";
   const model = (s.aiModel === "custom" ? s.aiCustom : s.aiModel).trim().replace(/^models\//, "");
-  if (!s.aiKey.trim()) { askErr = "제미니 키가 없음. ‘화풍·작가’ 탭 ‘연결’ 칸에서 넣기."; return render(); }
-  if (!model) { askErr = "제미니 모델 이름이 비어 있음. ‘화풍·작가’ 탭에서 고르기."; return render(); }
+  if (!s.aiKey.trim()) { askErr = "제미니 키가 없음. 설정(오른쪽 위 톱니바퀴)에서 넣기."; return render(); }
+  if (!model) { askErr = "제미니 모델 이름이 비어 있음. 설정(오른쪽 위 톱니바퀴)에서 고르기."; return render(); }
   // 보여 줄 그림: 사용자가 고른 사진이 있으면 그것, 없으면 체크했을 때의 방금 뽑은 그림. 한 번에 한 장.
   const fileImg = ui.attachFile?.blob || null;
   const nowImg = !fileImg && opts.image && now ? now.blob : null;
@@ -1354,7 +1354,7 @@ function parseSceneBlock(v) {
 }
 
 // kind, 블록 글을 칸에 넣는다. 돌려주는 것은 사용자에게 알릴 한 줄 (null이면 아무것도 안 함)
-// from: 블록이 나온 곳(비서 답·보관소 항목)의 표시. 인물 칸에 남겨 두고, 다른 곳에서 온 새 그림·새 인물이 들어오면 옛 인물 칸을 뺀다 (2026-11-21, 사용자 요청).
+// from: 블록이 나온 곳(비서 답·받은 자료 항목)의 표시. 인물 칸에 남겨 두고, 다른 곳에서 온 새 그림·새 인물이 들어오면 옛 인물 칸을 뺀다 (2026-11-21, 사용자 요청).
 function applyBlock(kind, v, from = "") {
   const d = store.data;
   const dropOld = () => { const n = d.draft.chars.length; d.draft.chars = d.draft.chars.filter((c) => from && c.from === from); return n - d.draft.chars.length; };
@@ -1470,7 +1470,7 @@ function attachBar() {
     <div class="attach">
       ${now
         ? `<label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> 방금 뽑은 그림도 같이 보여 주기 <span class="hint">체크하면 이 그림이 구글로 감</span></label>`
-        : `<p class="hint">방금 뽑은 그림이 없어서 ‘방금 그림 보여 주기’는 꺼져 있음. 새로 고쳤거나 버린 뒤에는 없어짐. 뽑으면 체크칸이 생김.</p>`}
+        : `<p class="hint">그림을 뽑으면 ‘방금 그림 보여 주기’ 체크칸이 생김.</p>`}
       ${f ? `<div class="srcrow"><img src="${f.url}" alt="고른 사진"><div><span class="hint">${esc(f.name)} — 다음 질문에 한 번 보냄 (구글로 감)</span><button type="button" class="ghost sm" id="askUnpick">빼기</button></div></div>` : ""}
       ${aiRefs().length ? `<label class="line"><input type="checkbox" id="withRefs" ${ui.withRefs ? "checked" : ""}> 참고 그림 서랍도 보여 주기 <span class="hint">비서용으로 둔 ${Math.min(aiRefs().length, 12)}장이 작게 줄어 구글로 감. 안 보여 줘도 이름은 비서가 앎${aiRefs().length < refs.length ? `. ${refs.length - aiRefs().length}장은 비서에게 안 감` : ""}</span></label>` : refs.length ? `<p class="hint">서랍 그림 ${refs.length}장이 전부 ‘비서가 못 씀’이라 비서는 참고 그림을 고르지 못함.</p>` : ""}
       ${ui.attachDoc ? `<div class="docrow"><span class="hint">파일 ‘${esc(ui.attachDoc.name)}’ — ${ui.attachDoc.len.toLocaleString()}자${ui.attachDoc.cut ? `, 앞 ${DOC_MAX.toLocaleString()}자만` : ""}. 다음 질문에 한 번 보냄 (구글로 감)</span><button type="button" class="ghost sm" id="askUndoc">빼기</button></div>` : ""}
@@ -1497,7 +1497,7 @@ function aiInner() {
   const shown = [];
   if (last >= 0) { if (chat[last].role === "model" && last > 0) shown.push(last - 1); shown.push(last); }
   const body = `
-    ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/taste/conn">‘화풍·작가’ 탭 ‘연결’ 칸</a>에서 넣어야 대답함.</p>`}
+    ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/set">설정(오른쪽 위 톱니바퀴)</a>에서 넣어야 대답함.</p>`}
     ${quickChips()}
     ${shown.length ? `<div class="chat">${shown.map((i) => msgHtml(chat[i], i)).join("")}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>` : (asking ? `<div class="msg ai dim">생각 중…</div>` : "")}
     ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
@@ -1530,7 +1530,7 @@ function charsInner() {
 function refInner() {
   const s = store.data.settings;
   if (!supportsVibe(s)) {
-    return `<p class="hint">참고 그림은 V4.5 Full에서만 됨. V5는 서버가 거절함(2026-11-17 확인). ${refs.length ? `붙여 둔 ${refs.length}장은 V5에서는 안 보냄. ` : ""}‘화풍·작가’ 탭에서 모델을 V4.5 Full로 바꾸면 쓸 수 있음.</p>`;
+    return `<p class="hint">참고 그림은 V4.5 Full에서만 됨. V5는 서버가 거절함(2026-11-17 확인). ${refs.length ? `붙여 둔 ${refs.length}장은 V5에서는 안 보냄. ` : ""}설정(오른쪽 위 톱니바퀴)에서 모델을 V4.5 Full로 바꾸면 쓸 수 있음.</p>`;
   }
   const mode = s.refMode === "precise" ? "precise" : "vibe";
   const key = (r) => `${modelId(s)}|${r.info}`;
@@ -2055,12 +2055,12 @@ function vaultIntake() {
 }
 function vaultItemView(id) {
   const v = vault.find((x) => x.id === id);
-  if (!v) return `<p class="empty">보관소에 없음.<br><a href="#/vault">보관소로</a></p>`;
+  if (!v) return `<p class="empty">받은 자료에 없음.<br><a href="#/vault">받은 자료로</a></p>`;
   return `
-    <a class="back" href="#/vault">‹ 보관소</a>
+    <a class="back" href="#/vault">‹ 받은 자료</a>
     <h2>${esc(v.name)}</h2>
     <p class="hint">${esc(v.label)} · ${esc(v.src)} · ${new Date(v.at).toLocaleDateString("ko-KR")} · ${v.blocks.length}블록</p>
-    <div class="acts2"><button type="button" class="ghost" id="vCopyAll">블록 전부 복사</button><button type="button" class="ghost" id="vDel">보관소에서 지우기</button></div>
+    <div class="acts2"><button type="button" class="ghost" id="vCopyAll">블록 전부 복사</button><button type="button" class="ghost" id="vDel">받은 자료에서 지우기</button></div>
     <input id="bq" type="search" placeholder="블록에서 찾기" value="${esc(ui.bq)}" autocomplete="off">
     <div id="blist">${blockList(v)}</div>`;
 }
@@ -2103,7 +2103,7 @@ const SCREENS = {
     const nRefs = refPlan(s) ? refs.filter((r) => r.on).length : 0;
     // 2026-11-21 재배치: 그림 자리가 맨 위, 뽑기 버튼은 아래에 떠 있음, 1~4순위는 접힘 (짤뽑기·짤뽑기공유 같이 고침)
     return `
-      ${s.token.trim() ? "" : `<p class="notice">NovelAI 토큰이 아직 없음. <a href="#/taste/conn">‘화풍·작가’ 탭 ‘연결’ 칸</a>에서 넣어야 뽑힘.</p>`}
+      ${s.token.trim() ? "" : `<p class="notice">NovelAI 토큰이 아직 없음. <a href="#/set">설정(오른쪽 위 톱니바퀴)</a>에서 넣어야 뽑힘.</p>`}
       ${now ? `
         <figure class="result">
           <img src="${now.url}" alt="방금 뽑은 그림" width="${now.rec.w}" height="${now.rec.h}">
@@ -2148,7 +2148,7 @@ const SCREENS = {
     const { settings: s, chat } = store.data;
     const bubbles = chat.map((m, i) => msgHtml(m, i)).join("");
     return `
-      ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/taste/conn">‘화풍·작가’ 탭 ‘연결’ 칸</a>에서 넣어야 대답함.</p>`}
+      ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/set">설정(오른쪽 위 톱니바퀴)</a>에서 넣어야 대답함.</p>`}
       ${chat.length ? "" : `<p class="empty">그리고 싶은 장면을 말로 던지면<br>NovelAI 태그 프롬프트로 바꿔 줌.<br><small>예: 금발 정장 입은 중국식 미인, 로우앵글로 내려다보는 오만한 느낌</small><br><small>자세·그림체·설정 추천과 그림 고치기는 ‘뽑기’ 탭 AI 도우미에서도 됨.</small></p>`}
       <div class="chat">${bubbles}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>
       ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
@@ -2162,7 +2162,7 @@ const SCREENS = {
       ${chat.length ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
       ${dictPanel()}
       ${personaEditor()}
-      <label for="aiModelQ">대답하는 모델 <span class="hint">${s.aiModel === "custom" ? "직접 입력한 이름은 ‘화풍·작가’ 탭에서 고침" : ""}</span></label>
+      <label for="aiModelQ">대답하는 모델 <span class="hint">${s.aiModel === "custom" ? "직접 입력한 이름은 설정(오른쪽 위 톱니바퀴)에서 고침" : ""}</span></label>
       <select id="aiModelQ">${MODEL_CHOICES.map((m) => `<option value="${m}" ${s.aiModel === m ? "selected" : ""}>${m === "gemini-4-argon" ? "gemini-4-argon (아르곤)" : m}</option>`).join("")}<option value="custom" ${s.aiModel === "custom" ? "selected" : ""}>직접 입력${s.aiModel === "custom" && s.aiCustom ? ` (${esc(s.aiCustom)})` : ""}</option></select>
       <p class="hint">대답은 제미니(${esc(s.aiModel === "custom" ? s.aiCustom : s.aiModel)})가 하고, 태그는 같이 실린 단부루 사전에서 맞춰 봄. 제미니 말은 틀릴 수 있어서 넣은 뒤 직접 한 번 읽기.</p>`;
   },
@@ -2216,7 +2216,7 @@ const SCREENS = {
     return `
       ${vaultErr ? `<p class="error">${esc(vaultErr)}</p>` : ""}
       ${vault.length ? sec("vin", "＋ 받은 것 넣기", "파일 · 붙여 넣기", vaultIntake()) : vaultIntake()}
-      <h2>보관소 <small>${vault.length}개</small></h2>
+      <h2>받은 자료 <small>${vault.length}개</small></h2>
       ${vault.length ? `<input id="vq" type="search" placeholder="이름·블록 글에서 찾기" value="${esc(ui.vq)}" autocomplete="off">` : ""}
       <div id="vlist">${vaultList(list)}</div>`;
   },
@@ -2226,11 +2226,7 @@ const SCREENS = {
     const { settings: s, taste, log } = store.data;
     const st = tagStats();
     const chip = (r, act) => `<button type="button" class="chip" ${act ? `data-add="${esc(r.tag)}"` : "disabled"}>${esc(r.tag)} <small>${r.keep}/${r.drop}</small></button>`;
-    const hasTok = !!s.token.trim(), hasKey = !!s.aiKey.trim();
-    if (ui.open.conn === undefined) ui.open.conn = !hasTok || !hasKey; // 처음 들어왔을 때 열쇠가 빠져 있으면 펼쳐 둔다
-    const modelName = s.model === "custom" ? (s.customModel || "직접 입력") : (MODELS[s.model]?.이름 || s.model);
     const negN = tg(taste.negative) ? tg(taste.negative).split(", ").length : 0;
-    const keptN = log.filter((r) => r.verdict === "keep").length;
     return `
       <h2>화풍·작가</h2>
       <p class="hint">모든 그림에 2순위로 붙음. 뽑기 탭 2순위 칸과 같은 값.</p>
@@ -2249,7 +2245,17 @@ const SCREENS = {
         <textarea id="negative" rows="3" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(taste.negative)}</textarea>
         <label class="line"><input type="checkbox" id="quality" ${s.quality ? "checked" : ""}> 품질 태그 붙이기</label>
         <p class="hint">이번 그림에만 뺄 것은 뽑기 탭 ‘빼는 것 이번 그림’ 칸에.</p>`)}
-      ${sec("conn", "연결", `NovelAI ${hasTok ? `✓ ${modelName}` : "✗ 토큰 없음"} · 제미니 ${hasKey ? "✓" : "✗ 키 없음"}`, `
+      </div>`;
+  },
+
+  set() {
+    // 2026-11-22: 연결·가져오기·데이터를 ‘화풍·작가’ 탭에서 떼어 설정 화면으로. 제목 줄 오른쪽 톱니바퀴로 들어온다.
+    const { settings: s, log } = store.data;
+    const hasTok = !!s.token.trim(), hasKey = !!s.aiKey.trim();
+    const keptN = log.filter((r) => r.verdict === "keep").length;
+    return `
+      <h2>연결</h2>
+      <p class="hint">NovelAI ${hasTok ? "✓ 토큰 있음" : "✗ 토큰 없음"} · 제미니 ${hasKey ? "✓ 키 있음" : "✗ 키 없음"}</p>
         <label for="token">NovelAI 토큰</label>
         <input id="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"
           placeholder="pst-…" value="${esc(s.token)}">
@@ -2270,8 +2276,9 @@ const SCREENS = {
           ${MODEL_CHOICES.map((m) => `<option value="${m}" ${s.aiModel === m ? "selected" : ""}>${m}</option>`).join("")}
           <option value="custom" ${s.aiModel === "custom" ? "selected" : ""}>직접 입력</option>
         </select>
-        ${s.aiModel === "custom" ? `<input id="aiCustom" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="gemini-…" value="${esc(s.aiCustom)}">` : ""}`)}
-      ${sec("tin", "받은 것 넣기", "그림 · 기록 · 해체기 글", `
+        ${s.aiModel === "custom" ? `<input id="aiCustom" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="gemini-…" value="${esc(s.aiCustom)}">` : ""}
+      <div class="tsecs">
+      ${sec("tin", "가져오기", "그림 · 기록 · 해체기 글", `
         <input id="inFile" type="file" accept="image/*" multiple hidden>
         <input id="jsonFile" type="file" accept="application/json,.json" hidden>
         <div class="acts2">
@@ -2290,18 +2297,19 @@ const SCREENS = {
 };
 
 // ── 라우터 ──────────────────────────────────────────────────
-const TITLES = { gen: "짤뽑기", ai: "비서", keep: "보관함", vault: "보관소", taste: "화풍·작가" };
+const TITLES = { gen: "짤뽑기", ai: "비서", keep: "보관함", vault: "받은 자료", taste: "화풍·작가", set: "설정" };
 const route = () => (location.hash.replace(/^#\/?/, "") || "gen").split("/");
 let thumbUrls = [];
 let renderSeq = 0;
 
 function render() {
   const [n, arg] = route();
+  if (n === "taste" && arg === "conn") { location.replace("#/set"); return; } // 옛 주소
   const name = SCREENS[n] ? n : "gen";
   const seq = ++renderSeq;
   thumbUrls.forEach((u) => URL.revokeObjectURL(u));
   thumbUrls = [];
-  document.getElementById("screen").innerHTML = (saveFail ? `<p class="error" role="alert">저장이 안 되고 있음. 이 기기 저장 공간이 참. 지금 고친 것은 새로 고치면 사라짐. ‘화풍·작가’ 탭에서 기록을 내보낸 뒤 오래된 대화나 기록을 지우기.</p>` : "") + SCREENS[name](arg);
+  document.getElementById("screen").innerHTML = (saveFail ? `<p class="error" role="alert">저장이 안 되고 있음. 이 기기 저장 공간이 참. 지금 고친 것은 새로 고치면 사라짐. 설정(오른쪽 위 톱니바퀴)에서 기록을 내보낸 뒤 오래된 대화나 기록을 지우기.</p>` : "") + SCREENS[name](arg);
   document.getElementById("title").textContent = TITLES[name];
   const kept = store.data.log.filter((r) => r.verdict === "keep").length;
   document.getElementById("count").textContent = name === "keep" && kept ? `${kept}장` : "";
@@ -2309,6 +2317,7 @@ function render() {
     if (a.dataset.tab === name) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   });
+  document.querySelector(".gear")?.toggleAttribute("aria-current", name === "set");
   wire(name, arg, seq);
 }
 
@@ -2541,7 +2550,7 @@ function wireVault(id) {
         if (rows.length) n += rows.length; else none.push(f.name);
       } catch (err) { none.push(`${f.name}(${err?.message || err})`); }
     }
-    toast(`보관소에 ${n}개 넣음${none.length ? ` · 펼칠 블록이 없음: ${none.slice(0, 3).join(", ")}` : ""}`);
+    toast(`받은 자료에 ${n}개 넣음${none.length ? ` · 펼칠 블록이 없음: ${none.slice(0, 3).join(", ")}` : ""}`);
     render();
   });
   on("vPaste", "click", async () => {
@@ -2578,7 +2587,7 @@ function wireVault(id) {
     try { await navigator.clipboard.writeText(all); toast(`블록 ${v.blocks.length}개를 복사함`); } catch { toast("복사 못 함"); }
   });
   on("vDel", "click", async () => {
-    if (!confirm("보관소에서 지움. 되돌릴 수 없음.")) return;
+    if (!confirm("받은 자료에서 지움. 되돌릴 수 없음.")) return;
     await vaultDelRow(v.id).catch(() => {});
     await loadVault();
     location.hash = "#/vault";
@@ -2849,7 +2858,7 @@ function wire(name, arg, seq) {
   }
   if (name === "ai") { wireAsk(); wirePersona(); wireDict(); on("aiModelQ", "change", (e) => { d.settings.aiModel = e.target.value; store.save(); }); }
   if (name === "vault") { wireVault(arg); document.querySelectorAll("details[data-sec]").forEach((el) => el.addEventListener("toggle", () => { ui.open[el.dataset.sec] = el.open; })); }
-  if (name === "keep" || name === "taste") {
+  if (name === "keep" || name === "set") {
     on("inAdd", "click", () => $("inFile").click());
     on("inFile", "change", (e) => { const f = [...e.target.files]; e.target.value = ""; if (f.length) importImages(f); });
   }
@@ -2956,11 +2965,7 @@ function wire(name, arg, seq) {
       try { await navigator.clipboard.writeText(v); b.textContent = "복사함"; } catch { b.textContent = "복사 못 함"; }
     }));
   }
-  if (name === "taste") {
-    if (arg === "conn") { // 다른 화면의 ‘토큰·키 없음’ 안내에서 왔을 때: 연결 칸을 펴고 그리로
-      const c = document.querySelector('details[data-sec="conn"]');
-      if (c) { c.open = true; ui.open.conn = true; c.scrollIntoView({ block: "start" }); }
-    }
+  if (name === "taste" || name === "set") {
     on("style", "input", (e) => { d.taste.style = e.target.value; store.persist(); });
     on("negative", "input", (e) => { d.taste.negative = e.target.value; store.persist(); });
     on("quality", "change", (e) => { d.settings.quality = e.target.checked; store.persist(); });
@@ -2986,7 +2991,7 @@ function wire(name, arg, seq) {
     on("jsonFile", "change", async (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) importJson(await f.text()); });
     on("pasteGo", "click", () => pasteToPiece($("pasteIn")?.value));
     on("reset", "click", async () => {
-      if (!confirm("화풍·작가, 빼는 것, 기록, 보관한 그림, 참고 그림, 프리셋 그림, 보관소, 대화, 토큰과 키를 전부 지움. 되돌릴 수 없음.")) return;
+      if (!confirm("화풍·작가, 빼는 것, 기록, 보관한 그림, 참고 그림, 프리셋 그림, 받은 자료, 대화, 토큰과 키를 전부 지움. 되돌릴 수 없음.")) return;
       await imgClear().catch(() => {});
       await refClear().catch(() => {});
       await srcClear().catch(() => {});
