@@ -156,6 +156,18 @@ function normPresetEdits(raw) {
 }
 
 // 옛 데이터·깨진 값이 와도 항상 같은 꼴로 돌려준다. 항목 안쪽 칸은 펼치기가 메워 주지 않아서 여기서 하나씩 본다.
+// 기록 한 건을 믿을 수 있는 꼴로. id는 글자·숫자·-·_만, 숫자 칸은 숫자만 남긴다 (남이 준 JSON을 되살릴 때 화면 글에 태그가 섞이지 않게).
+// (정규식은 함수로 둔다: load()가 이 줄보다 먼저 돌아서 const로 두면 아직 없는 이름을 읽게 된다)
+function safeId(v) { return /^[\w-]{1,80}$/.test(String(v ?? "")); }
+function safeRec(r) {
+  if (!r || typeof r !== "object" || !safeId(r.id)) return null;
+  const o = { ...r, id: String(r.id) };
+  for (const k of ["w", "h", "seed", "steps", "scale", "cr", "at"]) if (o[k] != null && !(typeof o[k] === "number" && Number.isFinite(o[k]))) { const n = Number(o[k]); if (typeof o[k] === "string" && o[k].trim() !== "" && Number.isFinite(n)) o[k] = n; else delete o[k]; }
+  if (o.refs != null) o.refs = Array.isArray(o.refs) ? o.refs.filter((x) => x && typeof x === "object").map((x) => ({ ...x, s: Number.isFinite(Number(x.s)) ? Number(x.s) : 0 })) : undefined;
+  if (o.i2i != null) o.i2i = typeof o.i2i === "object" ? { ...o.i2i, strength: Number(o.i2i.strength) || 0, noise: Number(o.i2i.noise) || 0 } : undefined;
+  if (o.chars != null) o.chars = Array.isArray(o.chars) ? o.chars.filter((c) => c && typeof c.text === "string") : undefined;
+  return o;
+}
 function normPersona(raw) {
   const out = { sections: {}, extra: [], auto: { state: true, cand: true } };
   if (!raw || typeof raw !== "object") return out;
@@ -167,7 +179,7 @@ function normPersona(raw) {
     if (o.on === false) e.on = false;
     if (Object.keys(e).length) out.sections[p.id] = e;
   }
-  if (Array.isArray(raw.extra)) out.extra = raw.extra.filter((e) => e && e.id && typeof e.text === "string").map((e) => ({ id: String(e.id), name: String(e.name || "").slice(0, 30), text: e.text, on: e.on !== false })).slice(0, 20);
+  if (Array.isArray(raw.extra)) out.extra = raw.extra.filter((e) => e && safeId(e.id) && typeof e.text === "string").map((e) => ({ id: String(e.id), name: String(e.name || "").slice(0, 30), text: e.text, on: e.on !== false })).slice(0, 20);
   out.auto = { state: raw.auto?.state !== false, cand: raw.auto?.cand !== false };
   return out;
 }
@@ -214,7 +226,7 @@ function normAll(raw) {
       presets: normPresets(raw.presets),
       presetEdits: normPresetEdits(raw.presetEdits),
       userDict: Array.isArray(raw.userDict) ? normDict(raw.userDict) : starterDict(),
-      log: Array.isArray(raw.log) ? raw.log.filter((r) => r && r.id) : [],
+      log: Array.isArray(raw.log) ? raw.log.map(safeRec).filter(Boolean) : [],
       chat: Array.isArray(raw.chat) ? raw.chat.filter((m) => m && (m.role === "user" || m.role === "model") && typeof m.text === "string") : [],
       persona: normPersona(raw.persona),
     };
@@ -727,7 +739,10 @@ async function generate() {
       for (const r of used) ex.vibes.push(await encodeRef(r, rec.model, s.token.trim(), busy.signal)); // 한 장씩, 자동 재시도 없음
     } else if (plan === "precise") {
       ex.precise = [];
-      for (const r of used) ex.precise.push(await padPrecise(r.full));
+      for (const r of used) {
+        if (r.encOnly) throw new Error(`‘${r.name}’은 원본 그림이 없는 바이브 파일이라 정밀 참조로 못 씀. 참고 그림에서 끄거나 방식을 바이브로 바꾸기.`);
+        ex.precise.push(await padPrecise(r.full));
+      }
     }
     if (useI2i) ex.i2i = await fitCover(src.full, w, h);
     phase = "";
@@ -777,13 +792,14 @@ function trimLog() {
 
 async function judge(verdict) {
   if (!now) return;
-  const rec = store.data.log.find((r) => r.id === now.rec.id);
+  const cur = now; // 저장을 기다리는 사이 다른 그림으로 바뀌어도 누른 그림에만 표시한다
+  const rec = store.data.log.find((r) => r.id === cur.rec.id);
   if (!rec) return;
   if (verdict === "keep") {
-    try { await imgPut({ id: rec.id, full: now.blob, thumb: await thumbOf(now.blob) }); }
+    try { await imgPut({ id: rec.id, full: cur.blob, thumb: await thumbOf(cur.blob) }); }
     catch (e) { errMsg = `보관 실패: 이 기기 저장 공간이 모자라거나 막혀 있음 (${e?.name || e}). ‘저장’으로 사진첩에 먼저 빼 두기.`; return render(); }
     rec.verdict = "keep";
-    now.rec.verdict = "keep";
+    cur.rec.verdict = "keep";
   } else {
     // 버림은 완전히 버리는 것: 목록에서 빼고, 보관한 그림이었다면 보관함 저장분도 지운다. 실수를 위해 9초 동안만 알림의 ‘되돌리기’로 살릴 수 있다.
     const entry = now, before = rec.verdict, idx = hist.indexOf(entry);
@@ -796,7 +812,7 @@ async function judge(verdict) {
       rec.verdict = before;
       hist.splice(Math.min(Math.max(idx, 0), hist.length), 0, entry);
       now = entry;
-      if (row) await imgPut(row).catch(() => {});
+      if (row) await imgPut(row).catch(() => toast("기록은 되돌렸지만 그림은 못 되살림 (저장 공간). 이 그림을 ‘저장’으로 빼 두기"));
       store.save();
     }, () => URL.revokeObjectURL(entry.url));
   }
@@ -817,9 +833,11 @@ async function removeKeptMany(ids) {
   }
   ui.ksel = null;
   toast(`${ids.length}장 지움`, async () => {
-    for (const row of rows) await imgPut(row).catch(() => {});
+    let lost = 0;
+    for (const row of rows) await imgPut(row).catch(() => { lost++; });
     for (const rec of recs) rec.verdict = "keep";
     store.save();
+    if (lost) toast(`기록은 되돌렸지만 그림 ${lost}장은 못 되살림 (저장 공간)`);
   });
   store.save();
 }
@@ -1006,7 +1024,7 @@ function importJson(text) {
   try { raw = JSON.parse(text); } catch { return toast("JSON이 아님. ‘기록 내보내기’로 받은 파일을 고르기"); }
   if (!raw || typeof raw !== "object" || !(Array.isArray(raw.log) || Array.isArray(raw.presets) || raw.taste)) return toast("짤뽑기에서 내보낸 기록이 아님");
   const inc = normAll(raw), d = store.data;
-  if (!confirm(`불러올 것: 기록 ${inc.log.length}건, 내 프리셋 ${inc.presets.length}개, 내 단어 ${inc.userDict.length}개.\n\n기록·프리셋·내 단어는 지금 것에 더함(같은 것은 건너뜀).\n화풍·작가, 기본 빼는 것, 비서 지시문은 불러온 값으로 바꿈.\n토큰·키·지금 칸·대화는 그대로.\n그림은 JSON에 없어서 안 따라옴.`)) return;
+  if (!confirm(`불러올 것: 기록 ${inc.log.length}건, 내 프리셋 ${inc.presets.length}개, 내 단어 ${inc.userDict.length}개.\n\n기록·프리셋·내 단어는 지금 것에 더함(같은 것은 건너뜀).\n화풍·작가, 기본 빼는 것, 비서 지시문은 파일에 들어 있으면 그 값으로 바꿈.\n토큰·키·지금 칸·대화는 그대로.\n그림은 JSON에 없어서 안 따라옴.`)) return;
   const before = JSON.stringify(d);
   const ids = new Set(d.log.map((r) => r.id));
   d.log = [...d.log, ...inc.log.filter((r) => !ids.has(r.id))].sort((a, b) => (b.at || 0) - (a.at || 0));
@@ -1016,8 +1034,13 @@ function importJson(text) {
   for (const [k, v] of Object.entries(inc.presetEdits)) if (!d.presetEdits[k]) d.presetEdits[k] = v;
   const words = new Set(d.userDict.map((e) => e.word.trim()));
   d.userDict = [...d.userDict, ...inc.userDict.filter((e) => e.word.trim() && !words.has(e.word.trim()))].slice(0, DICT_MAX);
-  d.taste = { ...d.taste, style: inc.taste.style, negative: inc.taste.negative };
-  d.persona = inc.persona;
+  // 파일에 든 칸만 바꾼다. 옛 파일(비서 지시문이 없거나 화풍 칸이 없는 것)이 지금 값을 처음 값으로 덮지 않게.
+  if (typeof raw.taste?.style === "string") d.taste.style = inc.taste.style;
+  if (typeof raw.taste?.negative === "string") {
+    d.taste.negative = inc.taste.negative;
+    if (!raw.taste.negSplit && tg(inc.draft.neg)) d.draft.neg = mergeTags(d.draft.neg, inc.draft.neg, false); // 기본·이번으로 나누기 전 파일: 덧붙였던 태그는 이번 빼는 것으로
+  }
+  if (raw.persona && typeof raw.persona === "object") d.persona = inc.persona;
   toast(`기록을 불러옴 (기록 ${d.log.length}건)`, () => { store.data = normAll(JSON.parse(before)); store.save(); });
   store.save();
 }
@@ -1253,11 +1276,13 @@ async function ask(text, opts = {}) {
     let i = d.chat.length - 1;
     while (i >= 0 && !(d.chat[i].role === "user" && d.chat[i].text === text)) i--;
     if (i >= 0) d.chat.splice(i, 1);
-    askDraft = text;
+    askDraft = askDraft.trim() && askDraft.trim() !== text ? `${text}\n${askDraft}` : text; // 기다리며 치던 글이 있으면 그 앞에 붙인다
     store.persist();
     if (e.name === "AbortError") askErr = "취소함.";
     else if (e instanceof TypeError) askErr = "구글 서버에 닿지 못함. 망이 끊겼는지 보기.";
     else askErr = e.message || String(e);
+    const tab = route()[0];
+    if (e.name !== "AbortError" && !(tab === "ai" || (tab === "gen" && ui.open.ai))) toast(`비서가 답하지 못함: ${askErr} 질문은 입력칸에 되돌려 둠`);
   } finally {
     asking = null;
     render();
@@ -1425,7 +1450,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 
 // ── 뽑기 화면 조각들 ─────────────────────────────────────────
 // 접었다 펴는 칸. 화면이 다시 그려져도 펼친 상태를 기억하려고 ui.open에 둔다 (새로 고치면 처음으로).
-const ui = { open: {}, withImg: false, attachFile: null, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "", dq: "", pimgOpen: null, pimgTarget: null, vq: "", bq: "", vShow: 40, vOpen: new Set(), vto: {} };
+const ui = { open: {}, withImg: false, attachFile: null, presetKind: "인물", pedit: null, showHidden: false, pput: null, pputText: "", dq: "", pimgOpen: null, pimgTarget: null, vq: "", bq: "", kq: "", vShow: 40, vOpen: new Set(), vto: {} };
 const sec = (k, title, hint, inner) =>
   `<details class="sec" data-sec="${k}" ${ui.open[k] ? "open" : ""}><summary>${title}${hint ? ` <small>${esc(hint)}</small>` : ""}</summary><div class="secbody">${inner}</div></details>`;
 
@@ -1454,7 +1479,17 @@ function attachBar() {
 }
 function clearAttach() { if (ui.attachFile) { URL.revokeObjectURL(ui.attachFile.url); ui.attachFile = null; } }
 
-function aiPanel() {
+// 마지막 답이 마음에 안 들 때 같은 질문을 다시 보낸다. 붙였던 사진·파일은 다시 안 간다(보낸 뒤 비우므로).
+const reAskBtn = () => (!asking && store.data.chat.length >= 2 && store.data.chat.at(-1).role === "model" && store.data.chat.at(-2).role === "user"
+  ? `<div class="acts2 reask"><button type="button" class="ghost sm" id="reAsk">↻ 같은 질문 다시 답하기</button></div>` : "");
+const quickChips = () => `<div class="chips">
+      <button type="button" class="chip" data-quick="pose">자세 3안</button>
+      <button type="button" class="chip" data-quick="style">그림체 잡기</button>
+      <button type="button" class="chip" data-quick="tidy">프롬프트 다듬기</button>
+      <button type="button" class="chip" data-quick="params">설정 추천</button>
+      <button type="button" class="chip" data-quick="fix">방금 것 고치기</button>
+    </div>`;
+function aiInner() {
   const { settings: s, chat } = store.data;
   const last = chat.length ? chat.length - 1 : -1;
   // 마지막 질문과 그 답만 여기서 보인다. 전체 대화는 ‘비서’ 탭.
@@ -1462,20 +1497,15 @@ function aiPanel() {
   if (last >= 0) { if (chat[last].role === "model" && last > 0) shown.push(last - 1); shown.push(last); }
   const body = `
     ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/taste/conn">‘화풍·작가’ 탭 ‘연결’ 칸</a>에서 넣어야 대답함.</p>`}
-    <div class="chips">
-      <button type="button" class="chip" data-quick="pose">자세 3안</button>
-      <button type="button" class="chip" data-quick="style">그림체 잡기</button>
-      <button type="button" class="chip" data-quick="tidy">프롬프트 다듬기</button>
-      <button type="button" class="chip" data-quick="params">설정 추천</button>
-      <button type="button" class="chip" data-quick="fix">방금 것 고치기</button>
-    </div>
+    ${quickChips()}
     ${shown.length ? `<div class="chat">${shown.map((i) => msgHtml(chat[i], i)).join("")}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>` : (asking ? `<div class="msg ai dim">생각 중…</div>` : "")}
     ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
+    ${reAskBtn()}
     <textarea id="ask" rows="3" placeholder="예: 팔짱 끼고 내려다보게, 표정은 더 차갑게" autocomplete="off">${esc(askDraft)}</textarea>
     ${attachBar()}
     ${asking ? `<button type="button" id="stopAsk" class="ghost">눌러서 취소</button>` : `<button type="button" id="send">AI에게 부탁</button>`}
     <p class="hint"><a href="#/ai">‘비서’ 탭</a> 맨 아래에서 비서 지시문을 고칠 수 있음.</p>`;
-  return sec("ai", "AI 도우미", "자세·그림체·수정·설정", body);
+  return body;
 }
 
 function charsInner() {
@@ -1553,8 +1583,10 @@ function i2iInner() {
 }
 
 function advInner() {
-  const s = store.data.settings;
+  const s = store.data.settings, draft = store.data.draft;
   return `
+    <label for="seed">시드</label>
+    <div class="seedrow seed3"><input id="seed" type="number" inputmode="numeric" min="0" max="4294967295" placeholder="시드 (비우면 무작위)" aria-label="시드" value="${Number.isInteger(draft.seed) ? draft.seed : ""}"><button type="button" class="ghost" id="seedRand">무작위</button><label class="line"><input type="checkbox" id="seedLock" ${draft.seedLock ? "checked" : ""}> 고정</label></div>
     <label for="sampler">샘플러</label>
     <select id="sampler">${Object.entries(SAMPLERS).map(([k, v]) => `<option value="${k}" ${s.sampler === k ? "selected" : ""}>${v}</option>`).join("")}</select>
     <div class="two">
@@ -1908,7 +1940,7 @@ function slotsPanel() {
     ${tg(sl.rest) ? row("rest", "그 밖에", "칸을 나누기 전의 글", "위 칸으로 옮겨 적고 비워도 됨", sl.rest, "") : ""}
     <div class="slot">${head("neg", "빼는 것", "이번 그림")}
       ${area("neg", d.draft.neg, "earrings, gloves")}${chipRow("neg")}</div>
-    ${sec("always", "늘 붙는 것", `품질 태그 ${s.quality ? "붙임" : "안 붙임"} · 기본 빼는 것 ${tg(d.taste.negative) ? tg(d.taste.negative).split(", ").length + "개" : "없음"}`, `
+    ${sec("always", "늘 붙는 것·완성본", `품질 태그 ${s.quality ? "붙임" : "안 붙임"} · 기본 빼는 것 ${tg(d.taste.negative) ? tg(d.taste.negative).split(", ").length + "개" : "없음"}`, `
     <div class="slot">${head("quality", "7순위", "품질 태그", `<label class="line mini"><input type="checkbox" id="qualityOn" ${s.quality ? "checked" : ""}> 붙이기</label>`)}
       ${area("quality", qText(s), "")}
       <div class="acts2"><button type="button" class="ghost sm" id="qualityDef" ${tg(s.qualityText) ? "" : "disabled"}>모델 기본값으로</button></div>
@@ -1916,10 +1948,9 @@ function slotsPanel() {
     <div class="slot">${head("negbase", "빼는 것", "기본 (모든 그림)")}
       ${area("negbase", d.taste.negative, "lowres, bad anatomy")}
       <div class="acts2"><button type="button" class="ghost sm" id="negDef" ${tidy(d.taste.negative) === tidy(DEFAULT_NEG) ? "disabled" : ""}>처음 값으로</button></div></div>
-    <p class="hint">‘화풍·작가’ 탭의 같은 칸과 이어져 있음.</p>`)}
-    ${sec("sprev", "완성된 프롬프트 보기", "", `<p class="hint">칸이 1→7순위로 이어 붙어 NovelAI로 감. 같은 태그는 먼저 나온 것만 남음.</p><p class="hint" id="scount">${full.length}자</p><pre class="pprev" id="sprevtxt">${esc(full) || "(비어 있음)"}</pre><p class="hint">빼는 것 전체</p><pre class="pprev" id="snegtxt">${esc(negAll) || "(비어 있음)"}</pre>`)}
-    <div class="acts2"><button type="button" class="ghost sm" id="saveScene">칸 전부 프리셋으로</button><button type="button" class="ghost sm" id="slotsClear">칸 비우기</button><button type="button" class="ghost sm" id="slotPick">파일에서 넣기</button><input id="slotFile" type="file" hidden></div>
-    <p class="hint">‘파일에서 넣기’: JSON·글·NovelAI PNG를 고르면 프롬프트·빼는 것·인물·시드가 칸에 바로 들어감. 여러 덩어리가 든 파일은 보관소에 펼쳐짐.</p>`;
+    <p class="hint">‘화풍·작가’ 탭의 같은 칸과 이어져 있음.</p>
+    <h2>완성된 프롬프트</h2><p class="hint">칸이 1→7순위로 이어 붙어 NovelAI로 감. 같은 태그는 먼저 나온 것만 남음.</p><p class="hint" id="scount">${full.length}자</p><pre class="pprev" id="sprevtxt">${esc(full) || "(비어 있음)"}</pre><p class="hint">빼는 것 전체</p><pre class="pprev" id="snegtxt">${esc(negAll) || "(비어 있음)"}</pre>`)}
+    <div class="acts2 slotacts"><button type="button" class="ghost sm" id="saveScene" aria-label="칸 전부 프리셋으로 저장">프리셋으로 저장</button><button type="button" class="ghost sm" id="slotsClear" aria-label="칸 비우기">비우기</button><button type="button" class="ghost sm" id="slotPick" aria-label="파일에서 넣기 (JSON·글·NovelAI PNG)">파일에서 넣기</button><input id="slotFile" type="file" hidden></div>`;
 }
 function wireSlots() {
   const d = store.data, s = d.settings;
@@ -2002,6 +2033,16 @@ function vaultList(list) {
   if (!list.length) return `<p class="hint">${vault.length ? "찾은 것이 없음." : "아직 없음."}</p>`;
   return list.map((v) => `<a class="vrow" href="#/vault/${v.id}"><span class="tag">${esc(v.label)}</span><b>${esc(v.name)}</b><small>${v.blocks.length}블록</small></a>`).join("");
 }
+function vaultIntake() {
+  return `
+      <p class="hint">다른 곳에서 받은 프롬프트·파일을 파일 안의 블록 그대로 펼쳐 이 폰에 둠. 블록마다 칸·프리셋·비서 조각에 넣을 수 있음. RisuAI 파일(.risup·.risum·.charx·카드), NovelAI PNG, 글·JSON, zip.</p>
+      <input id="vFile" type="file" multiple hidden>
+      <div class="acts2"><button type="button" id="vPick">＋ 받은 파일 펼치기</button></div>
+      <label for="vText">받은 글 붙여 넣기 <span class="hint">## 제목, \`\`\` 블록, 빈 줄로 나눈 덩어리가 블록이 됨</span></label>
+      <input id="vName" type="text" placeholder="이름 (비우면 첫 줄)" autocomplete="off">
+      <textarea id="vText" rows="4" autocomplete="off" spellcheck="false" placeholder="받은 프롬프트, 설정…"></textarea>
+      <div class="acts2"><button type="button" class="ghost" id="vPaste">펼쳐서 넣기</button></div>`;
+}
 function vaultItemView(id) {
   const v = vault.find((x) => x.id === id);
   if (!v) return `<p class="empty">보관소에 없음.<br><a href="#/vault">보관소로</a></p>`;
@@ -2031,6 +2072,11 @@ function blockList(v) {
 }
 
 // 이번에 뽑은 그림 목록. 눌러서 크게 다시 본다 (새로 뽑거나 버린 그림을 되돌리는 길).
+// 2026-11-22: 뽑기 화면 아래 접는 칸 여섯(AI 도우미~프리셋)을 버튼 묶음 하나로. 누른 것만 아래에 펼쳐지고, 닫힌 것은 그리지 않는다.
+function toolStrip(list) {
+  return `<div class="tools" role="group" aria-label="더 넣기·설정">${list.map(([k, t, h]) => `<button type="button" class="tool ${ui.open[k] ? "on" : ""}" data-tool="${k}" aria-expanded="${!!ui.open[k]}">${t}${h ? `<small>${esc(h)}</small>` : ""}</button>`).join("")}</div>`
+    + list.filter(([k]) => ui.open[k]).map(([k, t, , inner]) => `<section class="toolbody" data-toolbody="${k}"><div class="toolhead"><h2>${t}</h2><button type="button" class="ghost mini" data-tool="${k}">접기</button></div><div class="secbody">${inner()}</div></section>`).join("");
+}
 function histStrip() {
   if (!hist.length || (hist.length === 1 && hist[0] === now)) return "";
   const items = [...hist].reverse().map((h) => `<button type="button" class="hthumb ${h === now ? "on" : ""} ${h.rec.verdict === "keep" ? "kept" : ""}" data-hist="${esc(h.rec.id)}" aria-label="시드 ${h.rec.seed} 그림 다시 보기"><img src="${h.url}" alt=""></button>`).join("");
@@ -2073,17 +2119,19 @@ const SCREENS = {
         ${[...Object.keys(SIZES), "직접"].map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${k === "직접" ? `${w}×${h}` : SIZES[k].join("×")}</small></button>`).join("")}
       </div>
       ${s.size === "직접" ? `<div class="two"><label>가로 <span class="hint">64 단위</span><input id="customW" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${w}"></label><label>세로<input id="customH" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${h}"></label></div>` : ""}
-      <div class="seedrow seed3"><input id="seed" type="number" inputmode="numeric" min="0" max="4294967295" placeholder="시드 (비우면 무작위)" aria-label="시드" value="${Number.isInteger(draft.seed) ? draft.seed : ""}"><button type="button" class="ghost" id="seedRand">무작위</button><label class="line"><input type="checkbox" id="seedLock" ${draft.seedLock ? "checked" : ""}> 고정</label></div>
+      ${draft.seedLock && Number.isInteger(draft.seed) ? `<p class="seedchip">시드 ${draft.seed} 고정 <button type="button" class="ghost mini" id="seedOff">풀기</button></p>` : ""}
       ${notes.length ? `<p class="hint warn">Anlas가 들 수 있음 (문서 기준, 이 앱에서 차감은 재 보지 않음): ${esc(notes.join(" · "))}</p>` : ""}
       <div class="gobar">${busy
         ? `<button type="button" id="stop" class="ghost big">${esc(phase || "뽑는 중…")} 눌러서 취소</button>`
         : `<button type="button" id="go" class="big">뽑기${nChars || nRefs || (draft.i2i.on && src) ? ` <small>(${[nChars ? `인물 ${nChars}` : "", nRefs ? `참고 ${nRefs}` : "", draft.i2i.on && src ? "이미지→이미지" : ""].filter(Boolean).join(" · ")})</small>` : ""}</button>`}</div>
-      ${aiPanel()}
-      ${sec("chars", "인물별 프롬프트", nChars ? `${nChars}명` : "", charsInner())}
-      ${sec("ref", "참고 그림", nRefs ? `${s.refMode === "precise" ? "정밀 참조" : "바이브"} ${nRefs}장` : "", refInner())}
-      ${sec("i2i", "이미지→이미지", draft.i2i.on && src ? "켬" : "", i2iInner())}
-      ${sec("adv", "생성 설정", `${SAMPLERS[s.sampler] || s.sampler} · ${s.steps}스텝 · 강도 ${s.scale}`, advInner())}
-      ${sec("preset", "프리셋", "인물·그림체·자세·빼는 것", presetInner())}`;
+      ${toolStrip([
+        ["ai", "AI 도우미", asking ? "생각 중…" : "", aiInner],
+        ["chars", "인물별 프롬프트", nChars ? `${nChars}명` : "", charsInner],
+        ["ref", "참고 그림", nRefs ? `${s.refMode === "precise" ? "정밀" : "바이브"} ${nRefs}장` : "", refInner],
+        ["i2i", "이미지→이미지", draft.i2i.on && src ? "켬" : "", i2iInner],
+        ["adv", "생성 설정·시드", `${s.steps}스텝 · 강도 ${s.scale}`, advInner],
+        ["preset", "프리셋", "", presetInner],
+      ])}`;
   },
 
   ai() {
@@ -2094,6 +2142,8 @@ const SCREENS = {
       ${chat.length ? "" : `<p class="empty">그리고 싶은 장면을 말로 던지면<br>NovelAI 태그 프롬프트로 바꿔 줌.<br><small>예: 비 오는 골목에서 우산 든 여자, 네온 불빛</small><br><small>자세·그림체·설정 추천과 그림 고치기는 ‘뽑기’ 탭 AI 도우미에서도 됨.</small></p>`}
       <div class="chat">${bubbles}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>
       ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
+      ${reAskBtn()}
+      ${quickChips()}
       <textarea id="ask" rows="3" placeholder="장면, 인물, 분위기를 한국어로" autocomplete="off">${esc(askDraft)}</textarea>
       ${attachBar()}
       ${asking
@@ -2115,7 +2165,7 @@ const SCREENS = {
       if (!r) return `<p class="empty">없는 그림.<br><a href="#/keep">보관함으로</a></p>`;
       const prev = kept[k - 1], next = kept[k + 1];
       const field = (key, label, v) => `<div class="kf"><div class="kfh"><span>${label}</span>${v ? `<button type="button" class="ghost mini" data-kcopy="${key}">복사</button>` : ""}</div><p class="kfv">${esc(v) || "—"}</p></div>`;
-      const vals = `시드 ${r.seed ?? "모름"} · ${r.w}×${r.h} · ${r.steps}스텝 · 강도 ${r.scale} · ${esc(r.model)} · ${esc(SAMPLERS[r.sampler] || "Euler Ancestral")}${r.noise ? ` · ${esc(r.noise)}` : ""}${r.cr ? ` · cfg rescale ${r.cr}` : ""}${r.vb ? " · Variety+" : ""}${r.refs?.length ? ` · ${r.mode === "precise" ? "정밀 참조" : "바이브"} ${r.refs.length}장(강도 ${r.refs.map((x) => x.s).join("·")}, 다시 뽑기에는 그림이 안 따라옴)` : ""}${r.i2i ? ` · 이미지→이미지(strength ${r.i2i.strength}, noise ${r.i2i.noise}, 바탕 그림은 안 따라옴)` : ""}`;
+      const vals = `시드 ${r.seed ?? "모름"} · ${r.w ?? "?"}×${r.h ?? "?"} · ${r.steps}스텝 · 강도 ${r.scale} · ${esc(r.model)} · ${esc(SAMPLERS[r.sampler] || "Euler Ancestral")}${r.noise ? ` · ${esc(r.noise)}` : ""}${r.cr ? ` · cfg rescale ${r.cr}` : ""}${r.vb ? " · Variety+" : ""}${r.refs?.length ? ` · ${r.mode === "precise" ? "정밀 참조" : "바이브"} ${r.refs.length}장(강도 ${r.refs.map((x) => x.s).join("·")}, 다시 뽑기에는 그림이 안 따라옴)` : ""}${r.i2i ? ` · 이미지→이미지(strength ${r.i2i.strength}, noise ${r.i2i.noise}, 바탕 그림은 안 따라옴)` : ""}`;
       return `
         <nav class="knav"><a class="back" href="#/keep">‹ 보관함</a><span class="knum">${k + 1} / ${kept.length}</span>
           <span class="kpn">${prev ? `<a href="#/keep/${prev.id}" aria-label="이전(더 새 그림)">‹</a>` : `<span aria-hidden="true">‹</span>`}${next ? `<a href="#/keep/${next.id}" aria-label="다음(더 옛 그림)">›</a>` : `<span aria-hidden="true">›</span>`}</span></nav>
@@ -2144,7 +2194,8 @@ const SCREENS = {
     const addBtn = sel
       ? `<div class="kbar"><b id="kselN">${sel.size}장 고름</b><button type="button" class="ghost sm" id="kAll">${sel.size === kept.length ? "전부 풀기" : "전부"}</button><button type="button" class="ghost sm" id="kSave">저장</button><button type="button" class="ghost sm danger" id="kDel">지우기</button><button type="button" class="ghost sm" id="kOff">취소</button></div>`
       : `<input id="inFile" type="file" accept="image/*" multiple hidden><div class="acts2 ktop"><button type="button" class="ghost sm" id="kOn">고르기</button><button type="button" class="ghost sm" id="inAdd">＋ 받은 그림 넣기</button></div>`;
-    return `${addBtn}${groups.map(({ g, list }, gi) => `<h2 class="kday">${esc(g)} <small>${list.length}장</small>${sel ? `<button type="button" class="ghost mini" data-kday="${gi}">이 날 전부</button>` : ""}</h2><div class="kgrid ${sel ? "picking" : ""}" data-kg="${gi}">${list.map((r) =>
+    const find = kept.length > 6 ? `<input id="kq" type="search" placeholder="프롬프트 낱말·시드로 찾기" value="${esc(ui.kq || "")}" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="보관함에서 찾기"><p class="hint" id="kqN" hidden></p>` : "";
+    return `${addBtn}${find}${groups.map(({ g, list }, gi) => `<h2 class="kday">${esc(g)} <small>${list.length}장</small>${sel ? `<button type="button" class="ghost mini" data-kday="${gi}">이 날 전부</button>` : ""}</h2><div class="kgrid ${sel ? "picking" : ""}" data-kg="${gi}">${list.map((r) =>
       `<a href="#/keep/${r.id}" class="${sel?.has(r.id) ? "sel" : ""}" data-thumb="${r.id}" aria-label="${r.ext ? "받은 그림" : `시드 ${r.seed} 그림`}">${r.ext ? `<span class="kbadge">받음</span>` : ""}</a>`).join("")}</div>`).join("")}<p class="hint kfoot">NovelAI PNG면 안에 든 프롬프트·시드를 읽어 ‘다시 뽑기’가 됨. 받은 그림은 취향 통계에 안 셈.</p>`;
   },
 
@@ -2154,13 +2205,7 @@ const SCREENS = {
     const list = !q ? vault : vault.filter((v) => (v.name + " " + v.blocks.map((b) => b.title + " " + b.text).join(" ")).toLowerCase().includes(q));
     return `
       ${vaultErr ? `<p class="error">${esc(vaultErr)}</p>` : ""}
-      <p class="hint">다른 곳에서 받은 프롬프트·파일을 파일 안의 블록 그대로 펼쳐 이 폰에 둠. 블록마다 칸·프리셋·비서 조각에 넣을 수 있음. RisuAI 파일(.risup·.risum·.charx·카드), NovelAI PNG, 글·JSON, zip.</p>
-      <input id="vFile" type="file" multiple hidden>
-      <div class="acts2"><button type="button" id="vPick">＋ 받은 파일 펼치기</button></div>
-      <label for="vText">받은 글 붙여 넣기 <span class="hint">## 제목, \`\`\` 블록, 빈 줄로 나눈 덩어리가 블록이 됨</span></label>
-      <input id="vName" type="text" placeholder="이름 (비우면 첫 줄)" autocomplete="off">
-      <textarea id="vText" rows="4" autocomplete="off" spellcheck="false" placeholder="받은 프롬프트, 설정…"></textarea>
-      <div class="acts2"><button type="button" class="ghost" id="vPaste">펼쳐서 넣기</button></div>
+      ${vault.length ? sec("vin", "＋ 받은 것 넣기", "파일 · 붙여 넣기", vaultIntake()) : vaultIntake()}
       <h2>보관소 <small>${vault.length}개</small></h2>
       ${vault.length ? `<input id="vq" type="search" placeholder="이름·블록 글에서 찾기" value="${esc(ui.vq)}" autocomplete="off">` : ""}
       <div id="vlist">${vaultList(list)}</div>`;
@@ -2321,6 +2366,13 @@ function wireAsk() {
   on("askUnpick", "click", () => { clearAttach(); render(); });
   on("send", "click", () => { const t = askDraft.trim(); if (t) ask(t, { image: ui.withImg && !!now }); });
   on("stopAsk", "click", () => asking?.abort());
+  on("reAsk", "click", async () => {
+    if (asking || d.chat.length < 2) return;
+    const pair = d.chat.splice(-2, 2), keepDraft = askDraft, t0 = Date.now();
+    await ask(pair[0].text, { image: ui.withImg && !!now });
+    const got = d.chat.at(-1);
+    if (!(got?.role === "model" && got !== pair[1] && (got.at || 0) >= t0 && d.chat.at(-2)?.text === pair[0].text)) { d.chat.push(...pair); askDraft = keepDraft; store.save(); } // 못 받았으면 옛 답을 되살린다
+  });
   on("clearChat", "click", () => { if (confirm("비서와 한 대화를 지움.")) { d.chat = []; store.save(); } });
   document.querySelectorAll("[data-quick]").forEach((b) => b.addEventListener("click", () => {
     if (b.dataset.quick === "fix") {
@@ -2330,6 +2382,7 @@ function wireAsk() {
       const t = $("ask"); t?.focus(); t?.setSelectionRange(t.value.length, t.value.length);
       return;
     }
+    if (asking) return toast("앞 질문의 답을 기다리는 중. 끝나거나 취소한 뒤 누르기");
     ask(QUICK[b.dataset.quick], { image: ui.withImg && !!now });
   }));
   const blockOf = (id) => { const [i, j] = id.split(":").map(Number); return parseBlocks(d.chat[i]?.text || "")[j]?.v; };
@@ -2525,9 +2578,10 @@ function wireVault(id) {
 // [data-thumb] 칸에 보관한 그림의 썸네일을 채운다. 화면이 다시 그려졌으면(seq가 바뀜) 그만둔다.
 function fillThumbs(seq) {
   document.querySelectorAll("[data-thumb]").forEach(async (a) => {
-    const row = await imgGet(a.dataset.thumb).catch(() => null);
+    let bad = false;
+    const row = await imgGet(a.dataset.thumb).catch(() => { bad = true; return null; });
     if (seq !== renderSeq) return;
-    if (!row) { a.textContent = "그림 없음"; return; }
+    if (!row) { a.textContent = bad ? "못 읽음" : "그림 없음"; return; }
     const u = URL.createObjectURL(row.thumb || row.full);
     thumbUrls.push(u);
     const badge = a.querySelector(".kbadge")?.outerHTML || "";
@@ -2549,6 +2603,12 @@ function wire(name, arg, seq) {
       store.save();
     });
     on("seedRand", "click", () => { d.draft.seed = null; d.draft.seedLock = false; store.save(); });
+    on("seedOff", "click", () => { d.draft.seedLock = false; store.save(); });
+    document.querySelectorAll("[data-tool]").forEach((b) => b.addEventListener("click", () => {
+      const k = b.dataset.tool; ui.open[k] = !ui.open[k];
+      render();
+      if (ui.open[k]) document.querySelector(`[data-toolbody="${k}"]`)?.scrollIntoView({ block: "start" });
+    }));
     document.querySelectorAll("[data-size]").forEach((b) => b.addEventListener("click", () => { d.settings.size = b.dataset.size; store.save(); }));
     on("customW", "change", (e) => { d.settings.customW = clamp(Math.round(e.target.value / 64) * 64, 64, 1536, 832); store.save(); });
     on("customH", "change", (e) => { d.settings.customH = clamp(Math.round(e.target.value / 64) * 64, 64, 1536, 1216); store.save(); });
@@ -2778,7 +2838,7 @@ function wire(name, arg, seq) {
     fillThumbs(seq);
   }
   if (name === "ai") { wireAsk(); wirePersona(); wireDict(); on("aiModelQ", "change", (e) => { d.settings.aiModel = e.target.value; store.save(); }); }
-  if (name === "vault") wireVault(arg);
+  if (name === "vault") { wireVault(arg); document.querySelectorAll("details[data-sec]").forEach((el) => el.addEventListener("toggle", () => { ui.open[el.dataset.sec] = el.open; })); }
   if (name === "keep" || name === "taste") {
     on("inAdd", "click", () => $("inFile").click());
     on("inFile", "change", (e) => { const f = [...e.target.files]; e.target.value = ""; if (f.length) importImages(f); });
@@ -2787,6 +2847,26 @@ function wire(name, arg, seq) {
     fillThumbs(seq);
     // 여러 장 고르기: ‘고르기’ 버튼이나 그림을 길게 눌러 들어간다. 고르는 동안 누르면 열리지 않고 표시만 바뀐다(썸네일을 다시 안 그리게 화면은 그대로 두고 표시만 고침).
     const cells = [...document.querySelectorAll(".kgrid a[data-thumb]")];
+    // 찾기: 다시 그리지 않고 안 맞는 칸만 숨긴다 (썸네일을 다시 읽지 않게). 낱말을 여럿 쓰면 전부 든 그림만.
+    const byId = new Map(d.log.map((r) => [r.id, r]));
+    const kFilter = () => {
+      const words = (ui.kq || "").toLowerCase().split(/[\s,]+/).filter(Boolean);
+      let n = 0;
+      document.querySelectorAll(".kgrid").forEach((g) => {
+        let any = false;
+        g.querySelectorAll("a[data-thumb]").forEach((a) => {
+          const r = byId.get(a.dataset.thumb);
+          const text = r ? `${r.scene || ""} ${r.style || ""} ${(r.chars || []).map((c) => c.text).join(" ")} ${r.name || ""} ${r.seed ?? ""}`.toLowerCase() : "";
+          const ok = words.every((w) => text.includes(w));
+          a.hidden = !ok; if (ok) { any = true; n++; }
+        });
+        g.hidden = !any;
+        if (g.previousElementSibling?.classList.contains("kday")) g.previousElementSibling.hidden = !any;
+      });
+      const el = $("kqN"); if (el) { el.hidden = !words.length; el.textContent = n ? `${n}장 찾음` : "찾은 그림이 없음"; }
+    };
+    on("kq", "input", (e) => { ui.kq = e.target.value; kFilter(); });
+    if (ui.kq) kFilter();
     const sync = () => {
       const n = ui.ksel?.size || 0;
       cells.forEach((a) => a.classList.toggle("sel", !!ui.ksel?.has(a.dataset.thumb)));
@@ -2795,7 +2875,7 @@ function wire(name, arg, seq) {
     };
     on("kOn", "click", () => { ui.ksel = new Set(); render(); });
     on("kOff", "click", () => { ui.ksel = null; render(); });
-    on("kAll", "click", () => { ui.ksel = ui.ksel.size === cells.length ? new Set() : new Set(cells.map((a) => a.dataset.thumb)); sync(); });
+    on("kAll", "click", () => { const vis = cells.filter((a) => !a.hidden); ui.ksel = vis.length && vis.every((a) => ui.ksel.has(a.dataset.thumb)) ? new Set() : new Set(vis.map((a) => a.dataset.thumb)); sync(); });
     document.querySelectorAll("[data-kday]").forEach((b) => b.addEventListener("click", () => {
       const ids = [...document.querySelectorAll(`[data-kg="${b.dataset.kday}"] a[data-thumb]`)].map((a) => a.dataset.thumb);
       const all = ids.every((id) => ui.ksel.has(id));
@@ -2812,9 +2892,10 @@ function wire(name, arg, seq) {
   if (name === "keep" && arg) {
     const rec = d.log.find((r) => r.id === arg);
     let blob = null;
-    imgGet(arg).catch(() => null).then((row) => {
+    let bad = false;
+    imgGet(arg).catch(() => { bad = true; return null; }).then((row) => {
       if (seq !== renderSeq || !$("full")) return;
-      if (!row) { $("full").replaceWith(Object.assign(document.createElement("p"), { className: "error", textContent: "그림 파일이 이 기기에서 사라졌음. 설정값만 남아 있음." })); return; }
+      if (!row) { $("full").replaceWith(Object.assign(document.createElement("p"), { className: "error", textContent: bad ? "그림 저장소를 지금 못 읽음. 그림이 지워진 것은 아닐 수 있으니 새로 고쳐 다시 보기." : "그림 파일이 이 기기에서 사라졌음. 설정값만 남아 있음." })); return; }
       blob = row.full;
       const u = URL.createObjectURL(blob);
       thumbUrls.push(u);

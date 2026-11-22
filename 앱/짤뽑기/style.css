@@ -501,3 +501,24 @@ figure.result, p.error { scroll-margin-top: 64px; }
 .rdh .mini + .mini { margin-left: 4px; }
 .rdh { margin-top: 12px; }
 .rgrid + .refs, .rgrid + p.hint { margin-top: 4px; }
+
+/* 2026-11-22: 뽑기 화면 줄이기. 접는 칸 여섯 대신 버튼 묶음, 누른 것만 아래에 펼침 */
+.tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 18px; }
+.tool { min-height: 52px; padding: 6px 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 1.2; text-align: center; }
+.tool small { font-size: 11px; font-weight: 400; color: var(--accent-ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool.on { background: #2b1a21; border-color: var(--accent-ink); }
+.toolbody { margin-top: 14px; padding-top: 4px; border-top: 1px solid var(--line); scroll-margin-top: calc(var(--bar) + env(safe-area-inset-top) + 8px); }
+.toolhead { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
+.toolhead h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.toolhead .mini { min-width: 44px; min-height: 44px; }
+.toolbody > .secbody { padding: 0 2px 6px; }
+.slotacts { flex-wrap: nowrap; }
+.slotacts button { flex: 1 1 0; padding: 0 6px; font-size: 13.5px; white-space: nowrap; }
+.seedchip { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; font-size: 13px; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+.seedchip .mini { min-height: 44px; min-width: 44px; }
+.secbody .seedrow { margin-top: 0; }
+.kgrid[hidden], .kgrid a[hidden], .kday[hidden] { display: none; }
+#kq { margin: 0 0 8px; }
+.reask { margin: 0 0 8px; }
+.chips + textarea { margin-top: 8px; }
