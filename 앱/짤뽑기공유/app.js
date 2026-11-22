@@ -1952,7 +1952,16 @@ function slotsPanel() {
     <h2>완성된 프롬프트</h2><p class="hint">칸이 1→7순위로 이어 붙어 NovelAI로 감. 같은 태그는 먼저 나온 것만 남음.</p><p class="hint" id="scount">${full.length}자</p><pre class="pprev" id="sprevtxt">${esc(full) || "(비어 있음)"}</pre><p class="hint">빼는 것 전체</p><pre class="pprev" id="snegtxt">${esc(negAll) || "(비어 있음)"}</pre>`)}
     <div class="acts2 slotacts"><button type="button" class="ghost sm" id="saveScene" aria-label="칸 전부 프리셋으로 저장">프리셋으로 저장</button><button type="button" class="ghost sm" id="slotsClear" aria-label="칸 비우기">비우기</button><button type="button" class="ghost sm" id="slotPick" aria-label="파일에서 넣기 (JSON·글·NovelAI PNG)">파일에서 넣기</button><input id="slotFile" type="file" hidden></div>`;
 }
+// 2026-11-22: 프롬프트 칸 전부 접기. 접으면 완성된 프롬프트 두 줄만 보이고, 그 줄을 눌러도 펼쳐진다. 접힌 상태는 settings.foldPrompt에 남는다(옛 데이터에는 없어 펼친 것으로 읽음).
+function promptBlock() {
+  const d = store.data, fold = !!d.settings.foldPrompt;
+  if (!fold) return `<div class="phead"><h2>프롬프트</h2><button type="button" class="ghost mini" data-pfold="1" aria-expanded="true">전부 접기</button></div>${slotsPanel()}`;
+  const full = composePrompt(d.draft.slots, d.taste.style, d.settings), neg = tg(d.draft.neg);
+  return `<div class="phead"><h2>프롬프트 <small>${full.length}자${neg ? ` · 이번 빼는 것 ${neg.split(", ").length}개` : ""}</small></h2><button type="button" class="ghost mini" data-pfold="0" aria-expanded="false">펼치기</button></div>
+    <button type="button" class="pfold" data-pfold="0" aria-label="프롬프트 펼치기"><span>${esc(full) || "(비어 있음)"}</span></button>`;
+}
 function wireSlots() {
+  document.querySelectorAll("[data-pfold]").forEach((b) => b.addEventListener("click", () => { store.data.settings.foldPrompt = b.dataset.pfold === "1"; store.save(); }));
   const d = store.data, s = d.settings;
   const prev = () => {
     const t = composePrompt(d.draft.slots, d.taste.style, s); const a = $("sprevtxt"), c = $("scount"), n = $("snegtxt");
@@ -2114,7 +2123,7 @@ const SCREENS = {
 ` : `<div class="stage" style="aspect-ratio:${w}/${h}"><p>뽑은 그림이 여기 뜸</p><small>아래 칸을 채우고 ‘뽑기’</small></div>`}
       ${histStrip()}
       ${errMsg ? `<p class="error" role="alert">${esc(errMsg)}</p>` : ""}
-      ${slotsPanel()}
+      ${promptBlock()}
       <div class="seg seg4" role="group" aria-label="크기">
         ${[...Object.keys(SIZES), "직접"].map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${k === "직접" ? `${w}×${h}` : SIZES[k].join("×")}</small></button>`).join("")}
       </div>
