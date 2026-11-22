@@ -560,3 +560,17 @@ button.mini { min-height: 44px; font-size: 13.5px; }
 .acts + .acts button { font-size: 14px; }
 ::placeholder { color: color-mix(in srgb, var(--dim) 72%, transparent); }
 .gear[aria-current] { color: var(--gold); }
+
+/* 2026-11-22 까다로운 고객 비판에서 고친 것 (짤뽑기·짤뽑기공유·짤뽑기최적화 같이) */
+/* 그림 아래 버튼 두 줄이 떠 있는 ‘뽑기’에 가리지 않게 그림 높이를 화면에 맞춘다 */
+.result img { width: auto; max-width: 100%; margin: 0 auto; max-height: max(220px, calc(100dvh - var(--bar) - var(--tabs) - 250px)); }
+/* 뽑는 동안 그림 자리가 알려 준다 */
+.stage.busy p { color: var(--gold); animation: pulse 1.2s ease-in-out infinite; }
+.result.busy img { opacity: .5; transition: opacity .2s; }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .stage.busy p { animation: none; } }
+#stop small { display: block; font-size: 12px; color: var(--dim); letter-spacing: 0; }
+#stop.armed { color: var(--danger); border-color: var(--danger); }
+/* 보관을 물릴 수 있다는 표시, 비서 답의 블록 버튼은 선으로(채운 것은 ‘전부 넣기’ 하나) */
+.acts button.kept { color: var(--gold); }
+button.line { color: var(--ink); background: transparent; border: 1px solid var(--accent, #a8203a); }

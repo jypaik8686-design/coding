@@ -690,6 +690,8 @@ async function failText(res) {
   try { const t = await res.text(); said = (JSON.parse(t).message ?? t).toString().slice(0, 200); } catch { /* 본문 없음 */ }
   const hint = res.status === 401 ? "토큰이 틀렸거나 만료됨. 설정(오른쪽 위 톱니바퀴)에서 다시 넣기."
     : res.status === 429 ? "요청이 너무 잦거나 다른 생성이 돌고 있음. 잠시 뒤 직접 다시 누르기."
+    : res.status === 402 ? "NovelAI가 결제 쪽에서 막음. NovelAI 계정에서 구독과 남은 Anlas 보기."
+    : res.status >= 500 ? "NovelAI 서버 쪽 오류. 잠시 뒤 다시 누르기."
     : "";
   return `${hint} (서버 ${res.status}${said ? `: ${said}` : ""})`.trim();
 }
@@ -872,6 +874,8 @@ function histAdd(entry) {
 }
 function histClear() { hist.forEach((h) => URL.revokeObjectURL(h.url)); hist = []; now = null; }
 let busy = null;     // AbortController
+let stopArm = 0;     // ‘취소’를 처음 누른 때. 3초 안에 한 번 더 눌러야 멈춘다
+const stopArmed = () => Date.now() - stopArm < 3000;
 let errMsg = "";
 
 async function generate() {
@@ -946,9 +950,17 @@ async function generate() {
     render();
     // 끝난 것을 알린다: 짧은 진동, 뽑기 화면이면 그림(실패면 오류 줄)으로 올라가고 다른 탭이면 알림 한 줄.
     try { navigator.vibrate?.(okDone ? 60 : [40, 60, 40]); } catch { /* 진동 없는 기기 */ }
-    if (route()[0] === "gen" || !SCREENS[route()[0]]) document.querySelector(okDone ? "figure.result" : "p.error")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (route()[0] === "gen" || !SCREENS[route()[0]]) showBelowToast(document.querySelector(okDone ? "figure.result" : "p.error"));
     else toast(okDone ? "그림이 나옴. ‘뽑기’ 탭에서 보기" : `뽑기 실패: ${errMsg}`);
   }
+}
+
+// 끝난 자리(그림·오류 줄)를 화면 위쪽으로 올린다. 알림이 떠 있으면 그 아래로 (오류 줄이 알림에 가리던 것, 2026-11-22).
+function showBelowToast(el) {
+  if (!el) return;
+  const t = document.querySelector(".toast");
+  const top = Math.max(64, t ? t.getBoundingClientRect().bottom + 8 : 0);
+  window.scrollTo({ top: Math.max(0, window.scrollY + el.getBoundingClientRect().top - top), behavior: "smooth" });
 }
 
 const clamp = (v, lo, hi, dflt) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt; };
@@ -978,7 +990,7 @@ async function judge(verdict) {
     const entry = now, before = rec.verdict, idx = hist.indexOf(entry);
     rec.verdict = "drop";
     if (idx >= 0) hist.splice(idx, 1);
-    now = null;
+    now = idx >= 0 ? (hist[idx - 1] || hist[idx] || null) : null; // 빈 액자로 돌아가지 않고 바로 앞 그림으로 (2026-11-22)
     let row = null;
     if (before === "keep") { row = await imgGet(rec.id).catch(() => null); await imgDel(rec.id).catch(() => {}); }
     toast("버렸음", async () => {
@@ -990,6 +1002,67 @@ async function judge(verdict) {
     }, () => URL.revokeObjectURL(entry.url));
   }
   store.save();
+}
+
+// 보관을 물린다 (2026-11-22): 그림은 화면에 그대로 두고 보관함 저장분만 뺀다. 기록은 고르기 전(null)으로 돌아간다.
+async function unkeep() {
+  if (!now) return;
+  const cur = now, rec = store.data.log.find((r) => r.id === cur.rec.id);
+  if (!rec || rec.verdict !== "keep") return;
+  const row = await imgGet(rec.id).catch(() => null);
+  await imgDel(rec.id).catch(() => {});
+  rec.verdict = null; cur.rec.verdict = null;
+  toast("보관함에서 뺌", async () => {
+    try { await imgPut(row || { id: rec.id, full: cur.blob, thumb: await thumbOf(cur.blob) }); } catch { return toast("다시 보관하지 못함 (저장 공간)"); }
+    rec.verdict = "keep"; cur.rec.verdict = "keep";
+    store.save();
+  });
+  store.save();
+}
+
+// 보관한 그림을 zip 하나로 (2026-11-22). 압축 없이 묶기만 한다. PNG 안의 생성 정보가 그대로 있어서 풀어서 ‘받은 그림 넣기’로 되살린다.
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = (u8) => { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+let zipping = false;
+async function exportImages() {
+  if (zipping) return;
+  const recs = store.data.log.filter((r) => r.verdict === "keep");
+  if (!recs.length) return toast("보관한 그림이 없음");
+  zipping = true;
+  const parts = [], central = [], enc = new TextEncoder();
+  let off = 0, done = 0, miss = 0;
+  try {
+    for (const r of recs) {
+      const row = await imgGet(r.id).catch(() => null);
+      if (!row?.full) { miss++; continue; }
+      const crc = crc32(new Uint8Array(await row.full.arrayBuffer())), size = row.full.size;
+      const name = enc.encode(`${String(done + 1).padStart(4, "0")}-${r.seed ?? "seed"}-${r.id}.png`);
+      const t = new Date(r.at || Date.now());
+      const dtime = (t.getHours() << 11) | (t.getMinutes() << 5) | (t.getSeconds() >> 1), ddate = ((t.getFullYear() - 1980) << 9) | ((t.getMonth() + 1) << 5) | t.getDate();
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(10, dtime, true); lh.setUint16(12, ddate, true);
+      lh.setUint32(14, crc, true); lh.setUint32(18, size, true); lh.setUint32(22, size, true); lh.setUint16(26, name.length, true);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(12, dtime, true); ch.setUint16(14, ddate, true);
+      ch.setUint32(16, crc, true); ch.setUint32(20, size, true); ch.setUint32(24, size, true); ch.setUint16(28, name.length, true); ch.setUint32(42, off, true);
+      parts.push(lh.buffer, name, row.full); central.push(ch.buffer, name);
+      off += 30 + name.length + size; done++;
+      if (done % 10 === 0) toast(`그림 묶는 중 ${done}/${recs.length}`);
+      if (off > 3.9e9) { toast("4GB를 넘어 여기까지만 묶음"); break; }
+    }
+    if (!done) return toast("보관함에서 그림을 못 읽음");
+    const csize = central.reduce((n, c) => n + (c.byteLength ?? c.length), 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, done, true); end.setUint16(10, done, true); end.setUint32(12, csize, true); end.setUint32(16, off, true);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([...parts, ...central, end.buffer], { type: "application/zip" }));
+    a.download = `jjalbbopgi-${new Date().toISOString().slice(0, 10)}.zip`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    toast(`그림 ${done}장을 zip으로 내보냄${miss ? ` · 못 읽은 것 ${miss}장` : ""}. 다른 폰에서는 풀어서 보관함 ‘받은 그림 넣기’`);
+  } catch (e) {
+    toast(`그림 묶기 실패: ${e?.message || e}`);
+  } finally { zipping = false; }
 }
 
 // 보관함에서 여러 장을 한꺼번에 (2026-11-21). 지운 것은 알림의 ‘되돌리기’(9초) 동안 기억해 둔다.
@@ -1707,7 +1780,7 @@ function msgHtml(m, i) {
     const label = blockLabel(b);
     const btn = label ? (done.includes(j)
       ? `<button type="button" class="ghost done" data-blk="${id}" data-kind="${b.lang}" aria-label="${label} (넣음, 누르면 다시 넣음)">✓ 넣음</button>`
-      : `<button type="button" data-blk="${id}" data-kind="${b.lang}">${label}</button>`) : "";
+      : `<button type="button" class="line" data-blk="${id}" data-kind="${b.lang}">${label}</button>`) : "";
     let check = "";
     if (b.lang === "scene" || b.lang === "char") {
       const c = checkTags(b.v);
@@ -2027,7 +2100,7 @@ function presetInner() {
   return `
     <div class="chips pk">${PKINDS.map((k) => `<button type="button" class="chip ${k === kind ? "on" : ""}" data-pkind="${k}">${k}</button>`).join("")}</div>
     ${list}
-    <p class="hint">확정 = art 저장소에서 사용자가 확정한 것. 가안 = 사용자의 취향에서 이 앱이 짠 것이고, 태그는 사전에서 게시물 수를 확인함. 고친 것은 이 폰에만 저장되고, ‘기본값으로’로 되돌림. 인물은 이번 그림 맨 앞에, 의상은 4순위에, 자세·구도는 5순위에 더해짐. 빼는 것은 ‘이번 빼는 것’ 칸에 들어감. 뽑기 칸 제목 옆 ‘＋ … 프리셋’으로 캐릭터·의상·포즈 칸을 바로 저장함.</p>`;
+    <p class="hint">확정 = 내가 써 보고 정해 둔 것. 가안 = 내 취향에서 앱이 짠 것이고, 태그는 사전에서 게시물 수를 확인함. 고친 것은 이 폰에만 저장되고, ‘기본값으로’로 되돌림. 인물은 이번 그림 맨 앞에, 의상은 4순위에, 자세·구도는 5순위에 더해짐. 빼는 것은 ‘이번 빼는 것’ 칸에 들어감. 뽑기 칸 제목 옆 ‘＋ … 프리셋’으로 캐릭터·의상·포즈 칸을 바로 저장함.</p>`;
 }
 
 function tagsMinus(a, b) { const no = new Set(tg(b).toLowerCase().split(", ")); return tg(a).split(", ").filter((t) => t && !no.has(t.toLowerCase())).join(", "); }
@@ -2402,13 +2475,13 @@ const SCREENS = {
       ${originJob ? `<p class="notice">${esc(originJob)}</p>` : !s.token.trim() && originRaw() ? `<p class="notice">원본 짤뽑기에서 쓰던 토큰·프리셋·서랍을 이 복사본으로 가져올 수 있음. 원본은 그대로 둠. <button type="button" class="ghost sm" id="originIn">원본에서 가져오기</button></p>` : ""}
       ${s.token.trim() ? "" : `<p class="notice">NovelAI 토큰이 아직 없음. <a href="#/set">설정(오른쪽 위 톱니바퀴)</a>에서 넣어야 뽑힘.</p>`}
       ${now ? `
-        <figure class="result">
+        <figure class="result${busy ? " busy" : ""}">
           <img src="${now.url}" alt="방금 뽑은 그림" width="${now.rec.w}" height="${now.rec.h}">
           <figcaption class="hint">시드 ${now.rec.seed} · ${now.rec.w}×${now.rec.h} · ${esc(now.rec.model)} · ${esc(SAMPLERS[now.rec.sampler] || "")} ${now.rec.steps}스텝${now.rec.refs?.length ? ` · 참고 ${now.rec.refs.length}장` : ""}${now.rec.chars?.length ? ` · 인물 ${now.rec.chars.length}` : ""}${now.rec.i2i ? " · 이미지→이미지" : ""}</figcaption>
         </figure>
         <div class="acts">
           ${now.rec.verdict === "keep"
-            ? `<button type="button" class="ghost" disabled>보관함에 있음</button>`
+            ? `<button type="button" id="unkeep" class="ghost kept">♥ 보관됨 · 빼기</button>`
             : `<button type="button" id="keep">♥ 보관</button>`}
           <button type="button" id="drop" class="ghost">✕ 버림</button>
           <button type="button" id="share" class="ghost">저장</button>
@@ -2418,7 +2491,7 @@ const SCREENS = {
           <button type="button" id="toI2i" class="ghost">변형하기</button>
           <button type="button" id="toRef" class="ghost">참고 그림</button>
         </div>
-` : `<div class="stage" style="aspect-ratio:${w}/${h}"><p>뽑은 그림이 여기 뜸</p><small>아래 칸을 채우고 ‘뽑기’</small></div>`}
+` : `<div class="stage${busy ? " busy" : ""}" style="aspect-ratio:${w}/${h}"><p>${busy ? esc(phase || "뽑는 중…") : "뽑은 그림이 여기 뜸"}</p><small>아래 칸을 채우고 ‘뽑기’</small></div>`}
       ${histStrip()}
       ${errMsg ? `<p class="error" role="alert">${esc(errMsg)}</p>` : ""}
       ${promptBlock()}
@@ -2429,7 +2502,7 @@ const SCREENS = {
       ${draft.seedLock && Number.isInteger(draft.seed) ? `<p class="seedchip">시드 ${draft.seed} 고정 <button type="button" class="ghost mini" id="seedOff">풀기</button></p>` : ""}
       ${notes.length ? `<p class="hint warn">Anlas가 들 수 있음 (문서 기준, 이 앱에서 차감은 재 보지 않음): ${esc(notes.join(" · "))}</p>` : ""}
       <div class="gobar">${busy
-        ? `<button type="button" id="stop" class="ghost big">${esc(phase || "뽑는 중…")} 눌러서 취소</button>`
+        ? `<button type="button" id="stop" class="ghost big${stopArmed() ? " armed" : ""}">${stopArmed() ? "한 번 더 누르면 취소" : `${esc(phase || "뽑는 중…")} <small>취소는 두 번 누르기</small>`}</button>`
         : `<button type="button" id="go" class="big">뽑기${nChars || nRefs || (draft.i2i.on && src) ? ` <small>(${[nChars ? `인물 ${nChars}` : "", nRefs ? `참고 ${nRefs}` : "", draft.i2i.on && src ? "이미지→이미지" : ""].filter(Boolean).join(" · ")})</small>` : ""}</button>`}</div>
       ${toolStrip([
         ["ai", "AI 도우미", asking ? "생각 중…" : "", aiInner],
@@ -2589,7 +2662,8 @@ const SCREENS = {
         <p class="hint">전부 이 기기에만 있음. 다른 폰으로 옮기려면 내보내기 → 거기서 되살리기. 이 앱은 원본 짤뽑기와 저장소를 따로 씀.</p>
         ${originRaw() ? `<button type="button" class="ghost" id="originIn" ${originJob ? "disabled" : ""}>${originJob ? esc(originJob) : "원본 짤뽑기에서 가져오기"}</button>` : ""}
         <button type="button" class="ghost" id="export">기록 내보내기 (JSON, 토큰·그림 제외)</button>
-        <button type="button" class="danger" id="reset">전부 지우기</button>`)}
+        <button type="button" class="ghost" id="exportImg">보관한 그림 내보내기 (zip, ${keptN}장)</button>
+        <button type="button" class="ghost danger" id="reset">전부 지우기</button>`)}
       </div>`;
   },
 };
@@ -2736,7 +2810,8 @@ function wireAsk() {
     if (!ok.length) return;
     const changed = snapBlocks() !== before;
     const unmark = changed ? markDone(i, ok) : null;
-    toast(`${ok.length}개 넣음: ${msgs.join(" · ")}`, changed ? () => { unmark?.(); restoreBlocks(before); } : null);
+    const bad = msgs.filter((m) => /못 읽음|칸이 없음/.test(m)).length; // 못 넣은 블록은 넣은 수에서 뺀다
+    toast(`${ok.length - bad}개 넣음${bad ? `, ${bad}개 못 넣음` : ""}: ${msgs.join(" · ")}`, changed ? () => { unmark?.(); restoreBlocks(before); } : null);
     store.persist();
     if (todo.some((x) => x.b.lang === "scene") && route()[0] === "ai") location.hash = "#/gen"; else render();
   }));
@@ -2937,8 +3012,15 @@ function wire(name, arg, seq) {
     on("customW", "change", (e) => { d.settings.customW = clamp(Math.round(e.target.value / 64) * 64, 64, 1536, 832); store.save(); });
     on("customH", "change", (e) => { d.settings.customH = clamp(Math.round(e.target.value / 64) * 64, 64, 1536, 1216); store.save(); });
     on("go", "click", generate);
-    on("stop", "click", () => busy?.abort());
+    on("stop", "click", () => {
+      // 급해서 한 번 더 누른 것이 취소가 되지 않게 두 번 눌러야 멈춘다 (2026-11-22)
+      if (stopArmed()) { stopArm = 0; return busy?.abort(); }
+      stopArm = Date.now();
+      render();
+      setTimeout(() => { if (busy && !stopArmed()) render(); }, 3100);
+    });
     on("keep", "click", () => judge("keep"));
+    on("unkeep", "click", () => unkeep().then(render));
     on("drop", "click", () => judge("drop"));
     on("share", "click", () => now && shareImage(now.blob, now.rec));
     on("useSeed", "click", () => { if (!now) return; d.draft.seed = now.rec.seed; d.draft.seedLock = true; toast(`시드 ${now.rec.seed}로 고정함`); store.save(); });
@@ -3307,6 +3389,7 @@ function wire(name, arg, seq) {
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     });
+    on("exportImg", "click", exportImages);
     on("jsonIn", "click", () => $("jsonFile").click());
     on("jsonFile", "change", async (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) importJson(await f.text()); });
     on("pasteGo", "click", () => pasteToPiece($("pasteIn")?.value));
