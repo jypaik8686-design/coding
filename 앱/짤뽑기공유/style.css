@@ -522,3 +522,12 @@ figure.result, p.error { scroll-margin-top: 64px; }
 #kq { margin: 0 0 8px; }
 .reask { margin: 0 0 8px; }
 .chips + textarea { margin-top: 8px; }
+
+/* 2026-11-22: 프롬프트 전부 접기 */
+.phead { display: flex; align-items: center; justify-content: space-between; min-height: 44px; margin-top: 10px; border-top: 1px solid var(--line); }
+.phead h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.phead h2 small { margin-left: 6px; font-size: 12px; font-weight: 400; color: var(--dim); }
+.phead .mini { min-width: 44px; min-height: 44px; }
+.phead + .sec { border-top: 0; }
+.pfold { display: block; width: 100%; min-height: 46px; padding: 10px 12px; text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: 12px; color: var(--dim); font-size: 13px; font-weight: 400; line-height: 1.45; }
+.pfold span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
