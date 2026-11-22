@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """세션 지킴이 훅. 다섯 저장소에 같은 파일을 둔다 (Claude-의 tools/check_rules.py가 같은지 본다).
 
-  python3 .claude/hooks/guard.py start   # SessionStart: 규칙 세 줄 + 지금 상태 + 찾기표 전체 + 도구 지도를 맥락에 넣는다
+  python3 .claude/hooks/guard.py start   # SessionStart: 규칙 세 줄 + main 받아 오기 + 지금 상태 + 찾기표 전체 + 도구 지도를 맥락에 넣는다
   python3 .claude/hooks/guard.py stop    # Stop: 대답이 사실과 어긋나면 막고 고치게 한다
   python3 .claude/hooks/guard.py prompt  # UserPromptSubmit: 요청마다 "도구부터 찾는다"와 찾기표에서 맞는 줄(띄어쓰기 무시), 못 맞추면 직접 고르라는 한 줄
 
@@ -76,13 +76,38 @@ def state(repo, fetch=False):
     return name, f"main에 병합 전 커밋 {ahead}개, {pushed} (가지 {branch})"
 
 
+def catch_up(repo):
+    """세션 시작 때 origin/main을 새로 받아 온다. 깨끗하고 이 세션의 커밋이 없으면 그대로 따라잡는다(ff).
+    돌려주는 글: 따라잡았거나, 뒤처진 채 남았거나, 못 받아 왔을 때의 한마디. 최신이면 ""."""
+    code, _ = git(repo, "fetch", "-q", "origin", "main", timeout=12)
+    if code != 0:
+        return "원격을 못 받아 와서 main과 같은지 모름"
+    _, behind = git(repo, "rev-list", "--count", "HEAD..origin/main")
+    if behind in ("", "0"):
+        return ""
+    _, dirty = git(repo, "status", "--porcelain")
+    _, ahead = git(repo, "rev-list", "--count", "origin/main..HEAD")
+    if not dirty and ahead in ("", "0"):
+        code, _ = git(repo, "merge", "-q", "--ff-only", "origin/main", timeout=20)
+        if code == 0:
+            return f"main의 새 커밋 {behind}개를 받아 옴"
+    return f"main보다 {behind}개 뒤처짐. 고치기 전에 `git merge origin/main`으로 받기"
+
+
 def start():
     print(RULES)
     repos = repos_here()
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            notes = list(ex.map(catch_up, repos))
+    except Exception:
+        notes = ["원격을 못 받아 와서 main과 같은지 모름"] * len(repos)
     print("\n지금 상태 (병합 전이면 다른 세션에 안 보인다):")
-    for repo in repos:
+    for repo, note in zip(repos, notes):
         name, s = state(repo)
-        print(f"- {name}: {s or '깨끗함 (main과 같음)'}")
+        s = s or ("깨끗함" if note else "깨끗함 (main과 같음)")
+        print(f"- {name}: {s}{' · ' + note if note else ''}")
     표 = 표전체(repos)
     if 표:
         print("\n할 수 있는 일 (Claude-/할수있는일.md 찾기표 전체. MCP 도구는 시스템 메시지의 deferred 목록에 이름이 있고 ToolSearch로 불러 쓴다):")
