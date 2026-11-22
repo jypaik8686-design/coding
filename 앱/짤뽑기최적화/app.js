@@ -1753,10 +1753,10 @@ function attachBar() {
   return `
     <div class="attach">
       ${now ? (seen
-        ? `<p class="hint">방금 그림 #${recCode(now.rec)}은 비서가 이미 봐서 메모로 감: ${esc(cut(seen, 70))}</p><label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> 이번만 다시 보여 주기 <span class="hint">축소본</span></label>`
-        : `<label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> 방금 뽑은 그림 보여 주기 <span class="hint">처음 한 번만 구글로 감</span></label>`) : ""}
+        ? `<p class="hint">방금 그림 #${recCode(now.rec)}은 비서가 이미 봐서 메모로 감: ${esc(cut(seen, 70))}</p><label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> <span>이번만 다시 보여 주기 <span class="hint">축소본</span></span></label>`
+        : `<label class="line"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> <span>방금 뽑은 그림 보여 주기 <span class="hint">처음 한 번만 구글로 감</span></span></label>`) : ""}
       ${f ? `<div class="srcrow"><img src="${f.url}" alt="고른 사진"><div><span class="hint">${esc(f.name)} — 다음 질문에 한 번 보냄 (구글로 감)</span><button type="button" class="ghost sm" id="askUnpick">빼기</button></div></div>` : ""}
-      ${onRefs.length ? `<label class="line"><input type="checkbox" id="withRefs" ${ui.withRefs ? "checked" : ""}> 켠 참고 그림 ${onRefs.length}장을 눈으로 비교 <span class="hint">이번만, 축소본이 구글로 감</span></label>` : ""}
+      ${onRefs.length ? `<label class="line"><input type="checkbox" id="withRefs" ${ui.withRefs ? "checked" : ""}> <span>켠 참고 그림 ${onRefs.length}장을 눈으로 비교 <span class="hint">이번만, 축소본이 구글로 감</span></span></label>` : ""}
       ${ui.attachDoc ? `<div class="docrow"><span class="hint">파일 ‘${esc(ui.attachDoc.name)}’ — ${ui.attachDoc.len.toLocaleString()}자${ui.attachDoc.cut ? `, 앞 ${DOC_MAX.toLocaleString()}자만` : ""}. 다음 질문에 한 번 보냄 (구글로 감)</span><button type="button" class="ghost sm" id="askUndoc">빼기</button></div>` : ""}
       <input id="askFile" type="file" hidden>
       <button type="button" class="ghost sm" id="askPick">${f || ui.attachDoc ? "다른 사진·파일 고르기" : "사진·파일 붙이기"}</button>
@@ -1853,7 +1853,7 @@ function refInner() {
     ${on.length ? `<ul class="refs">${on.map(row).join("")}</ul>` : `<p class="hint">켜 둔 그림 없음. 위 서랍에서 눌러 켜기.</p>`}
     <input id="refFile" type="file" multiple hidden>
     <input id="swapFile" type="file" accept="image/*" hidden>
-    <label class="line"><input type="checkbox" id="autoMemo" ${s.autoMemo !== false ? "checked" : ""}> 새 그림은 넣을 때 비서가 한 번 봄 <span class="hint">구글로 한 번 감</span></label>
+    <label class="line"><input type="checkbox" id="autoMemo" ${s.autoMemo !== false ? "checked" : ""}> <span>새 그림은 넣을 때 비서가 한 번 봄 <span class="hint">구글로 한 번 감</span></span></label>
     ${memoJob ? `<p class="hint">비서가 그림을 보는 중 ${memoJob.done}/${memoJob.total}… <button type="button" class="ghost mini" id="memoStop">멈춤</button></p>` : need ? `<button type="button" class="ghost" id="memoAll">메모 없는 그림 ${need}장 한 번씩 보여 주기 <small>구글로 감</small></button>` : ""}
     ${memoErr ? `<p class="error" role="alert">${esc(memoErr)}</p>` : ""}
     <button type="button" class="ghost" id="addRef" ${refs.length >= LIB_MAX ? "disabled" : ""}>＋ 서랍에 그림·바이브 파일 넣기 (${refs.length}/${LIB_MAX})</button>
