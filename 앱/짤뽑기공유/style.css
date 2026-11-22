@@ -304,7 +304,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent-ink); margin: 0; }
 .wk button { min-height: 36px; padding: 0 6px; font-size: 12px; }
 #screen > .hint + .grid { margin-top: 12px; }
 
-/* 2026-11-19 보관소 */
+/* 2026-11-19 받은 자료 */
 section.blk { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; margin-top: 10px; background: var(--bg); }
 .bhead { display: flex; align-items: center; gap: 8px; }
 .bhead b { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
@@ -501,3 +501,22 @@ figure.result, p.error { scroll-margin-top: 64px; }
 .rdh .mini + .mini { margin-left: 4px; }
 .rdh { margin-top: 12px; }
 .rgrid + .refs, .rgrid + p.hint { margin-top: 4px; }
+
+/* 2026-11-22 손질: 설정 톱니바퀴, 글씨와 누름 영역 키움 */
+.gear { display: grid; place-items: center; width: 44px; height: 44px; margin-right: -10px; color: var(--dim); }
+.gear svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.gear:focus-visible { outline: 2px solid var(--gold); outline-offset: -4px; border-radius: 10px; }
+.sec + .seg { margin-top: 18px; }
+.hint, .notice, label { font-size: 13.5px; }
+.sec > summary small, .kday small, .kfh, .meta dt, li.row time, .stage small, button.big small, .ptext { font-size: 13px; }
+.seg button small, .tag, .att, .wk a, .rgrid .rt button, .pchips .pkl, .slothead .num, .tabs a { font-size: 12px; }
+.result figcaption { font-size: 12.5px; }
+.kbadge, .rgrid .noai { font-size: 11px; }
+button.mini { min-height: 44px; font-size: 13.5px; }
+.pchips .chip { min-height: 44px; padding: 0 14px; font-size: 14px; }
+.pchips { gap: 8px; }
+.toast .undo, .refbody .line { min-height: 44px; }
+.wk button { min-height: 40px; font-size: 13px; }
+.acts + .acts button { font-size: 14px; }
+::placeholder { color: color-mix(in srgb, var(--dim) 72%, transparent); }
+.gear[aria-current] { color: var(--gold); }
