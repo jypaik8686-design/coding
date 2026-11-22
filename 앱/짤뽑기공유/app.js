@@ -156,6 +156,18 @@ function normPresetEdits(raw) {
 }
 
 // 옛 데이터·깨진 값이 와도 항상 같은 꼴로 돌려준다. 항목 안쪽 칸은 펼치기가 메워 주지 않아서 여기서 하나씩 본다.
+// 기록 한 건을 믿을 수 있는 꼴로. id는 글자·숫자·-·_만, 숫자 칸은 숫자만 남긴다 (남이 준 JSON을 되살릴 때 화면 글에 태그가 섞이지 않게).
+// (정규식은 함수로 둔다: load()가 이 줄보다 먼저 돌아서 const로 두면 아직 없는 이름을 읽게 된다)
+function safeId(v) { return /^[\w-]{1,80}$/.test(String(v ?? "")); }
+function safeRec(r) {
+  if (!r || typeof r !== "object" || !safeId(r.id)) return null;
+  const o = { ...r, id: String(r.id) };
+  for (const k of ["w", "h", "seed", "steps", "scale", "cr", "at"]) if (o[k] != null && !(typeof o[k] === "number" && Number.isFinite(o[k]))) { const n = Number(o[k]); if (typeof o[k] === "string" && o[k].trim() !== "" && Number.isFinite(n)) o[k] = n; else delete o[k]; }
+  if (o.refs != null) o.refs = Array.isArray(o.refs) ? o.refs.filter((x) => x && typeof x === "object").map((x) => ({ ...x, s: Number.isFinite(Number(x.s)) ? Number(x.s) : 0 })) : undefined;
+  if (o.i2i != null) o.i2i = typeof o.i2i === "object" ? { ...o.i2i, strength: Number(o.i2i.strength) || 0, noise: Number(o.i2i.noise) || 0 } : undefined;
+  if (o.chars != null) o.chars = Array.isArray(o.chars) ? o.chars.filter((c) => c && typeof c.text === "string") : undefined;
+  return o;
+}
 function normPersona(raw) {
   const out = { sections: {}, extra: [], auto: { state: true, cand: true } };
   if (!raw || typeof raw !== "object") return out;
@@ -167,7 +179,7 @@ function normPersona(raw) {
     if (o.on === false) e.on = false;
     if (Object.keys(e).length) out.sections[p.id] = e;
   }
-  if (Array.isArray(raw.extra)) out.extra = raw.extra.filter((e) => e && e.id && typeof e.text === "string").map((e) => ({ id: String(e.id), name: String(e.name || "").slice(0, 30), text: e.text, on: e.on !== false })).slice(0, 20);
+  if (Array.isArray(raw.extra)) out.extra = raw.extra.filter((e) => e && safeId(e.id) && typeof e.text === "string").map((e) => ({ id: String(e.id), name: String(e.name || "").slice(0, 30), text: e.text, on: e.on !== false })).slice(0, 20);
   out.auto = { state: raw.auto?.state !== false, cand: raw.auto?.cand !== false };
   return out;
 }
@@ -214,7 +226,7 @@ function normAll(raw) {
       presets: normPresets(raw.presets),
       presetEdits: normPresetEdits(raw.presetEdits),
       userDict: Array.isArray(raw.userDict) ? normDict(raw.userDict) : starterDict(),
-      log: Array.isArray(raw.log) ? raw.log.filter((r) => r && r.id) : [],
+      log: Array.isArray(raw.log) ? raw.log.map(safeRec).filter(Boolean) : [],
       chat: Array.isArray(raw.chat) ? raw.chat.filter((m) => m && (m.role === "user" || m.role === "model") && typeof m.text === "string") : [],
       persona: normPersona(raw.persona),
     };
@@ -727,7 +739,10 @@ async function generate() {
       for (const r of used) ex.vibes.push(await encodeRef(r, rec.model, s.token.trim(), busy.signal)); // 한 장씩, 자동 재시도 없음
     } else if (plan === "precise") {
       ex.precise = [];
-      for (const r of used) ex.precise.push(await padPrecise(r.full));
+      for (const r of used) {
+        if (r.encOnly) throw new Error(`‘${r.name}’은 원본 그림이 없는 바이브 파일이라 정밀 참조로 못 씀. 참고 그림에서 끄거나 방식을 바이브로 바꾸기.`);
+        ex.precise.push(await padPrecise(r.full));
+      }
     }
     if (useI2i) ex.i2i = await fitCover(src.full, w, h);
     phase = "";
@@ -777,13 +792,14 @@ function trimLog() {
 
 async function judge(verdict) {
   if (!now) return;
-  const rec = store.data.log.find((r) => r.id === now.rec.id);
+  const cur = now; // 저장을 기다리는 사이 다른 그림으로 바뀌어도 누른 그림에만 표시한다
+  const rec = store.data.log.find((r) => r.id === cur.rec.id);
   if (!rec) return;
   if (verdict === "keep") {
-    try { await imgPut({ id: rec.id, full: now.blob, thumb: await thumbOf(now.blob) }); }
+    try { await imgPut({ id: rec.id, full: cur.blob, thumb: await thumbOf(cur.blob) }); }
     catch (e) { errMsg = `보관 실패: 이 기기 저장 공간이 모자라거나 막혀 있음 (${e?.name || e}). ‘저장’으로 사진첩에 먼저 빼 두기.`; return render(); }
     rec.verdict = "keep";
-    now.rec.verdict = "keep";
+    cur.rec.verdict = "keep";
   } else {
     // 버림은 완전히 버리는 것: 목록에서 빼고, 보관한 그림이었다면 보관함 저장분도 지운다. 실수를 위해 9초 동안만 알림의 ‘되돌리기’로 살릴 수 있다.
     const entry = now, before = rec.verdict, idx = hist.indexOf(entry);
@@ -796,7 +812,7 @@ async function judge(verdict) {
       rec.verdict = before;
       hist.splice(Math.min(Math.max(idx, 0), hist.length), 0, entry);
       now = entry;
-      if (row) await imgPut(row).catch(() => {});
+      if (row) await imgPut(row).catch(() => toast("기록은 되돌렸지만 그림은 못 되살림 (저장 공간). 이 그림을 ‘저장’으로 빼 두기"));
       store.save();
     }, () => URL.revokeObjectURL(entry.url));
   }
@@ -817,9 +833,11 @@ async function removeKeptMany(ids) {
   }
   ui.ksel = null;
   toast(`${ids.length}장 지움`, async () => {
-    for (const row of rows) await imgPut(row).catch(() => {});
+    let lost = 0;
+    for (const row of rows) await imgPut(row).catch(() => { lost++; });
     for (const rec of recs) rec.verdict = "keep";
     store.save();
+    if (lost) toast(`기록은 되돌렸지만 그림 ${lost}장은 못 되살림 (저장 공간)`);
   });
   store.save();
 }
@@ -1006,7 +1024,7 @@ function importJson(text) {
   try { raw = JSON.parse(text); } catch { return toast("JSON이 아님. ‘기록 내보내기’로 받은 파일을 고르기"); }
   if (!raw || typeof raw !== "object" || !(Array.isArray(raw.log) || Array.isArray(raw.presets) || raw.taste)) return toast("짤뽑기에서 내보낸 기록이 아님");
   const inc = normAll(raw), d = store.data;
-  if (!confirm(`불러올 것: 기록 ${inc.log.length}건, 내 프리셋 ${inc.presets.length}개, 내 단어 ${inc.userDict.length}개.\n\n기록·프리셋·내 단어는 지금 것에 더함(같은 것은 건너뜀).\n화풍·작가, 기본 빼는 것, 비서 지시문은 불러온 값으로 바꿈.\n토큰·키·지금 칸·대화는 그대로.\n그림은 JSON에 없어서 안 따라옴.`)) return;
+  if (!confirm(`불러올 것: 기록 ${inc.log.length}건, 내 프리셋 ${inc.presets.length}개, 내 단어 ${inc.userDict.length}개.\n\n기록·프리셋·내 단어는 지금 것에 더함(같은 것은 건너뜀).\n화풍·작가, 기본 빼는 것, 비서 지시문은 파일에 들어 있으면 그 값으로 바꿈.\n토큰·키·지금 칸·대화는 그대로.\n그림은 JSON에 없어서 안 따라옴.`)) return;
   const before = JSON.stringify(d);
   const ids = new Set(d.log.map((r) => r.id));
   d.log = [...d.log, ...inc.log.filter((r) => !ids.has(r.id))].sort((a, b) => (b.at || 0) - (a.at || 0));
@@ -1016,8 +1034,13 @@ function importJson(text) {
   for (const [k, v] of Object.entries(inc.presetEdits)) if (!d.presetEdits[k]) d.presetEdits[k] = v;
   const words = new Set(d.userDict.map((e) => e.word.trim()));
   d.userDict = [...d.userDict, ...inc.userDict.filter((e) => e.word.trim() && !words.has(e.word.trim()))].slice(0, DICT_MAX);
-  d.taste = { ...d.taste, style: inc.taste.style, negative: inc.taste.negative };
-  d.persona = inc.persona;
+  // 파일에 든 칸만 바꾼다. 옛 파일(비서 지시문이 없거나 화풍 칸이 없는 것)이 지금 값을 처음 값으로 덮지 않게.
+  if (typeof raw.taste?.style === "string") d.taste.style = inc.taste.style;
+  if (typeof raw.taste?.negative === "string") {
+    d.taste.negative = inc.taste.negative;
+    if (!raw.taste.negSplit && tg(inc.draft.neg)) d.draft.neg = mergeTags(d.draft.neg, inc.draft.neg, false); // 기본·이번으로 나누기 전 파일: 덧붙였던 태그는 이번 빼는 것으로
+  }
+  if (raw.persona && typeof raw.persona === "object") d.persona = inc.persona;
   toast(`기록을 불러옴 (기록 ${d.log.length}건)`, () => { store.data = normAll(JSON.parse(before)); store.save(); });
   store.save();
 }
@@ -1253,11 +1276,13 @@ async function ask(text, opts = {}) {
     let i = d.chat.length - 1;
     while (i >= 0 && !(d.chat[i].role === "user" && d.chat[i].text === text)) i--;
     if (i >= 0) d.chat.splice(i, 1);
-    askDraft = text;
+    askDraft = askDraft.trim() && askDraft.trim() !== text ? `${text}\n${askDraft}` : text; // 기다리며 치던 글이 있으면 그 앞에 붙인다
     store.persist();
     if (e.name === "AbortError") askErr = "취소함.";
     else if (e instanceof TypeError) askErr = "구글 서버에 닿지 못함. 망이 끊겼는지 보기.";
     else askErr = e.message || String(e);
+    const tab = route()[0];
+    if (e.name !== "AbortError" && !(tab === "ai" || (tab === "gen" && ui.open.ai))) toast(`비서가 답하지 못함: ${askErr} 질문은 입력칸에 되돌려 둠`);
   } finally {
     asking = null;
     render();
@@ -2140,7 +2165,7 @@ const SCREENS = {
       if (!r) return `<p class="empty">없는 그림.<br><a href="#/keep">보관함으로</a></p>`;
       const prev = kept[k - 1], next = kept[k + 1];
       const field = (key, label, v) => `<div class="kf"><div class="kfh"><span>${label}</span>${v ? `<button type="button" class="ghost mini" data-kcopy="${key}">복사</button>` : ""}</div><p class="kfv">${esc(v) || "—"}</p></div>`;
-      const vals = `시드 ${r.seed ?? "모름"} · ${r.w}×${r.h} · ${r.steps}스텝 · 강도 ${r.scale} · ${esc(r.model)} · ${esc(SAMPLERS[r.sampler] || "Euler Ancestral")}${r.noise ? ` · ${esc(r.noise)}` : ""}${r.cr ? ` · cfg rescale ${r.cr}` : ""}${r.vb ? " · Variety+" : ""}${r.refs?.length ? ` · ${r.mode === "precise" ? "정밀 참조" : "바이브"} ${r.refs.length}장(강도 ${r.refs.map((x) => x.s).join("·")}, 다시 뽑기에는 그림이 안 따라옴)` : ""}${r.i2i ? ` · 이미지→이미지(strength ${r.i2i.strength}, noise ${r.i2i.noise}, 바탕 그림은 안 따라옴)` : ""}`;
+      const vals = `시드 ${r.seed ?? "모름"} · ${r.w ?? "?"}×${r.h ?? "?"} · ${r.steps}스텝 · 강도 ${r.scale} · ${esc(r.model)} · ${esc(SAMPLERS[r.sampler] || "Euler Ancestral")}${r.noise ? ` · ${esc(r.noise)}` : ""}${r.cr ? ` · cfg rescale ${r.cr}` : ""}${r.vb ? " · Variety+" : ""}${r.refs?.length ? ` · ${r.mode === "precise" ? "정밀 참조" : "바이브"} ${r.refs.length}장(강도 ${r.refs.map((x) => x.s).join("·")}, 다시 뽑기에는 그림이 안 따라옴)` : ""}${r.i2i ? ` · 이미지→이미지(strength ${r.i2i.strength}, noise ${r.i2i.noise}, 바탕 그림은 안 따라옴)` : ""}`;
       return `
         <nav class="knav"><a class="back" href="#/keep">‹ 보관함</a><span class="knum">${k + 1} / ${kept.length}</span>
           <span class="kpn">${prev ? `<a href="#/keep/${prev.id}" aria-label="이전(더 새 그림)">‹</a>` : `<span aria-hidden="true">‹</span>`}${next ? `<a href="#/keep/${next.id}" aria-label="다음(더 옛 그림)">›</a>` : `<span aria-hidden="true">›</span>`}</span></nav>
@@ -2357,6 +2382,7 @@ function wireAsk() {
       const t = $("ask"); t?.focus(); t?.setSelectionRange(t.value.length, t.value.length);
       return;
     }
+    if (asking) return toast("앞 질문의 답을 기다리는 중. 끝나거나 취소한 뒤 누르기");
     ask(QUICK[b.dataset.quick], { image: ui.withImg && !!now });
   }));
   const blockOf = (id) => { const [i, j] = id.split(":").map(Number); return parseBlocks(d.chat[i]?.text || "")[j]?.v; };
@@ -2552,9 +2578,10 @@ function wireVault(id) {
 // [data-thumb] 칸에 보관한 그림의 썸네일을 채운다. 화면이 다시 그려졌으면(seq가 바뀜) 그만둔다.
 function fillThumbs(seq) {
   document.querySelectorAll("[data-thumb]").forEach(async (a) => {
-    const row = await imgGet(a.dataset.thumb).catch(() => null);
+    let bad = false;
+    const row = await imgGet(a.dataset.thumb).catch(() => { bad = true; return null; });
     if (seq !== renderSeq) return;
-    if (!row) { a.textContent = "그림 없음"; return; }
+    if (!row) { a.textContent = bad ? "못 읽음" : "그림 없음"; return; }
     const u = URL.createObjectURL(row.thumb || row.full);
     thumbUrls.push(u);
     const badge = a.querySelector(".kbadge")?.outerHTML || "";
@@ -2865,9 +2892,10 @@ function wire(name, arg, seq) {
   if (name === "keep" && arg) {
     const rec = d.log.find((r) => r.id === arg);
     let blob = null;
-    imgGet(arg).catch(() => null).then((row) => {
+    let bad = false;
+    imgGet(arg).catch(() => { bad = true; return null; }).then((row) => {
       if (seq !== renderSeq || !$("full")) return;
-      if (!row) { $("full").replaceWith(Object.assign(document.createElement("p"), { className: "error", textContent: "그림 파일이 이 기기에서 사라졌음. 설정값만 남아 있음." })); return; }
+      if (!row) { $("full").replaceWith(Object.assign(document.createElement("p"), { className: "error", textContent: bad ? "그림 저장소를 지금 못 읽음. 그림이 지워진 것은 아닐 수 있으니 새로 고쳐 다시 보기." : "그림 파일이 이 기기에서 사라졌음. 설정값만 남아 있음." })); return; }
       blob = row.full;
       const u = URL.createObjectURL(blob);
       thumbUrls.push(u);
