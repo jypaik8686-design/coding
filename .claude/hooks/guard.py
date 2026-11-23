@@ -161,11 +161,30 @@ def 찾기표(prompt, 최대=4):
             if on and ln.startswith("|"):
                 c = [x.strip() for x in ln.strip().strip("|").split("|")]
                 if len(c) >= 2 and not set(c[0]) <= set("-: ") and c[0] != "찾는 말":
-                    keys = [붙여(k) for k in c[0].split(",") if len(붙여(k)) >= 2]
-                    if any(k in 붙여(prompt) for k in keys):
+                    if any(맞나(k, prompt) for k in c[0].split(",")):
                         rows.append(c[1])
         return rows[:최대]
     return []
+
+
+def 맞나(key, prompt):
+    """찾는 말이 요청에 들었나. 띄어쓰기는 무시하되('자료모아'='자료 모아', '여 론'='여론'),
+    어절 중간에서 시작해 다음 어절로 넘어가는 것은 버린다 ('내가 사용'을 '가사'로 맞추지 않게)."""
+    k = 붙여(key)
+    if len(k) < 2:
+        return False
+    words = [w for w in (붙여(x) for x in prompt.split()) if w]
+    text, starts, pos = "".join(words), [], 0
+    for w in words:
+        starts.append(pos)
+        pos += len(w)
+    i = text.find(k)
+    while i != -1:
+        end = i + len(k)
+        if i in starts or not any(i < st < end for st in starts):
+            return True
+        i = text.find(k, i + 1)
+    return False
 
 
 def 붙여(s):
