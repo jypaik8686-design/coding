@@ -134,9 +134,10 @@ def start():
 
 
 TOOL_FIRST = ("[도구 먼저] 요청을 바로 실행하지 않는다. 먼저 맞는 도구를 찾는다: "
-              "① 아래 찾기표 줄, Claude-의 할수있는일.md, `check_rules.py --길잡이` "
-              "② 설치된 스킬(Skill 도구)과 SearchSkills·SearchPlugins "
-              "③ 없으면 외부 스킬을 검색(firecrawl_developer_search의 skills:\"only\", 웹 검색)하되 참고용으로만 읽고 설치·실행하지 않는다. "
+              "① 설치된 `superpowers:*` 스킬(맞는 것이 있으면 먼저 불러온다) "
+              "② 아래 찾기표 줄, Claude-의 할수있는일.md, `check_rules.py --길잡이` "
+              "③ 그 밖의 설치된 스킬(Skill 도구)과 SearchSkills·SearchPlugins "
+              "④ 없으면 외부 스킬을 검색(firecrawl_developer_search의 skills:\"only\", 웹 검색)하되 참고용으로만 읽고 설치·실행하지 않는다. "
               "고른 도구 이름을 대답 첫 줄에 밝히고 실행한다. 한두 줄짜리 질문·잡담은 건너뛴다.")
 NO_MATCH = ("[찾기표] 낱말로는 못 맞췄다. 세션 시작 때 넣은 찾기표 전체와 시스템 메시지의 deferred 도구 이름 목록에서 직접 고른다. "
             "MCP 도구는 이름만 보이고 ToolSearch로 불러와야 쓴다. 기본 도구만 있다고 답하지 않는다.")
