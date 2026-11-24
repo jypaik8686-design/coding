@@ -1,5 +1,5 @@
 // 쓸 만한 프롬프트 모음. 눌러서 이번 그림·취향 그림체·빼는 것에 넣는다.
-// 확정 = NovelAI 문서에서 옮긴 것. 가안 = 이 앱이 짠 것. 태그는 전부 tags.json에서 게시물 수를 확인했다(2026-11-18). 짤뽑기에서 복사하고 개인 인물·그림체는 뺐다(2026-11-21).
+// 확정 = NovelAI 문서에서 옮긴 것. 가안 = 이 앱이 짠 것. 태그는 전부 tags.json에서 게시물 수를 확인했다(2026-11-18). 짤뽑기에서 복사하고 개인 설정은 뺐다(2026-11-21, 2026-11-24).
 // 한 줄: { name, text, to: "scene" | "style" | "neg", at?: "front"(맨 앞에 더함), neg?: 같이 더할 빼는 것, note, ok: 확정이면 true }
 
 export const PRESETS = {
@@ -11,26 +11,20 @@ export const PRESETS = {
     { name: "스케치 라인아트", to: "style",
       text: "sketch, lineart, painterly, limited palette, film grain",
       note: "거친 선과 붓 느낌" },
-    { name: "진홍과 회색", to: "style",
-      text: "limited palette, red theme, grey theme, high contrast, backlighting, vignetting, film grain",
-      note: "진홍과 회색 두 색" },
-    { name: "검정·금·진홍", to: "style",
-      text: "limited palette, black theme, red theme, gold trim, high contrast, backlighting",
-      note: "검정·금·진홍 배색" },
+    { name: "파스텔", to: "style",
+      text: "pastel colors, bloom, light particles",
+      note: "옅은 색과 부드러운 빛" },
+    { name: "단색 평면", to: "style",
+      text: "flat color, limited palette",
+      note: "음영을 줄인 평평한 색" },
   ],
   "자세·구도": [
-    { name: "내려다보는 오만", to: "scene",
-      text: "from below, looking down, expressionless, crossed arms, head tilt, half-closed eyes, jitome, upper body",
-      note: "로우앵글로 내려다봄" },
-    { name: "왕좌에 앉아", to: "scene",
-      text: "sitting, throne, crossed legs, head rest, hand on own chin, from below, looking down",
-      note: "왕좌에 다리 꼬고 턱 굄" },
-    { name: "올려다보는 굴욕", to: "scene",
-      text: "from above, looking up, tears, tearing up, scared, trembling, upper body",
-      note: "눈물 섞인 눈으로 올려다봄" },
-    { name: "짜증·겁먹음", to: "scene",
-      text: "annoyed, jitome, looking at viewer, hand on own hip, upper body",
-      note: "겁먹음은 annoyed 대신 scared, trembling" },
+    { name: "앉은 모습", to: "scene",
+      text: "sitting, looking at viewer, full body",
+      note: "앉아서 정면을 봄" },
+    { name: "손 흔들기", to: "scene",
+      text: "waving, smile, open mouth, upper body",
+      note: "웃으며 손 흔듦" },
     { name: "정면 상반신", to: "scene",
       text: "upper body, looking at viewer, portrait",
       note: "얼굴이 크게 잡힘" },
@@ -52,8 +46,5 @@ export const PRESETS = {
     { name: "손·팔 보강", ok: true, to: "neg",
       text: "bad hands, missing fingers, extra digits, fewer digits, extra arms, deformed",
       note: "손·팔 형태 오류 줄이기" },
-    { name: "늙어 보임 막기", ok: true, to: "neg",
-      text: "old, aged, wrinkles, elf ears",
-      note: "결과물이 늙어 보일 때" },
   ],
 };
