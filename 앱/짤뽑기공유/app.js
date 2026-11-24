@@ -76,7 +76,7 @@ const str = (v, max) => (typeof v === "string" ? v.slice(0, max) : "");
 // 내 단어 사전의 처음 낱말. 구도·시선 낱말만, 기본 사전(tags.json)에 있고 게시물 1,000개 이상인 태그로 옮긴 것(2026-11-18 확인). 사용자가 고치거나 지울 수 있다.
 const STARTER_DICT = [
   ["로우앵글", "from below"], ["내려다보는", "looking down, from below"], ["올려다보는", "looking up, from above"],
-  ["팔짱", "crossed arms"], ["턱 괴", "head rest, hand on own chin"], ["눈물", "tears"], ["웃는", "smile"],
+  ["팔짱", "crossed arms"], ["턱 괴", "head rest, hand on own chin"], ["윙크", "one eye closed"], ["웃는", "smile"],
   ["상반신", "upper body"], ["전신", "full body"], ["클로즈업", "close-up"], ["돌아봄", "looking back"], ["옆모습", "profile"],
 ];
 const starterDict = () => STARTER_DICT.map(([word, tags]) => ({ id: crypto.randomUUID(), word, tags }));
@@ -1574,7 +1574,7 @@ function aiInner() {
     ${shown.length ? `<div class="chat">${shown.map((i) => msgHtml(chat[i], i)).join("")}${asking ? `<div class="msg ai dim">생각 중…</div>` : ""}</div>` : (asking ? `<div class="msg ai dim">생각 중…</div>` : "")}
     ${askErr ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
     ${reAskBtn()}
-    <textarea id="ask" rows="3" placeholder="예: 팔짱 끼고 내려다보게, 표정은 더 차갑게" autocomplete="off">${esc(askDraft)}</textarea>
+    <textarea id="ask" rows="3" placeholder="예: 앉아서 손 흔들게, 표정은 더 밝게" autocomplete="off">${esc(askDraft)}</textarea>
     ${attachBar()}
     ${asking ? `<button type="button" id="stopAsk" class="ghost">눌러서 취소</button>` : `<button type="button" id="send">AI에게 부탁</button>`}
     <p class="hint"><a href="#/ai">‘비서’ 탭</a> 맨 아래에서 비서 지시문을 고칠 수 있음.</p>`;
@@ -1929,7 +1929,7 @@ function dictSearch(q) {
 }
 function dictResults() {
   const q = ui.dq.trim();
-  if (!q) return `<p class="hint">한국어 낱말이나 영어 태그로 찾음. 태그를 누르면 ‘이번 그림’에 더함. 예: 금발, blonde</p>`;
+  if (!q) return `<p class="hint">한국어 낱말이나 영어 태그로 찾음. 태그를 누르면 ‘이번 그림’에 더함. 예: 안경, glasses</p>`;
   const rows = dictSearch(q);
   const none = `<p class="hint">${rows.length ? "" : tags ? "찾은 것이 없음. " : "기본 사전을 못 받아서 내 단어만 찾음. "}‘${esc(q)}’를 내 단어로 직접 더할 수 있음.</p><button type="button" class="ghost sm" data-dnew="${esc(q)}">‘${esc(q)}’ 내 단어로 더하기</button>`;
   return rows.map((r) => `<div class="drow"><b>${esc(r.word)}</b>${r.own ? " <small>내 단어</small>" : ""}<div class="chips">${r.tags.map((t) => `<button type="button" class="chip" data-dadd="${esc(t)}">${esc(t)} <small>${tags && !r.own ? fmtN(tags.n[t]).replace("게시물 ", "") : tags ? fmtN(tags.n[t.toLowerCase()]).replace("게시물 ", "") : ""}</small></button>`).join("")}</div></div>`).join("") + none;
@@ -1949,7 +1949,7 @@ function dictPanel() {
   const body = `
     <p class="hint" id="dstatus">${dictStatus()}</p>
     <label for="dq">사전에서 찾기</label>
-    <input id="dq" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="금발, blonde, 팔짱 …" value="${esc(ui.dq)}">
+    <input id="dq" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="안경, glasses, 팔짱 …" value="${esc(ui.dq)}">
     <div id="dres">${dictResults()}</div>
     <h2>내 단어 <small>${store.data.userDict.length}개</small></h2>
     <p class="hint">여기 적은 낱말이 비서에게 한 말에 들어 있으면 그 태그가 사전 후보로 먼저 붙음. 숫자는 기본 사전의 게시물 수(1000 미만이면 잘 안 먹을 수 있음).</p>
@@ -2008,7 +2008,7 @@ function slotsPanel() {
     ${row("style", "2순위", "화풍·작가", "‘화풍·작가’ 탭과 같은 칸", d.taste.style, "{painterly}, artist:이름")}
     ${row("traits", "3순위", "캐릭터 고유 특징", "체형, 머리, 눈 색, 표정", sl.traits, "silver hair, long hair, blue eyes")}
     ${row("outfit", "4순위", "의상·장신구", "", sl.outfit, "black suit, necktie")}`)}
-    ${row("pose", "5순위", "포즈·시선·구도", "", sl.pose, "crossed arms, from below, upper body")}
+    ${row("pose", "5순위", "포즈·시선·구도", "", sl.pose, "sitting, looking at viewer, upper body")}
     ${row("bg", "6순위", "배경·조명·분위기·이펙트", "", sl.bg, "palace, backlighting")}
     ${tg(sl.rest) ? row("rest", "그 밖에", "칸을 나누기 전의 글", "위 칸으로 옮겨 적고 비워도 됨", sl.rest, "") : ""}
     <div class="slot">${head("neg", "빼는 것", "이번 그림")}
