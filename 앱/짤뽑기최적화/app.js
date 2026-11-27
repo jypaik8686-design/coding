@@ -1508,7 +1508,7 @@ function refsText(full = true) {
 function personText() {
   const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
   const now = list.filter((e) => chipOn(e.p)).map((e) => e.p.name);
-  return `\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
+  return `\n\n## 내기 전 검토\n블록을 내기 전에 한 번 훑는다: 태그가 맞는 칸 줄에 있나, 같은 태그가 두 줄에 겹치나, 빼는 것(기본·이번)에 있는 태그를 넣으려 하나, 단부루에 없는 말(자연어·한국어)이 섞였나, 인원수가 인물 수와 맞나. 걸리면 고친 블록만 내고 무엇을 고쳤는지 한 줄. 확실하지 않은 태그는 search 블록으로 찾는다.\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
 }
 function fullPersona(sent, libFull = true) {
   const d = store.data;
@@ -2666,10 +2666,10 @@ function diagnose() {
     out.push({ msg: `‘${key}’ 태그가 넣을 것(${SLOT_LABEL[k]})과 ${where}에 둘 다 있음: 서로 지워서 효과가 약함`, fix: [`${where}에서 지우기`, () => { if (negs.get(key) === "neg") d.draft.neg = tagsOf(d.draft.neg).filter((x) => ckey(x) !== key).join(", "); else d.taste.negative = tagsOf(d.taste.negative).filter((x) => ckey(x) !== key).join(", "); }] });
   }
   // 6 배경
-  if (!s.bgOn && tg(sl.bg)) out.push({ msg: "배경 깔기가 꺼져 있어 6 배경 칸 글이 안 감 (대신 simple background)", fix: ["배경 깔기 켜기", () => { s.bgOn = true; }] });
-  if (!tg(sl.traits) && !d.draft.chars.length) out.push({ msg: "3 특징 칸이 비어 있음: 인물 생김새가 매번 달라짐" });
+  if (!s.bgOn && tg(sl.bg)) out.push({ soft: true, msg: "배경 깔기가 꺼져 있어 6 배경 칸 글이 안 감 (대신 simple background)", fix: ["배경 깔기 켜기", () => { s.bgOn = true; }] });
+  if (!tg(sl.traits) && !d.draft.chars.length) out.push({ soft: true, msg: "3 특징 칸이 비어 있음: 인물 생김새가 매번 달라짐" });
   // 7 사전 (받아 둔 때만)
-  if (tags) { const c = checkTags([sl.traits, sl.outfit, sl.pose, s.bgOn ? sl.bg : ""].join(", ")); if (c?.missing.length) out.push({ msg: `사전에 없는 태그 ${c.missing.length}개 (자연어 문구·오타·캐릭터 이름일 수 있음): ${c.missing.slice(0, 6).join(", ")}` }); }
+  if (tags) { const c = checkTags([sl.traits, sl.outfit, sl.pose, s.bgOn ? sl.bg : ""].join(", ")); if (c?.missing.length) out.push({ soft: true, msg: `사전에 없는 태그 ${c.missing.length}개 (자연어 문구·오타·캐릭터 이름일 수 있음): ${c.missing.slice(0, 6).join(", ")}` }); }
   return out;
 }
 function diagHtml() {
@@ -2677,7 +2677,7 @@ function diagHtml() {
   const list = ui.diag;
   return `<section class="diag" aria-label="프롬프트 점검 결과"><div class="toolhead"><h2>프롬프트 점검 <small>${list.length ? `${list.length}개` : "문제 없음"}</small></h2><button type="button" class="ghost mini" id="diagClose">닫기</button></div>
     ${list.length ? `<ul>${list.map((x, i) => `<li><p>${esc(x.msg)}</p>${x.fix ? `<button type="button" class="ghost sm" data-dfix="${i}">${esc(x.fix[0])}</button>` : ""}</li>`).join("")}</ul>
-    <button type="button" class="ghost sm" id="diagAsk">비서에게 고쳐 달라기</button>` : `<p class="hint">칸 나누기·겹침·괄호·인원수·빼는 것과의 충돌을 봤고 걸린 것이 없음. 그림이 이상하면 태그 뜻이 문제일 수 있으니 비서에게 그림을 보여 주고 묻기.</p>`}</section>`;
+    <button type="button" class="ghost sm" id="diagAsk">비서에게 고쳐 달라기</button>` + `<label class="line mini"><input type="checkbox" id="preCheck" ${store.data.settings.preCheck !== false ? "checked" : ""}> 프롬프트가 바뀐 뒤 처음 뽑기 전에 한 번 점검</label>` : `<p class="hint">칸 나누기·겹침·괄호·인원수·빼는 것과의 충돌을 봤고 걸린 것이 없음. 그림이 이상하면 태그 뜻이 문제일 수 있으니 비서에게 그림을 보여 주고 묻기.</p>`}</section>`;
 }
 // 2026-11-22: 프롬프트 칸 전부 접기. 접으면 완성된 프롬프트 두 줄만 보이고, 그 줄을 눌러도 펼쳐진다. 접힌 상태는 settings.foldPrompt에 남는다(옛 데이터에는 없어 펼친 것으로 읽음).
 // 뽑기 화면의 비서 한 줄 (2026-11-27, 사용자: 편의성). 비서 탭으로 가지 않고 여기서 묻고, 답의 블록도 여기서 넣는다.
@@ -2715,6 +2715,7 @@ function promptBlock() {
 function wireSlots() {
   on("diagGo", "click", async () => { await loadTags().catch(() => {}); ui.diag = diagnose(); render(); $("diagClose")?.scrollIntoView({ behavior: "smooth", block: "center" }); });
   on("diagClose", "click", () => { ui.diag = null; render(); });
+  on("preCheck", "change", (e) => { store.data.settings.preCheck = e.target.checked; store.save(); });
   document.querySelectorAll("[data-dfix]").forEach((b) => b.addEventListener("click", () => {
     const x = ui.diag?.[+b.dataset.dfix]; if (!x?.fix) return;
     const before = snapBlocks(); x.fix[1](); ui.diag = diagnose(); store.save();
@@ -3098,7 +3099,7 @@ const SCREENS = {
 const TITLES = { gen: "짤뽑기 최적화판", ai: "비서", keep: "보관함", vault: "받은 자료", taste: "화풍·작가", set: "설정" };
 const route = () => (location.hash.replace(/^#\/?/, "") || "gen").split("/");
 let thumbUrls = [];
-let renderSeq = 0, lastScreen = "", genStartY = 0;
+let renderSeq = 0, lastScreen = "", genStartY = 0, checkedKey = "";
 
 function render() {
   const [n, arg] = route();
@@ -3476,7 +3477,19 @@ function wire(name, arg, seq) {
     document.querySelectorAll("[data-size]").forEach((b) => b.addEventListener("click", () => { d.settings.size = b.dataset.size; store.save(); }));
     on("customW", "change", (e) => { d.settings.customW = clamp(Math.round(e.target.value / 64) * 64, 64, 1536, 832); store.save(); });
     on("customH", "change", (e) => { d.settings.customH = clamp(Math.round(e.target.value / 64) * 64, 64, 1536, 1216); store.save(); });
-    on("go", "click", generate);
+    // 2026-11-27(사용자: 프롬프트는 한 번 검토하는 과정 포함): 프롬프트가 바뀐 뒤 처음 누른 뽑기는 점검을 한 번 돌린다.
+    // 참고용(soft)이 아닌 문제가 있으면 목록을 띄우고 멈춘다. 같은 프롬프트로 한 번 더 누르면 그대로 뽑는다. settings.preCheck === false면 안 함.
+    on("go", "click", async () => {
+      const st = d.settings;
+      const key = JSON.stringify([composePrompt(d.draft.slots, d.taste.style, st), d.taste.negative, d.draft.neg, d.draft.chars.map((c) => c.text)]);
+      if (st.preCheck !== false && key !== checkedKey) {
+        checkedKey = key;
+        await loadTags().catch(() => {});
+        const list = diagnose(), hard = list.filter((x) => !x.soft);
+        if (hard.length) { ui.diag = list; render(); $("diagClose")?.scrollIntoView({ behavior: "smooth", block: "center" }); toast(`뽑기 전에 한 번 점검함: ${hard.length}개 걸림. 고치거나, 그대로면 ‘뽑기’를 한 번 더`); return; }
+      }
+      generate();
+    });
     on("stop", "click", () => {
       // 급해서 한 번 더 누른 것이 취소가 되지 않게 두 번 눌러야 멈춘다 (2026-11-22)
       if (stopArmed()) { stopArm = 0; return busy?.abort(); }
