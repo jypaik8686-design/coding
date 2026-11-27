@@ -1500,7 +1500,12 @@ function fullPersona(sent, libFull = true) {
 function sizeParts(sys, contents, pics, conf) {
   const est = (n) => Math.round(n / 1.9);
   const out = [];
-  for (const sec of ("\n\n" + sys).split(/\n\n(?=## )/)) { if (!sec.trim()) continue; const name = sec.trim().startsWith("## ") ? sec.trim().split("\n")[0].slice(3, 24) : "지시문 앞머리"; out.push([name, sec.length, est(sec.length)]); }
+  // 지시문: 조각마다 이름으로(고친 조각은 ‘고침’). 그 뒤 앱이 붙이는 칸(서랍·태그 찾기·인물·지금 상태)은 제목으로 나눈다.
+  const pc = store.data.persona;
+  for (const p of PERSONA_PARTS) { const st = partState(pc, p); if (st.on && st.text.trim()) out.push([`지시문: ${p.name}${st.edited ? " (고침)" : ""}`, st.text.length, est(st.text.length)]); }
+  for (const e of Array.isArray(pc.extra) ? pc.extra : []) if (e?.on !== false && e?.text?.trim()) out.push([`내 조각: ${e.name || "이름 없음"}`, e.text.length, est(e.text.length)]);
+  const tail = sys.slice(buildPersona(pc).length);
+  for (const sec of tail.split(/\n\n(?=## )/)) { if (!sec.trim()) continue; out.push([sec.trim().split("\n")[0].replace(/^## /, "").slice(0, 24), sec.length, est(sec.length)]); }
   const last = contents.at(-1), past = contents.slice(0, -1);
   const pastN = past.reduce((a, c) => a + c.parts.reduce((b, x) => b + (x.text?.length || 0), 0), 0);
   if (past.length) out.push([`지난 대화 ${past.length}개`, pastN, est(pastN)]);
@@ -2437,16 +2442,19 @@ function dictPanel() {
 
 // ── 비서 지시문 고치기 ───────────────────────────────────────
 // 기본 조각(assistant.js)은 바꾸지 않고, 고친 것만 store.data.persona에 덮어쓴다. 되돌리면 기본 글이 다시 나온다.
+const PART_BIG = 1500; // 조각 하나가 이보다 길면 ‘김’ 표시 (2026-11-27: 첫 조각이 8,600토큰쯤 된 사용자 신고)
 function personaEditor() {
   const pc = store.data.persona;
   const part = (p) => {
     const st = partState(pc, p);
-    return sec(`pp:${p.id}`, esc(p.name), [st.on ? "" : "꺼짐", st.edited ? "고침" : ""].filter(Boolean).join(" · "), `
+    const big = st.on && st.text.length > PART_BIG;
+    return sec(`pp:${p.id}`, esc(p.name), [st.on ? "" : "꺼짐", st.edited ? "고침" : "", `${st.text.length.toLocaleString("ko-KR")}자${big ? ` · 김(질문마다 약 ${Math.round(st.text.length / 1.9).toLocaleString("ko-KR")}토큰)` : ""}`].filter(Boolean).join(" · "), `
+      ${big ? `<p class="hint warn">이 조각이 질문마다 그대로 감. 기본 글은 ${p.text.length.toLocaleString("ko-KR")}자. 줄이거나 ‘기본값으로’를 누르면 토큰과 답 기다림이 줄어듦.</p>` : ""}
       <label class="line"><input type="checkbox" data-pon="${p.id}" ${st.on ? "checked" : ""}> 이 조각 쓰기</label>
       <textarea data-ptext="${p.id}" rows="9" spellcheck="false" autocomplete="off">${esc(st.text)}</textarea>
       <button type="button" class="ghost sm" data-prev="${p.id}" ${st.edited ? "" : "disabled"}>이 조각 기본값으로</button>`);
   };
-  const extra = (e) => sec(`pe:${e.id}`, esc(e.name || "내 조각"), e.on ? "" : "꺼짐", `
+  const extra = (e) => sec(`pe:${e.id}`, esc(e.name || "내 조각"), [e.on ? "" : "꺼짐", `${(e.text || "").length.toLocaleString("ko-KR")}자${e.on && (e.text || "").length > PART_BIG ? " · 김" : ""}`].filter(Boolean).join(" · "), `
       <label class="line"><input type="checkbox" data-eon="${e.id}" ${e.on ? "checked" : ""}> 이 조각 쓰기</label>
       <label>이름<input type="text" data-ename="${e.id}" maxlength="30" autocomplete="off" value="${esc(e.name)}"></label>
       <textarea data-etext="${e.id}" rows="6" spellcheck="false" autocomplete="off" placeholder="비서가 늘 지킬 말을 적기">${esc(e.text)}</textarea>
@@ -2623,10 +2631,14 @@ function wireSlots() {
     if (a) a.textContent = withComma(t) || "(비어 있음)"; if (c) c.textContent = `${t.length}자`;
     if (n) n.textContent = withComma(joinTags([d.taste.negative, d.draft.neg])) || "(비어 있음)";
   };
-  const grow = (el) => { el.style.height = "auto"; el.style.height = Math.max(el.scrollHeight + 2, 46) + "px"; };
-  document.querySelectorAll("details.sec").forEach((dt) => dt.addEventListener("toggle", () => { if (dt.open) dt.querySelectorAll("[data-slot]").forEach(grow); }));
+  // 칸 높이를 글에 맞춘다. 2026-11-27(사용자: 렉): 칸마다 높이를 비우고 재고 바꾸기를 되풀이해 그릴 때마다 배치를 칸 수만큼 다시 계산했다(칩 하나에 폰 기준 0.2초).
+  // 이제 브라우저가 맞추게(field-sizing: content, style.css) 하고, 그걸 모르는 브라우저만 모아서 한 번에 잰다.
+  const AUTO = CSS.supports?.("field-sizing", "content");
+  const grow = (el) => { if (AUTO) return; el.style.height = "auto"; el.style.height = Math.max(el.scrollHeight + 2, 46) + "px"; };
+  const growAll = (els) => { if (AUTO) return; els = [...els].filter((el) => el.offsetParent); els.forEach((el) => { el.style.height = "auto"; }); const hs = els.map((el) => el.scrollHeight); els.forEach((el, i) => { el.style.height = Math.max(hs[i] + 2, 46) + "px"; }); };
+  document.querySelectorAll("details.sec").forEach((dt) => dt.addEventListener("toggle", () => { if (dt.open) growAll(dt.querySelectorAll("[data-slot]")); }));
+  growAll(document.querySelectorAll("[data-slot]"));
   document.querySelectorAll("[data-slot]").forEach((el) => {
-    grow(el);
     el.addEventListener("input", () => {
       grow(el);
       const k = el.dataset.slot;

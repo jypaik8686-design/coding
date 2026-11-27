@@ -608,3 +608,6 @@ button.line { color: var(--ink); background: transparent; border: 1px solid var(
 
 /* 2026-11-27 칸 아래 버튼 넷이 폰 폭을 넘쳐서 줄바꿈 */
 .slotacts { flex-wrap: wrap; }
+
+/* 2026-11-27 렉 줄이기: 칸 높이는 브라우저가 글에 맞춘다(크롬 123부터). 모르는 브라우저는 app.js가 잰다 */
+@supports (field-sizing: content) { .slot textarea { field-sizing: content; min-height: 46px; max-height: 60vh; } }
