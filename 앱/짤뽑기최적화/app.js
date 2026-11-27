@@ -41,7 +41,8 @@ const DEFAULT_SCENE = "1girl, solo, business suit, formal, blonde hair, long hai
 // 취향 프롬프트 처음 값: art/프롬프트/NAI.md에서 사용자가 "엄청 마음에 든다"고 확정한 키아나 그림체 블록. 취향뽑기 앱의 처음 값과 같다.
 const DEFAULT_STYLE = "{painterly}, visible brushstrokes, {dappled sunlight}, harsh sunlight, strong shadows, glossy skin, film grain, warm highlights, teal shadows, cinematic lighting, depth of field, bokeh";
 // NovelAI 문서(docs.novelai.net/en/image/undesiredcontent, 2026-11-15 확인)의 'Human Focus V5 Full'. V4.5 Full도 같은 글이다.
-const DEFAULT_NEG = "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page, @_@, mismatched pupils, glowing eyes, bad anatomy";
+// 2026-11-27 종합 점검: film grain은 뺐다. 처음 그림체(DEFAULT_STYLE, 사용자가 확정한 키아나 그림체)가 film grain을 넣으라 해서 서로 지웠다. 쓰던 데이터는 안 바꾼다(뽑기 전 점검이 알림).
+const DEFAULT_NEG = "lowres, artistic error, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page, @_@, mismatched pupils, glowing eyes, bad anatomy";
 // 처음 버전이 쓰던 값. 사용자가 손대지 않고 그대로 남아 있으면 새 값으로 바꾼다.
 const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, signature, watermark, username, blurry";
 
@@ -268,13 +269,18 @@ function db() {
   });
   return dbp;
 }
+// 그림 저장(쓰기)이 실패하면 한 번 알리고 화면 위에 경고를 둔다 (2026-11-27 종합 점검: 쓰는 곳 여럿이 .catch(() => {})로 실패를 삼켜 그림·서랍이 조용히 안 남을 수 있었다).
+let idbFail = ""; // 쓰기가 실패한 창고 이름. 경고는 앱을 다시 열 때까지 남긴다(저장 공간이 차도 지우기는 성공하므로 성공으로 풀면 경고가 금방 사라졌다)
 async function idb(mode, fn, name = "img") {
   const d = await db();
   return new Promise((ok, no) => {
     const tx = d.transaction(name, mode);
     const q = fn(tx.objectStore(name));
     tx.oncomplete = () => ok(q?.result);
-    tx.onerror = tx.onabort = () => no(tx.error);
+    tx.onerror = tx.onabort = () => {
+      if (mode === "readwrite" && !idbFail) { idbFail = name; toast(`그림 저장 실패 (${tx.error?.name || "중단됨"}) — 저장 공간이 찼을 수 있음`); softRender(); }
+      no(tx.error);
+    };
   });
 }
 const imgPut = (row) => idb("readwrite", (s) => s.put(row));
@@ -453,7 +459,7 @@ let memoErr = "";
 const aiModelId = (s) => (s.aiModel === "custom" ? s.aiCustom : s.aiModel).trim().replace(/^models\//, "");
 const partsText = (j) => (j?.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("").trim();
 // 글을 치는 중이면 화면을 다시 그리지 않는다 (뒤에서 도는 일이 끝날 때 입력칸의 포커스를 뺏지 않게).
-function softRender() { if (!/^(TEXTAREA|INPUT|SELECT)$/.test(document.activeElement?.tagName || "")) render(); }
+function softRender() { const a = document.activeElement; if (!/^(TEXTAREA|INPUT|SELECT)$/.test(a?.tagName || "") || a.type === "file" || a.type === "checkbox") render(); } // 파일 고르기·체크 칸은 글 치는 중이 아니라 다시 그려도 된다 (2026-11-27)
 // 제미니의 고칠 수 있는 차단 기준을 전부 끈다(사용자: 검열 최대한 적게, 2026-11-27). 고를 수 있는 모델 넷 모두 OFF를 받는 것을 봤다.
 // PROHIBITED_CONTENT 같은 구글 쪽 고정 차단은 이 설정으로 안 꺼진다.
 const SAFETY = ["HARASSMENT", "HATE_SPEECH", "SEXUALLY_EXPLICIT", "DANGEROUS_CONTENT", "CIVIC_INTEGRITY"].map((c) => ({ category: `HARM_CATEGORY_${c}`, threshold: "OFF" }));
@@ -3119,7 +3125,7 @@ function render() {
   lastScreen = name;
   thumbUrls.forEach((u) => URL.revokeObjectURL(u));
   thumbUrls = [];
-  document.getElementById("screen").innerHTML = (saveFail ? `<p class="error" role="alert">저장이 안 되고 있음. 이 기기 저장 공간이 참. 지금 고친 것은 새로 고치면 사라짐. 설정(오른쪽 위 톱니바퀴)에서 기록을 내보낸 뒤 오래된 대화나 기록을 지우기.</p>` : "") + SCREENS[name](arg);
+  document.getElementById("screen").innerHTML = (idbFail && !saveFail ? `<p class="error" role="alert">그림(보관함·서랍·프리셋 그림) 저장이 실패했음. 이 기기 저장 공간이 찼을 수 있음. 보관함 ‘zip으로’로 내려받아 두고 안 쓰는 그림을 지우기.</p>` : "") + (saveFail ? `<p class="error" role="alert">저장이 안 되고 있음. 이 기기 저장 공간이 참. 지금 고친 것은 새로 고치면 사라짐. 설정(오른쪽 위 톱니바퀴)에서 기록을 내보낸 뒤 오래된 대화나 기록을 지우기.</p>` : "") + SCREENS[name](arg);
   if (keepY != null && Math.abs(window.scrollY - keepY) > 1) window.scrollTo(0, keepY);
   document.getElementById("title").textContent = TITLES[name];
   const kept = store.data.log.filter((r) => r.verdict === "keep").length;
