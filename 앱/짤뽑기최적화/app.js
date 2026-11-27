@@ -7,6 +7,10 @@ import { PERSONA_PARTS, partState, buildPersona, MODEL_CHOICES } from "./assista
 import { PRESETS } from "./presets.js";
 // 받은 파일을 블록으로 펼치는 것은 해체기와 같은 코드를 쓴다(같은 주소 아래 있어서 바로 불러옴). 해체기 폴더를 옮기면 이 줄도 고친다.
 import { parseFile, vaultItems } from "../해체기/risu.js";
+// scene 블록 칸 읽기는 원본 짤뽑기와 같은 코드(`- outfit:`·`**outfit:**`·`의상:` 꼴도 읽고, 칸 이름 없는 태그는 칸을 짐작함. 시험: ../짤뽑기/slots.test.mjs). 2026-11-27 사용자: 프롬프트가 엉뚱한 칸으로 감.
+import { parseSceneBlock, sceneKeys, setSlotData, splitPerson } from "../짤뽑기/slots.js";
+try { const r = await fetch("../짤뽑기/slots.json"); if (r.ok) setSlotData((await r.json()).slots); else console.warn("slots.json 못 받음", r.status); }
+catch (e) { console.warn("slots.json 못 받음", e); }
 
 const KEY = "짤뽑기최적화/v1"; // 원본(짤뽑기/v1)과 저장소를 따로 쓴다. 원본 데이터는 ‘원본에서 가져오기’로 복사만 한다
 const ORIGIN_KEY = "짤뽑기/v1", ORIGIN_DB = "짤뽑기", MY_DB = "짤뽑기최적화";
@@ -63,7 +67,8 @@ const SHAPE = () => ({
     token: "", model: "nai-diffusion-5-full", customModel: "", size: "세로", steps: 28, scale: 5, quality: true,
     aiKey: "", aiModel: MODEL_CHOICES[0], aiCustom: "", qualityText: "",
     sampler: "k_euler_ancestral", noise: "karras", cfgRescale: 0, variety: false, customW: 832, customH: 1216, refMode: "vibe",
-    autoMemo: true, // 최적화판: 서랍에 새 그림을 넣을 때 비서가 한 번 보고 메모를 남긴다 (그 그림이 구글로 한 번 감)
+    autoMemo: false, // 최적화판: 켜면 서랍에 새 그림을 넣을 때 비서가 한 번 보고 메모를 남긴다 (그 그림이 구글로 한 번 감). 2026-11-27 사용자: 처음엔 끔 (노출 그림이 구글 차단에 걸림)
+    memoOff1: 0, // 옛 데이터의 autoMemo를 한 번만 껐다는 표시
   },
   taste: { style: DEFAULT_STYLE, negative: DEFAULT_NEG, seeded: true, negSplit: true },
   draft: { scene: sceneOf(DEFAULT_SLOTS), slots: { ...DEFAULT_SLOTS }, neg: "", seedLock: false, seed: null, seeded: true, chars: [], i2i: { on: false, strength: 0.7, noise: 0 } },
@@ -209,6 +214,7 @@ function normAll(raw) {
     draft.scene = sceneOf(draft.slots);
     const settings = { ...base.settings, ...(raw.settings || {}) };
     if (typeof settings.qualityText !== "string") settings.qualityText = "";
+    if (!settings.memoOff1) { settings.autoMemo = false; settings.memoOff1 = 1; } // 2026-11-27: 자동 메모를 한 번 끔. 그 뒤 사용자가 켜면 그대로
     const taste = { ...base.taste, ...(raw.taste || {}) };
     if (taste.negative === OLD_NEG) taste.negative = DEFAULT_NEG;
     // 취향 처음 값이 생기기 전에 저장된 데이터: 비어 있으면 한 번만 채운다. 그 뒤에 사용자가 비우면 다시 채우지 않는다.
@@ -433,6 +439,11 @@ const aiModelId = (s) => (s.aiModel === "custom" ? s.aiCustom : s.aiModel).trim(
 const partsText = (j) => (j?.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("").trim();
 // 글을 치는 중이면 화면을 다시 그리지 않는다 (뒤에서 도는 일이 끝날 때 입력칸의 포커스를 뺏지 않게).
 function softRender() { if (!/^(TEXTAREA|INPUT|SELECT)$/.test(document.activeElement?.tagName || "")) render(); }
+// 제미니의 고칠 수 있는 차단 기준을 전부 끈다(사용자: 검열 최대한 적게, 2026-11-27). 고를 수 있는 모델 넷 모두 OFF를 받는 것을 봤다.
+// PROHIBITED_CONTENT 같은 구글 쪽 고정 차단은 이 설정으로 안 꺼진다.
+const SAFETY = ["HARASSMENT", "HATE_SPEECH", "SEXUALLY_EXPLICIT", "DANGEROUS_CONTENT", "CIVIC_INTEGRITY"].map((c) => ({ category: `HARM_CATEGORY_${c}`, threshold: "OFF" }));
+const blockWhy = (j) => j?.promptFeedback?.blockReason || j?.candidates?.[0]?.finishReason || "";
+const BLOCKED = /SAFETY|PROHIBITED|BLOCKLIST|SPII|OTHER|RECITATION/i;
 async function lookOnce(list, force = false) {
   const s = store.data.settings, model = aiModelId(s);
   list = list.filter((r) => r.ai !== false && !r.encOnly && r.full && (force || needsMemo(r)));
@@ -448,11 +459,11 @@ async function lookOnce(list, force = false) {
       const res = await fetch(`${GEMINI}${encodeURIComponent(model)}:generateContent`, {
         method: "POST", signal: memoJob.ctl.signal,
         headers: { "Content-Type": "application/json", "x-goog-api-key": s.aiKey.trim() },
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: MEMO_SYS }] }, contents: [{ role: "user", parts: [{ inline_data: { mime_type: "image/jpeg", data } }, { text: r.meta?.prompt ? `프롬프트: ${cut(r.meta.prompt, 1500)}` : "프롬프트 없음" }] }], generationConfig: { temperature: 0.2 } }),
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: MEMO_SYS }] }, contents: [{ role: "user", parts: [{ inline_data: { mime_type: "image/jpeg", data } }, { text: r.meta?.prompt ? `프롬프트: ${cut(r.meta.prompt, 1500)}` : "프롬프트 없음" }] }], generationConfig: { temperature: 0.2 }, safetySettings: SAFETY }),
       });
       if (!res.ok) throw new Error(await geminiFail(res));
-      const out = partsText(await res.json());
-      if (!out) throw new Error("빈 메모가 옴");
+      const jj = await res.json(), out = partsText(jj);
+      if (!out) throw new Error(`빈 메모가 옴${blockWhy(jj) ? ` (${blockWhy(jj)}${BLOCKED.test(blockWhy(jj)) ? ": 구글 쪽 고정 차단. 메모를 직접 적어도 됨" : ""})` : ""}`);
       if (!refs.includes(r)) continue; // 그사이 서랍에서 지운 그림
       r.memo = cut(out.replace(/^```\w*|```$/g, "").replace(/^\s*#?[0-9a-f]{4}\s*[:：]\s*/i, ""), 300); r.memoHash = r.hash || ""; r.memoBy = "ai"; r.memoAt = Date.now();
       await refPut(rowOf(r)).catch(() => {});
@@ -485,7 +496,7 @@ async function replaceRef(r, file) {
     await refPut(rowOf(r));
     render();
     toast(`‘${r.name}’의 그림을 바꿈. 바이브 인코딩은 다음 뽑기에서 새로 함`);
-    if (store.data.settings.autoMemo !== false) lookOnce([r]);
+    if (store.data.settings.autoMemo === true) lookOnce([r]);
   } catch (e) { errMsg = `그림을 바꾸지 못함 (${e?.message || e}).`; render(); }
 }
 
@@ -587,7 +598,7 @@ async function addRefs(files, carry = null) { // carry: { memo } — 비서가 �
   }
   if (dup.length) toast(`이미 서랍에 있는 그림 ${dup.length}장은 다시 안 넣음 (${cut(dup.join(", "), 60)})`);
   render();
-  if (added.length && store.data.settings.autoMemo !== false && store.data.settings.aiKey.trim()) lookOnce(added); // 새 그림만, 한 번
+  if (added.length && store.data.settings.autoMemo === true && store.data.settings.aiKey.trim()) lookOnce(added); // 새 그림만, 한 번
   return { added: added.length, dup: dup.length };
 }
 
@@ -1558,18 +1569,21 @@ async function ask(text, opts = {}) {
     // 다시 보여 주는 그림뿐이면 해상도 설정을 낮춰 토큰을 줄인다(MEDIUM은 한 장 약 530~560, LOW는 260~280. 2026-11-22 countTokens로 잼). 처음 보는 그림이 섞이면 기본(약 1,080~1,120)으로 둔다.
     const conf = { temperature: 0.8 };
     if (!first.length && again.length) conf.mediaResolution = again.length >= 3 ? "MEDIA_RESOLUTION_LOW" : "MEDIA_RESOLUTION_MEDIUM";
-    const post = (generationConfig) => fetch(`${GEMINI}${encodeURIComponent(model)}:generateContent`, {
-      method: "POST", signal: asking.signal,
-      headers: { "Content-Type": "application/json", "x-goog-api-key": s.aiKey.trim() },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: fullPersona(new Set(shown.map((a) => a.code))) }] }, contents, generationConfig }),
-    });
+    const sys = fullPersona(new Set(shown.map((a) => a.code)));
+    const post = (generationConfig) => {
+      return fetch(`${GEMINI}${encodeURIComponent(model)}:generateContent`, {
+        method: "POST", signal: asking.signal,
+        headers: { "Content-Type": "application/json", "x-goog-api-key": s.aiKey.trim() },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig, safetySettings: SAFETY }),
+      });
+    };
     let res = await post(conf);
     if (res.status === 400 && conf.mediaResolution) res = await post({ temperature: conf.temperature }); // 해상도 설정을 모르는 모델이면 그 칸만 빼고 한 번 더
     if (!res.ok) throw new Error(await geminiFail(res));
     const j = await res.json();
     const c = j.candidates?.[0];
     const raw = partsText(j);
-    if (!raw) throw new Error(`빈 답이 옴 (${c?.finishReason || j.promptFeedback?.blockReason || "이유 모름"}). 말을 바꿔 다시 보내기.`);
+    if (!raw) throw new Error(`빈 답이 옴 (${blockWhy(j) || "이유 모름"}${BLOCKED.test(blockWhy(j)) ? ": 구글 쪽 고정 차단이라 앱 설정으로는 안 꺼짐" : ""}). 말을 바꿔 다시 보내기.`);
     // 답에 딸려 온 메모를 그림 줄에 남긴다. 다음부터 그 그림은 메모로 간다.
     const { text: out, memos } = takeMemos(raw);
     const saved = [];
@@ -1610,7 +1624,6 @@ async function ask(text, opts = {}) {
 // 블록 종류: scene(이번 그림) / style(취향 그림체) / negative(빼는 것) / char(인물 한 명) / params(생성 설정 JSON)
 const BLOCK_LABEL = { scene: "장면 줄 바꾸기", style: "그림체 바꾸기", negative: "이번 빼는 것에 넣기", char: "인물 칸에 더하기", params: "설정 적용", refs: "참고 그림 이대로 켜기" };
 // 최적화판: scene 블록에 캐릭터 줄(count·traits)이 들어 있으면 고정 칸도 바뀐다. 버튼에 그렇게 적어서 누르기 전에 보이게 한다.
-const sceneKeys = (v) => [...new Set([...String(v).matchAll(/^\s*(count|traits|outfit|pose|bg)\s*:/gim)].map((m) => m[1].toLowerCase()))];
 const blockLabel = (b) => (b.lang === "scene" && sceneKeys(b.v).some((k) => k === "count" || k === "traits") ? "장면·캐릭터 바꾸기" : BLOCK_LABEL[b.lang]);
 // 블록 글을 보여 주거나 복사할 때: 태그 줄 끝에 쉼표를 붙인다.
 function showBlock(b) {
@@ -1666,20 +1679,7 @@ function restoreBlocks(json) {
   store.save();
 }
 
-// scene 블록: 한 줄에 칸 하나(`count:` `traits:` `outfit:` `pose:` `bg:`로 시작). 줄 이름이 없는 글은 인원수 태그만 1순위로 빼고 나머지를 ‘그 밖에’ 칸에 넣는다.
-// 블록이 이번 그림 전체를 대신하므로 블록에 없는 칸은 비워진다.
-function parseSceneBlock(v) {
-  const out = Object.fromEntries(SLOT_KEYS.map((k) => [k, ""])), loose = [];
-  let labeled = false;
-  for (const line of String(v).split("\n")) {
-    const m = line.match(/^\s*(count|traits|outfit|pose|bg)\s*:\s*(.*)$/i);
-    if (m) { labeled = true; const k = m[1].toLowerCase(); out[k] = joinTags([out[k], m[2]]); }
-    else if (line.trim()) loose.push(line);
-  }
-  if (!labeled) { const { count, rest } = splitCount(loose.join("\n")); out.count = count; out.rest = rest; return out; }
-  out.rest = joinTags(loose);
-  return out;
-}
+// scene 블록 읽기(parseSceneBlock·sceneKeys)는 ../짤뽑기/slots.js에 있다.
 
 // kind, 블록 글을 칸에 넣는다. 돌려주는 것은 사용자에게 알릴 한 줄 (null이면 아무것도 안 함)
 // from: 블록이 나온 곳(비서 답·받은 자료 항목)의 표시. 인물 칸에 남겨 두고, 다른 곳에서 온 새 그림·새 인물이 들어오면 옛 인물 칸을 뺀다 (2026-11-21, 사용자 요청).
@@ -1694,9 +1694,12 @@ function applyBlock(kind, v, from = "") {
       return `이번 그림 칸들을 바꿈${gone ? ` · 옛 인물 ${gone}명 뺌` : ""}`;
     }
     // 최적화판: 칸 이름이 붙은 줄만 바꾸고 안 적은 칸은 그대로 둔다. 인물별 프롬프트 칸도 건드리지 않는다.
+    // 이름 없는 줄의 태그는 짐작한 칸에 더한다(이름 붙은 칸은 블록 글로 바뀐다).
     const got = parseSceneBlock(v);
-    for (const k of keys) d.draft.slots[k] = got[k];
-    if (tg(got.rest)) d.draft.slots.rest = got.rest;
+    for (const k of SLOT_KEYS) {
+      if (keys.includes(k)) d.draft.slots[k] = got[k];
+      else if (tg(got[k])) d.draft.slots[k] = joinTags([d.draft.slots[k], got[k]]);
+    }
     syncScene(); d.draft.seedLock = false;
     return `${keys.map((k) => SLOT_NAMES[k] || k).join("·")} 칸을 바꿈${keys.some((k) => k === "count" || k === "traits") ? " (캐릭터도 바뀜)" : ""}`;
   }
@@ -1926,7 +1929,7 @@ function refInner() {
     ${on.length ? `<ul class="refs">${on.map(row).join("")}</ul>` : `<p class="hint">켜 둔 그림 없음. 위 서랍에서 눌러 켜기.</p>`}
     <input id="refFile" type="file" multiple hidden>
     <input id="swapFile" type="file" accept="image/*" hidden>
-    <label class="line"><input type="checkbox" id="autoMemo" ${s.autoMemo !== false ? "checked" : ""}> <span>새 그림은 넣을 때 비서가 한 번 봄 <span class="hint">구글로 한 번 감</span></span></label>
+    <label class="line"><input type="checkbox" id="autoMemo" ${s.autoMemo === true ? "checked" : ""}> <span>새 그림은 넣을 때 비서가 한 번 봄 <span class="hint">구글로 한 번 감</span></span></label>
     ${memoJob ? `<p class="hint">비서가 그림을 보는 중 ${memoJob.done}/${memoJob.total}… <button type="button" class="ghost mini" id="memoStop">멈춤</button></p>` : need ? `<button type="button" class="ghost" id="memoAll">메모 없는 그림 ${need}장 한 번씩 보여 주기 <small>구글로 감</small></button>` : ""}
     ${memoErr ? `<p class="error" role="alert">${esc(memoErr)}</p>` : ""}
     <button type="button" class="ghost" id="addRef" ${refs.length >= LIB_MAX ? "disabled" : ""}>＋ 서랍에 그림·바이브 파일 넣기 (${refs.length}/${LIB_MAX})</button>
@@ -2110,6 +2113,11 @@ function mergeTags(cur, add, front) {
   return out.join(", ");
 }
 // 프리셋을 칸에 넣는다. mode: add | replace | neg(금지 태그를 빼는 것에 더함). 알릴 한 줄을 돌려준다.
+// 인물 프리셋 = 고정(인원수·얼굴·머리·몸) + 기본 의상. outfit 칸이 있으면(내장 인물) 그대로, 없으면 text에서 의상 태그를 갈라 낸다 (원본 짤뽑기와 같음, 2026-11-27).
+function personParts(p) {
+  if (typeof p.outfit === "string") return { fixed: tagsMinus(tidy(p.text || ""), p.outfit), outfit: tidy(p.outfit) };
+  const o = splitPerson(p.text || ""); return { fixed: o.fixed, outfit: o.outfit };
+}
 function usePreset(p, mode) {
   const d = store.data;
   if (mode !== "neg" && !tidy(p.text || "")) return "내용이 비어 있음. ‘고치기’에서 채우기";
@@ -2119,9 +2127,13 @@ function usePreset(p, mode) {
     // 프리셋은 자기 칸(slot)에만 넣는다. ‘바꾸기’도 그 칸만 바꾸고 다른 칸은 그대로 둔다.
     const slot = SLOT_KEYS.includes(p.slot) ? p.slot : "rest", sl = d.draft.slots;
     const put = (k, txt) => { if (!tidy(txt)) return; sl[k] = mode === "replace" ? tidy(txt) : mergeTags(sl[k], txt, p.at === "front"); };
-    if (slot === "traits") { const { count, rest } = splitCount(p.text); put("count", count); put("traits", rest); } else put(slot, p.text);
+    let withOutfit = false;
+    if (slot === "traits") { // 인물: 고정은 1·3순위에, 기본 의상은 4순위에. 기본 의상이 비어 있으면 의상 칸은 그대로
+      const { fixed, outfit } = personParts(p), { count, rest } = splitCount(fixed);
+      put("count", count); put("traits", rest); if (tidy(outfit)) { put("outfit", outfit); withOutfit = true; }
+    } else put(slot, p.text);
     syncScene(); d.draft.seedLock = false;
-    return `‘${p.name}’을 ${SLOT_NAMES[slot]} 칸에 ${mode === "replace" ? "바꿔 넣음" : "더함"}`;
+    return `‘${p.name}’을 ${SLOT_NAMES[slot]}${withOutfit ? "·의상" : ""} 칸에 ${mode === "replace" ? "바꿔 넣음" : "더함"}`;
   }
   if (p.to === "style") { const old = tidy(d.taste.style); d.taste.style = mode === "add" ? mergeTags(old, p.text, false) : tidy(p.text); return `화풍·작가에 ‘${p.name}’을 ${mode === "add" ? "더함" : "넣음"}${mode === "add" ? "" : `. 이전 값: ${old.slice(0, 90)}${old.length > 90 ? "…" : ""}`}`; }
   const old = tidy(d.draft.neg);
@@ -2151,9 +2163,9 @@ function paddForm() {
       <div class="acts2"><button type="button" id="paddSave">저장</button><button type="button" class="ghost" id="paddCancel">취소</button></div>
     </div>`;
 }
-const CHIP_ONE = new Set(["인물", "의상"]);
+const CHIP_ONE = new Set(["인물", "의상", "자세·구도"]); // 하나만 켜지고, 누르면 그 칸을 바꿔 넣는다(덧붙이지 않음, 2026-11-27 사용자: 편의성). 그림체·작가·빼는 것은 섞어 쓰므로 더한다
 const chipTarget = (p) => (p.to === "style" ? store.data.taste.style : p.to === "neg" ? store.data.draft.neg : store.data.draft.slots[SLOT_KEYS.includes(p.slot) ? p.slot : "rest"]);
-const chipBody = (p) => (p.to === "scene" && p.slot === "traits" ? splitCount(p.text).rest : p.text); // 인물은 인원수 태그를 빼고 견준다(그건 1순위 칸에 있다)
+const chipBody = (p) => (p.to === "scene" && p.slot === "traits" ? splitCount(personParts(p).fixed).rest : p.text); // 인물은 고정 부분만, 인원수 태그를 빼고 견준다(의상은 바뀌어도 같은 인물)
 function chipOn(p) {
   const want = tg(chipBody(p)).toLowerCase().split(", ").filter(Boolean);
   if (!want.length) return false;
@@ -2164,7 +2176,11 @@ function chipOff(p) {
   const d = store.data;
   if (p.to === "style") d.taste.style = tagsMinus(d.taste.style, p.text);
   else if (p.to === "neg") d.draft.neg = tagsMinus(d.draft.neg, p.text);
-  else { const k = SLOT_KEYS.includes(p.slot) ? p.slot : "rest"; d.draft.slots[k] = tagsMinus(d.draft.slots[k], chipBody(p)); syncScene(); }
+  else {
+    const k = SLOT_KEYS.includes(p.slot) ? p.slot : "rest"; d.draft.slots[k] = tagsMinus(d.draft.slots[k], chipBody(p));
+    if (k === "traits") d.draft.slots.outfit = tagsMinus(d.draft.slots.outfit, personParts(p).outfit); // 인물을 끄면 그 기본 의상도 뺀다
+    syncScene();
+  }
   if (p.neg && p.to !== "neg") d.draft.neg = tagsMinus(d.draft.neg, p.neg);
 }
 function chipRow(slotKey) {
@@ -2183,10 +2199,10 @@ function chipToggle(key) {
   else {
     const out = [];
     if (CHIP_ONE.has(kind)) for (const e of presetEntries(kind)) if (e.key !== key && !e.hidden && chipOn(e.p)) { chipOff(e.p); out.push(e.p.name); }
-    usePreset(p, "add");
+    usePreset(p, CHIP_ONE.has(kind) ? "replace" : "add");
     if (kind === "인물" && tidy(p.neg || "")) usePreset(p, "neg");
     autoRef(key, p);
-    msg = `‘${p.name}’을 넣음${kind === "인물" && tidy(p.neg || "") ? " (금지 태그도)" : ""}${out.length ? ` · ‘${out.join("’, ‘")}’은 뺌` : ""}`;
+    msg = `‘${p.name}’을 ${CHIP_ONE.has(kind) ? "바꿔 " : ""}넣음${kind === "인물" && tidy(personParts(p).outfit) ? " (기본 의상도)" : ""}${kind === "인물" && tidy(p.neg || "") ? " (금지 태그도)" : ""}${out.length ? ` · ‘${out.join("’, ‘")}’은 뺌` : ""}`;
   }
   toast(msg, () => { const o = JSON.parse(snap); d.draft.slots = o.slots; syncScene(); d.draft.seedLock = o.lock; d.taste.style = o.style; d.draft.neg = o.nd; store.save(); });
   store.save();
@@ -2283,12 +2299,25 @@ function personaEditor() {
 }
 
 // ── 프롬프트 칸 화면 ────────────────────────────────────────
+// 바뀐 칸 표시 (2026-11-27, 사용자: 편의성). 화면을 다시 그릴 때 지난번에 보여 준 값과 다른 칸에 금색 테두리를 잠깐 두르고, 그 칸 제목 옆에 ‘↺ 전 값’을 둔다.
+// 손으로 친 글은 입력할 때 shownVals도 같이 고쳐서 표시하지 않는다. 전 값은 메모리에만 있다(새로 고치면 사라짐).
+const TRACK = ["count", "traits", "outfit", "pose", "bg", "rest", "style", "neg"];
+const valOf = (k) => (k === "style" ? store.data.taste.style : k === "neg" ? store.data.draft.neg : store.data.draft.slots[k]) || "";
+let shownVals = null, flashKeys = new Set();
+const prevVals = {};
+function trackSlots() {
+  const cur = Object.fromEntries(TRACK.map((k) => [k, valOf(k)]));
+  flashKeys = new Set();
+  if (shownVals) for (const k of TRACK) if (tg(cur[k]) !== tg(shownVals[k])) { flashKeys.add(k); prevVals[k] = shownVals[k]; }
+  shownVals = cur;
+}
 // 1→7순위 칸. 2순위는 취향 프롬프트, 7순위는 품질 태그와 같은 값이다. 글자를 칠 때는 저장만 하고 다시 그리지 않는다.
 function slotsPanel() {
   const d = store.data, sl = d.draft.slots, s = d.settings;
   const area = (key, val, ph) => `<textarea id="slot-${key}" data-slot="${key}" rows="1" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="${esc(ph)}">${esc(val)}</textarea>`;
-  const head = (key, n, title, extra = "") => `<div class="slothead"><label for="slot-${key}">${/^\d/.test(n) ? `<span class="num">${parseInt(n, 10)}</span>` : `<b>${n}</b>`} ${title}</label>${extra}</div>`;
-  const row = (key, n, title, hint, val, ph) => `<div class="slot">${head(key, n, title)}${area(key, val, ph)}${chipRow(key)}</div>`;
+  const undo = (key) => (key in prevVals && tg(prevVals[key]) !== tg(valOf(key)) ? `<button type="button" class="ghost mini" data-sundo="${key}" aria-label="${esc(SLOT_NAMES[key] || key)} 칸을 전 값으로">↺ 전 값</button>` : "");
+  const head = (key, n, title, extra = "") => `<div class="slothead"><label for="slot-${key}">${/^\d/.test(n) ? `<span class="num">${parseInt(n, 10)}</span>` : `<b>${n}</b>`} ${title}</label>${extra || undo(key)}</div>`;
+  const row = (key, n, title, hint, val, ph) => `<div class="slot${flashKeys.has(key) ? " flash" : ""}">${head(key, n, title)}${area(key, val, ph)}${chipRow(key)}</div>`;
   const full = composePrompt(sl, d.taste.style, s);
   const negAll = joinTags([d.taste.negative, d.draft.neg]);
   // 최적화판: 고정(품질·그림체·캐릭터·기본 Undesired)은 접어 두고, 장면 줄(의상·자세·장소)만 펼쳐 둔다. NovelAI로 가는 순서(1→7순위)는 그대로다.
@@ -2311,13 +2340,20 @@ function slotsPanel() {
     ${row("pose", "5순위", "자세·시선·구도", "", sl.pose, "crossed arms, from below, upper body")}
     ${row("bg", "6순위", "장소·조명·분위기", "", sl.bg, "palace, backlighting")}
     ${tg(sl.rest) ? row("rest", "그 밖에", "칸을 나누기 전의 글", "", sl.rest, "") : ""}
-    <div class="slot">${head("neg", "Undesired", "이번 장면만")}
+    <div class="slot${flashKeys.has("neg") ? " flash" : ""}">${head("neg", "Undesired", "이번 장면만")}
       ${area("neg", d.draft.neg, "earrings, gloves")}${chipRow("neg")}</div>
     ${sec("sprev", "완성본 보기", `${full.length}자`, `<p class="hint">칸이 1→7순위로 이어 붙어 NovelAI로 감. 가중치 표시만 다른 같은 태그는 먼저 나온 것만 남음.</p><p class="hint" id="scount">${full.length}자</p><pre class="pprev" id="sprevtxt">${esc(withComma(full)) || "(비어 있음)"}</pre><p class="endmark">✅ 여기까지</p><p class="hint">Undesired 전체</p><pre class="pprev" id="snegtxt">${esc(withComma(negAll)) || "(비어 있음)"}</pre><p class="endmark">✅ 여기까지</p>`)}
     <div class="acts2 slotacts"><button type="button" class="ghost sm" id="saveScene" aria-label="칸 전부 프리셋으로 저장">프리셋으로 저장</button><button type="button" class="ghost sm" id="slotsClear" aria-label="장면 줄 비우기">장면 비우기</button><button type="button" class="ghost sm" id="slotPick" aria-label="파일에서 넣기 (JSON·글·NovelAI PNG)">파일에서 넣기</button><input id="slotFile" type="file" hidden></div>`;
 }
 // 2026-11-22: 프롬프트 칸 전부 접기. 접으면 완성된 프롬프트 두 줄만 보이고, 그 줄을 눌러도 펼쳐진다. 접힌 상태는 settings.foldPrompt에 남는다(옛 데이터에는 없어 펼친 것으로 읽음).
+function sceneSum() {
+  trackSlots(); trackSlots.done = true;
+  const sl = store.data.draft.slots;
+  const item = (k, name) => `<button type="button" class="${flashKeys.has(k) ? "flash" : ""}" data-jump="${k}"><small>${name}</small><span>${esc(tg(sl[k])) || "비어 있음"}</span></button>`;
+  return `<nav class="scenesum" aria-label="지금 장면 (누르면 그 칸으로)">${item("outfit", "의상")}${item("pose", "자세")}${item("bg", "배경")}</nav>`;
+}
 function promptBlock() {
+  if (!trackSlots.done) trackSlots(); trackSlots.done = false;
   const d = store.data, fold = !!d.settings.foldPrompt;
   if (!fold) return `<div class="phead"><h2>프롬프트</h2><button type="button" class="ghost mini" data-pfold="1" aria-expanded="true">전부 접기</button></div>${slotsPanel()}`;
   const full = composePrompt(d.draft.slots, d.taste.style, d.settings), neg = tg(d.draft.neg);
@@ -2344,9 +2380,22 @@ function wireSlots() {
       else if (k === "negbase") { d.taste.negative = el.value; const b = $("negDef"); if (b) b.disabled = tidy(el.value) === tidy(DEFAULT_NEG); }
       else if (k === "quality") { s.qualityText = tg(el.value) === qDefault(s) ? "" : el.value; const b = $("qualityDef"); if (b) b.disabled = !tg(s.qualityText); }
       else { d.draft.slots[k] = el.value; syncScene(); }
+      if (shownVals && k in shownVals) { shownVals[k] = el.value; delete prevVals[k]; } // 손으로 친 것은 ‘바뀐 칸’이 아니다
       store.persist(); prev();
     });
   });
+  document.querySelectorAll("[data-sundo]").forEach((b) => b.addEventListener("click", () => {
+    const k = b.dataset.sundo, v = prevVals[k] ?? "";
+    if (k === "style") d.taste.style = v; else if (k === "neg") d.draft.neg = v; else { d.draft.slots[k] = v; syncScene(); }
+    toast(`${SLOT_NAMES[k] || (k === "style" ? "그림체" : "이번 빼는 것")} 칸을 전 값으로 돌림`);
+    store.save();
+  }));
+  document.querySelectorAll("[data-jump]").forEach((b) => b.addEventListener("click", () => {
+    const k = b.dataset.jump;
+    if (d.settings.foldPrompt) { d.settings.foldPrompt = false; store.save(); }
+    const el = $(`slot-${k}`); if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" }); el.focus({ preventScroll: true });
+  }));
   on("slotPick", "click", () => $("slotFile").click());
   on("slotFile", "change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) fileToSlots(f); });
   on("qualityOn", "change", (e) => { s.quality = e.target.checked; store.persist(); prev(); });
@@ -2494,9 +2543,10 @@ const SCREENS = {
 ` : `<div class="stage${busy ? " busy" : ""}" style="aspect-ratio:${w}/${h}"><p>${busy ? esc(phase || "뽑는 중…") : "뽑은 그림이 여기 뜸"}</p><small>아래 칸을 채우고 ‘뽑기’</small></div>`}
       ${histStrip()}
       ${errMsg ? `<p class="error" role="alert">${esc(errMsg)}</p>` : ""}
+      ${sceneSum()}
       ${promptBlock()}
       <div class="seg seg4" role="group" aria-label="크기">
-        ${[...Object.keys(SIZES), "직접"].map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${k === "직접" ? `${w}×${h}` : SIZES[k].join("×")}</small></button>`).join("")}
+        ${[...Object.keys(SIZES), "직접"].map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${k === "직접" ? (s.size === "직접" ? `${w}×${h}` : "입력") : SIZES[k].join("×")}</small></button>`).join("")}
       </div>
       ${s.size === "직접" ? `<div class="two"><label>가로 <span class="hint">64 단위</span><input id="customW" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${w}"></label><label>세로<input id="customH" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${h}"></label></div>` : ""}
       ${draft.seedLock && Number.isInteger(draft.seed) ? `<p class="seedchip">시드 ${draft.seed} 고정 <button type="button" class="ghost mini" id="seedOff">풀기</button></p>` : ""}
@@ -3414,6 +3464,7 @@ function wire(name, arg, seq) {
 // 탭을 바꾸면 그 탭 맨 위에서 시작한다(전에는 앞 탭의 스크롤 위치가 남아 비서 탭이 대화 중간에서 열렸다). 비서 탭만 마지막 대화로 간다.
 addEventListener("hashchange", () => { errMsg = ""; askErr = ""; ui.bq = ""; ui.vShow = 40; ui.vOpen = new Set(); if (route()[0] === "ai") scrollAi = true; else scrollTo({ top: 0 }); if (route()[0] !== "keep") ui.ksel = null; render(); });
 if (route()[0] === "ai") scrollAi = true;
+shownVals = Object.fromEntries(TRACK.map((k) => [k, valOf(k)])); // 바뀐 칸 표시의 처음 기준: 앱을 연 때의 값 (비서 탭에서 먼저 바꿔도 뽑기 탭에서 보이게)
 render();
 loadRefs().then(render); loadSrc().then(render); loadPimgs().then(render); loadVault().then(render);
 // 참고 그림은 IndexedDB에서 읽어 와야 해서 한 박자 늦게 그린다
