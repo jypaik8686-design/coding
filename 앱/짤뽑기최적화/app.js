@@ -2652,7 +2652,7 @@ function slotsPanel() {
     ${row("outfit", "4순위", "의상·장신구", "", sl.outfit, "black suit, necktie")}
     ${row("pose", "5순위", "자세·시선·구도", "", sl.pose, "crossed arms, from below, upper body")}
     <div class="slot${flashKeys.has("bg") ? " flash" : ""}${s.bgOn ? "" : " bgoff"}">${head("bg", "6순위", "장소·조명·분위기", `<button type="button" class="chip ${s.bgOn ? "on" : ""}" id="bgOn" aria-pressed="${!!s.bgOn}">${s.bgOn ? "배경 깔기 켬" : "배경 깔기"}</button>${undo("bg")}`)}${area("bg", sl.bg, "palace, backlighting")}${s.bgOn ? "" : `<p class="hint">꺼짐: 이 칸은 안 가고 ${BG_OFF}로 그림</p>`}${chipRow("bg")}</div>
-    ${tg(sl.rest) ? row("rest", "그 밖에", "칸을 나누기 전의 글", "", sl.rest, "") : ""}
+    ${tg(sl.rest) ? `<div class="slot${flashKeys.has("rest") ? " flash" : ""}">${head("rest", "그 밖에", "칸을 나누기 전의 글", `<button type="button" class="ghost mini" id="restSplit">칸마다 나누기</button>`)}${area("rest", sl.rest, "")}</div>` : ""}
     <div class="slot${flashKeys.has("neg") ? " flash" : ""}">${head("neg", "Undesired", "이번 장면만")}
       ${area("neg", d.draft.neg, "earrings, gloves")}${chipRow("neg")}</div>
     ${sec("sprev", "완성본 보기", `${full.length}자`, `<p class="hint">칸이 1→7순위로 이어 붙어 NovelAI로 감. 가중치 표시만 다른 같은 태그는 먼저 나온 것만 남음.</p><p class="hint" id="scount">${full.length}자</p><pre class="pprev" id="sprevtxt">${esc(withComma(full)) || "(비어 있음)"}</pre><p class="endmark">✅ 여기까지</p><p class="hint">Undesired 전체</p><pre class="pprev" id="snegtxt">${esc(withComma(negAll)) || "(비어 있음)"}</pre><p class="endmark">✅ 여기까지</p>`)}
@@ -2747,7 +2747,19 @@ function promptBlock() {
   return `<div class="phead"><h2>프롬프트 <small>${full.length}자${neg ? ` · 이번 빼는 것 ${neg.split(", ").length}개` : ""}</small></h2><button type="button" class="ghost mini" data-pfold="0" aria-expanded="false">펼치기</button></div>
     <button type="button" class="pfold" data-pfold="0" aria-label="프롬프트 펼치기"><span>${esc(withComma(full)) || "(비어 있음)"}</span></button>`;
 }
+// ‘그 밖에’ 칸의 태그를 하나씩 맞는 칸에 옮긴다 (2026-11-27 사용자: 칸 나누기 전 칸에 있는 것을 분류). 칸을 모르는 태그만 남긴다.
+function splitRest() {
+  const d = store.data, sl = d.draft.slots, before = JSON.stringify(sl), lock = d.draft.seedLock;
+  const got = parseSceneBlock(sl.rest), moved = [];
+  for (const k of SLOT_KEYS) if (k !== "rest" && tg(got[k])) { sl[k] = joinTags([sl[k], got[k]]); moved.push(`${SLOT_NAMES[k]} ${tg(got[k]).split(", ").length}`); }
+  sl.rest = tg(got.rest); syncScene();
+  if (!moved.length) return toast("칸을 정할 수 있는 태그가 없음 (모르는 태그는 손으로 옮기기)");
+  d.draft.seedLock = false;
+  toast(`나눔: ${moved.join(" · ")}${sl.rest ? ` · 남은 ${sl.rest.split(", ").length}개` : ""}`, () => { d.draft.slots = JSON.parse(before); syncScene(); d.draft.seedLock = lock; store.save(); });
+  store.save();
+}
 function wireSlots() {
+  on("restSplit", "click", splitRest);
   on("diagGo", "click", async () => { await loadTags().catch(() => {}); ui.diag = diagnose(); render(); $("diagClose")?.scrollIntoView({ behavior: "smooth", block: "center" }); });
   on("diagClose", "click", () => { ui.diag = null; render(); });
   on("preCheck", "change", (e) => { store.data.settings.preCheck = e.target.checked; store.save(); });
