@@ -395,7 +395,8 @@ const refsOn = () => refs.filter((r) => r.on).length;
 const BASE_MAX = 2;
 function baseVibes(s = store.data.settings) {
   if (refPlan(s) !== "vibe" || s.baseOn === false || refs.some((r) => r.on)) return [];
-  return refs.filter((r) => r.base && (r.full || r.encOnly)).slice(0, BASE_MAX);
+  // 원본 그림이 없는 바이브 파일은 이 모델·정보량의 인코딩이 있을 때만 (없으면 새로 못 만들어 뽑기가 통째로 실패했다, 2026-11-27 검토)
+  return refs.filter((r) => r.base && (r.full || r.enc?.[`${modelId(s)}|${r.info}`])).slice(0, BASE_MAX);
 }
 const baseStr = (s = store.data.settings) => clamp(s.baseStr, 0.05, 1, 0.3);
 // 비서가 써도 되는 서랍 그림 (2026-11-21, 사용자가 고름). ai가 false인 그림은 비서에게 이름도 그림도 안 가고, refs 블록이 켜지도 끄지도 않는다. 옛 항목은 칸이 없어 써도 되는 것으로 읽는다.
@@ -1062,7 +1063,8 @@ async function unkeep() {
 const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 const crc32 = (u8) => { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
 let zipping = false;
-async function exportImages(ids = null) { // ids: 고른 그림만 (보관함 고르기의 ‘zip으로’)
+async function exportImages(ids = null) { // ids: 고른 그림만 (보관함 고르기의 ‘zip으로’). 배열이 아니면(버튼이 넘긴 클릭 정보) 전부
+  if (!Array.isArray(ids)) ids = null; // 2026-11-27 고침: 설정의 ‘그림 zip 내보내기’가 클릭 정보를 넘겨 ids.includes 오류로 멈췄다
   if (zipping) return;
   const recs = store.data.log.filter((r) => r.verdict === "keep" && (!ids || ids.includes(r.id)));
   if (!recs.length) return toast("보관한 그림이 없음");
