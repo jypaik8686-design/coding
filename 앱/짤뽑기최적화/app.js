@@ -8,7 +8,7 @@ import { PRESETS } from "./presets.js";
 // 받은 파일을 블록으로 펼치는 것은 해체기와 같은 코드를 쓴다(같은 주소 아래 있어서 바로 불러옴). 해체기 폴더를 옮기면 이 줄도 고친다.
 import { parseFile, vaultItems } from "../해체기/risu.js";
 // scene 블록 칸 읽기는 원본 짤뽑기와 같은 코드(`- outfit:`·`**outfit:**`·`의상:` 꼴도 읽고, 칸 이름 없는 태그는 칸을 짐작함. 시험: ../짤뽑기/slots.test.mjs). 2026-11-27 사용자: 프롬프트가 엉뚱한 칸으로 감.
-import { parseSceneBlock, sceneKeys, setSlotData, splitPerson } from "../짤뽑기/slots.js";
+import { parseSceneBlock, sceneKeys, setSlotData, splitPerson, guessSlot } from "../짤뽑기/slots.js";
 try { const r = await fetch("../짤뽑기/slots.json"); if (r.ok) setSlotData((await r.json()).slots); else console.warn("slots.json 못 받음", r.status); }
 catch (e) { console.warn("slots.json 못 받음", e); }
 
@@ -1484,9 +1484,15 @@ function refsText() {
   const lib = pool.map((r) => `#${refCode(r)} ${r.name}${Number.isInteger(r.meta?.seed) ? ` | 시드 ${r.meta.seed}` : ""} | ${r.encOnly ? "바이브 파일(그림 없음)" : r.memo ? `메모: ${cut(r.memo, 140)}` : "메모 없음(비서가 아직 안 봄)"}`).join("\n");
   return `\n\n## 참고 그림 서랍\n그림은 붙지 않는다. 아래 글이 그림을 대신한다. 고를 때는 refs 블록에 \`#이름표: 강도\`.\n${lib}`;
 }
+// 인물 바꾸기 쓰는 법과 인물 프리셋 이름. 지시문 조각을 고쳐 두어도 늘 붙는다 (2026-11-27, 사용자: 비서가 인물을 편하게 바꾸게).
+function personText() {
+  const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
+  const now = list.filter((e) => chipOn(e.p)).map((e) => e.p.name);
+  return `\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
+}
 function fullPersona(sent) {
   const d = store.data;
-  return buildPersona(d.persona) + refsText() + (d.persona.auto.state ? stateText(sent) : "");
+  return buildPersona(d.persona) + refsText() + personText() + (d.persona.auto.state ? stateText(sent) : "");
 }
 
 // 비서 답에서 memo 블록을 떼어 낸다. 메모는 그림 줄에 따로 저장하고, 대화 기록에는 남기지 않는다(다음 질문에 같은 글이 두 번 가지 않게).
@@ -1625,7 +1631,7 @@ async function ask(text, opts = {}) {
 
 // ── 비서 답의 코드 블록을 칸에 넣기 ──────────────────────────
 // 블록 종류: scene(이번 그림) / style(취향 그림체) / negative(빼는 것) / char(인물 한 명) / params(생성 설정 JSON)
-const BLOCK_LABEL = { scene: "장면 줄 바꾸기", style: "그림체 바꾸기", negative: "이번 빼는 것에 넣기", char: "인물 칸에 더하기", params: "설정 적용", refs: "참고 그림 이대로 켜기" };
+const BLOCK_LABEL = { person: "인물 바꾸기", scene: "장면 줄 바꾸기", style: "그림체 바꾸기", negative: "이번 빼는 것에 넣기", char: "인물 칸에 더하기", params: "설정 적용", refs: "참고 그림 이대로 켜기" };
 // 최적화판: scene 블록에 캐릭터 줄(count·traits)이 들어 있으면 고정 칸도 바뀐다. 버튼에 그렇게 적어서 누르기 전에 보이게 한다.
 const blockLabel = (b) => (b.lang === "scene" && sceneKeys(b.v).some((k) => k === "count" || k === "traits") ? "장면·캐릭터 바꾸기" : BLOCK_LABEL[b.lang]);
 // 블록 글을 보여 주거나 복사할 때: 태그 줄 끝에 쉼표를 붙인다.
@@ -1686,8 +1692,32 @@ function restoreBlocks(json) {
 
 // kind, 블록 글을 칸에 넣는다. 돌려주는 것은 사용자에게 알릴 한 줄 (null이면 아무것도 안 함)
 // from: 블록이 나온 곳(비서 답·받은 자료 항목)의 표시. 인물 칸에 남겨 두고, 다른 곳에서 온 새 그림·새 인물이 들어오면 옛 인물 칸을 뺀다 (2026-11-21, 사용자 요청).
+// person 블록: 프리셋 이름이면 그 인물 칩을 켠 것처럼 바꿔 넣고(고정 + 기본 의상, 금지 태그), 아니면 태그로 새 인물을 넣는다.
+function applyPerson(v) {
+  const d = store.data, name = String(v).split("\n").map((x) => x.trim()).find(Boolean) || "";
+  if (!name) return "인물 블록이 비어 있음";
+  const norm = (x) => x.toLowerCase().replace(/[\s()（）·]/g, "");
+  const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
+  const hit = list.find((e) => norm(e.p.name) === norm(name)) || list.find((e) => norm(e.p.name).includes(norm(name)) || norm(name).includes(norm(e.p.name)));
+  if (hit && !name.includes(",")) {
+    for (const e of list) if (e.key !== hit.key && chipOn(e.p)) chipOff(e.p);
+    usePreset(hit.p, "replace");
+    if (tidy(hit.p.neg || "")) usePreset(hit.p, "neg");
+    d.draft.chipsOn = [...(d.draft.chipsOn || []).filter((x) => x !== hit.key), hit.key].slice(-40);
+    return `인물을 ‘${hit.p.name}’으로 바꿈${tidy(personParts(hit.p).outfit) ? " (기본 의상도)" : ""}`;
+  }
+  const { fixed, outfit } = splitPerson(String(v).replace(/\n/g, ", ")), { count, rest } = splitCount(fixed);
+  if (!tg(rest) && !tg(count)) return `‘${name.slice(0, 20)}’ 인물을 프리셋에서 못 찾음`;
+  for (const e of list) if (chipOn(e.p)) chipOff(e.p);
+  if (tg(count)) d.draft.slots.count = tg(count);
+  d.draft.slots.traits = tg(rest);
+  if (tg(outfit)) d.draft.slots.outfit = tg(outfit);
+  syncScene(); d.draft.seedLock = false;
+  return `인물을 태그로 바꿈${tg(outfit) ? " (의상도)" : ""}`;
+}
 function applyBlock(kind, v, from = "") {
   const d = store.data;
+  if (kind === "person") return applyPerson(v);
   const dropOld = () => { const n = d.draft.chars.length; d.draft.chars = d.draft.chars.filter((c) => from && c.from === from); return n - d.draft.chars.length; };
   if (kind === "scene") {
     const keys = sceneKeys(v);
@@ -2386,7 +2416,63 @@ function slotsPanel() {
     <div class="slot${flashKeys.has("neg") ? " flash" : ""}">${head("neg", "Undesired", "이번 장면만")}
       ${area("neg", d.draft.neg, "earrings, gloves")}${chipRow("neg")}</div>
     ${sec("sprev", "완성본 보기", `${full.length}자`, `<p class="hint">칸이 1→7순위로 이어 붙어 NovelAI로 감. 가중치 표시만 다른 같은 태그는 먼저 나온 것만 남음.</p><p class="hint" id="scount">${full.length}자</p><pre class="pprev" id="sprevtxt">${esc(withComma(full)) || "(비어 있음)"}</pre><p class="endmark">✅ 여기까지</p><p class="hint">Undesired 전체</p><pre class="pprev" id="snegtxt">${esc(withComma(negAll)) || "(비어 있음)"}</pre><p class="endmark">✅ 여기까지</p>`)}
-    <div class="acts2 slotacts"><button type="button" class="ghost sm" id="saveScene" aria-label="칸 전부 프리셋으로 저장">프리셋으로 저장</button><button type="button" class="ghost sm" id="slotsClear" aria-label="장면 줄 비우기">장면 비우기</button><button type="button" class="ghost sm" id="slotPick" aria-label="파일에서 넣기 (JSON·글·NovelAI PNG)">파일에서 넣기</button><input id="slotFile" type="file" hidden></div>`;
+    <div class="acts2 slotacts"><button type="button" class="ghost sm" id="saveScene" aria-label="칸 전부 프리셋으로 저장">프리셋으로 저장</button><button type="button" class="ghost sm" id="slotsClear" aria-label="장면 줄 비우기">장면 비우기</button><button type="button" class="ghost sm" id="slotPick" aria-label="파일에서 넣기 (JSON·글·NovelAI PNG)">파일에서 넣기</button><input id="slotFile" type="file" hidden><button type="button" class="ghost sm" id="diagGo">프롬프트 점검</button></div>
+    ${diagHtml()}`;
+}
+// ── 프롬프트 점검 (2026-11-27, 사용자: 키워드가 꼬이거나 프롬프트가 잘못되면 어디서 잘못됐는지 보는 버튼) ──
+// 앱이 혼자 본다(구글로 안 감). 문제마다 한 줄과, 고칠 수 있으면 버튼 하나. ‘비서에게 고쳐 달라기’는 이 목록을 질문으로 보낸다.
+const SLOT_LABEL = { count: "1 인원수", traits: "3 특징", outfit: "4 의상", pose: "5 자세", bg: "6 배경", rest: "그 밖에", style: "2 그림체" };
+function diagnose() {
+  const d = store.data, sl = d.draft.slots, s = d.settings, out = [];
+  const tagsOf = (t) => tg(t).split(", ").filter(Boolean);
+  const put = (k, v) => { if (k === "style") d.taste.style = v; else if (k === "neg") d.draft.neg = v; else { sl[k] = v; syncScene(); } };
+  const valK = (k) => (k === "style" ? d.taste.style : k === "neg" ? d.draft.neg : sl[k]) || "";
+  const SL = ["count", "traits", "outfit", "pose", "bg", "rest"];
+  // 1 한글·괄호
+  for (const k of [...SL, "style"]) {
+    const v = valK(k);
+    if (/[가-힣]/.test(v)) out.push({ msg: `${SLOT_LABEL[k]} 칸에 한글이 있음: NovelAI는 영어 태그만 알아들음 (${tagsOf(v).filter((t) => /[가-힣]/.test(t)).slice(0, 3).join(", ")})`, fix: ["한글 태그 지우기", () => put(k, tagsOf(v).filter((t) => !/[가-힣]/.test(t)).join(", "))] });
+    const n = (c) => (v.match(new RegExp(`\\${c}`, "g")) || []).length;
+    if (n("{") !== n("}") || n("[") !== n("]") || (v.match(/::/g) || []).length % 2) out.push({ msg: `${SLOT_LABEL[k]} 칸의 괄호가 안 맞음 ({ ${n("{")}·} ${n("}")}, [ ${n("[")}·] ${n("]")}, :: ${(v.match(/::/g) || []).length}). 뒤 태그까지 가중치가 번질 수 있음` });
+  }
+  // 2 인원수
+  const cnt = tagsOf(sl.count).map(ckey), many = cnt.filter((t) => /^[2-9]\+?(girls|boys|others)$|^\d+\+?(girl|boy)s$/.test(t));
+  if (cnt.filter((t) => /^\d\+?(girl|boy|other)s?$/.test(t)).length > 1 && !many.length) out.push({ msg: `인원수 태그가 여럿: ${tagsOf(sl.count).join(", ")}` });
+  if (cnt.includes("solo") && many.length) out.push({ msg: `solo와 여러 명(${many.join(", ")})이 같이 있음`, fix: ["solo 빼기", () => put("count", tagsOf(sl.count).filter((t) => ckey(t) !== "solo").join(", "))] });
+  if (!tg(sl.count)) out.push({ msg: "1 인원수 칸이 비어 있음: 1girl·solo 같은 태그가 없으면 사람 수가 들쭉날쭉함" });
+  // 3 엉뚱한 칸에 든 태그
+  for (const k of ["traits", "outfit", "pose", "bg"]) for (const t of tagsOf(sl[k])) {
+    const g = guessSlot(t);
+    if (g === k || g === "rest") continue;
+    if (g === "count" || (["outfit", "pose", "bg", "traits"].includes(g))) out.push({ msg: `‘${t}’ 태그는 ${SLOT_LABEL[g]} 칸 것으로 보이는데 ${SLOT_LABEL[k]} 칸에 있음`, fix: [`${SLOT_LABEL[g]} 칸으로 옮기기`, () => { put(k, tagsOf(sl[k]).filter((x) => x !== t).join(", ")); put(g, joinTags([valK(g), t])); }] });
+  }
+  if (tg(sl.rest)) out.push({ msg: `‘그 밖에’ 칸에 칸을 못 정한 태그 ${tagsOf(sl.rest).length}개: ${tagsOf(sl.rest).slice(0, 5).join(", ")}`, fix: ["칸마다 나눠 넣기", () => { const got = parseSceneBlock(sl.rest); sl.rest = ""; for (const k of SL) if (tg(got[k])) sl[k] = joinTags([sl[k], got[k]]); syncScene(); }] });
+  // 4 두 칸에 겹친 태그
+  const seen = new Map();
+  for (const k of ["count", "style", "traits", "outfit", "pose", "bg", "rest"]) for (const t of tagsOf(valK(k))) {
+    const key = ckey(t);
+    if (seen.has(key) && seen.get(key) !== k) { const a = seen.get(key); out.push({ msg: `‘${t}’ 태그가 ${SLOT_LABEL[a]} 칸과 ${SLOT_LABEL[k]} 칸에 둘 다 있음`, fix: [`${SLOT_LABEL[k]}에서 빼기`, () => put(k, tagsOf(valK(k)).filter((x) => ckey(x) !== key).join(", "))] }); }
+    else seen.set(key, k);
+  }
+  // 5 넣을 것과 뺄 것에 둘 다
+  const negs = new Map([...tagsOf(d.taste.negative).map((t) => [ckey(t), "base"]), ...tagsOf(d.draft.neg).map((t) => [ckey(t), "neg"])]);
+  for (const [key, k] of seen) if (negs.has(key)) {
+    const where = negs.get(key) === "neg" ? "이번 빼는 것" : "기본 빼는 것";
+    out.push({ msg: `‘${key}’ 태그가 넣을 것(${SLOT_LABEL[k]})과 ${where}에 둘 다 있음: 서로 지워서 효과가 약함`, fix: [`${where}에서 지우기`, () => { if (negs.get(key) === "neg") d.draft.neg = tagsOf(d.draft.neg).filter((x) => ckey(x) !== key).join(", "); else d.taste.negative = tagsOf(d.taste.negative).filter((x) => ckey(x) !== key).join(", "); }] });
+  }
+  // 6 배경
+  if (!s.bgOn && tg(sl.bg)) out.push({ msg: "배경 깔기가 꺼져 있어 6 배경 칸 글이 안 감 (대신 simple background)", fix: ["배경 깔기 켜기", () => { s.bgOn = true; }] });
+  if (!tg(sl.traits) && !d.draft.chars.length) out.push({ msg: "3 특징 칸이 비어 있음: 인물 생김새가 매번 달라짐" });
+  // 7 사전 (받아 둔 때만)
+  if (tags) { const c = checkTags([sl.traits, sl.outfit, sl.pose, s.bgOn ? sl.bg : ""].join(", ")); if (c?.missing.length) out.push({ msg: `사전에 없는 태그 ${c.missing.length}개 (자연어 문구·오타·캐릭터 이름일 수 있음): ${c.missing.slice(0, 6).join(", ")}` }); }
+  return out;
+}
+function diagHtml() {
+  if (!ui.diag) return "";
+  const list = ui.diag;
+  return `<section class="diag" aria-label="프롬프트 점검 결과"><div class="toolhead"><h2>프롬프트 점검 <small>${list.length ? `${list.length}개` : "문제 없음"}</small></h2><button type="button" class="ghost mini" id="diagClose">닫기</button></div>
+    ${list.length ? `<ul>${list.map((x, i) => `<li><p>${esc(x.msg)}</p>${x.fix ? `<button type="button" class="ghost sm" data-dfix="${i}">${esc(x.fix[0])}</button>` : ""}</li>`).join("")}</ul>
+    <button type="button" class="ghost sm" id="diagAsk">비서에게 고쳐 달라기</button>` : `<p class="hint">칸 나누기·겹침·괄호·인원수·빼는 것과의 충돌을 봤고 걸린 것이 없음. 그림이 이상하면 태그 뜻이 문제일 수 있으니 비서에게 그림을 보여 주고 묻기.</p>`}</section>`;
 }
 // 2026-11-22: 프롬프트 칸 전부 접기. 접으면 완성된 프롬프트 두 줄만 보이고, 그 줄을 눌러도 펼쳐진다. 접힌 상태는 settings.foldPrompt에 남는다(옛 데이터에는 없어 펼친 것으로 읽음).
 // 뽑기 화면의 비서 한 줄 (2026-11-27, 사용자: 편의성). 비서 탭으로 가지 않고 여기서 묻고, 답의 블록도 여기서 넣는다.
@@ -2422,6 +2508,18 @@ function promptBlock() {
     <button type="button" class="pfold" data-pfold="0" aria-label="프롬프트 펼치기"><span>${esc(withComma(full)) || "(비어 있음)"}</span></button>`;
 }
 function wireSlots() {
+  on("diagGo", "click", async () => { await loadTags().catch(() => {}); ui.diag = diagnose(); render(); $("diagClose")?.scrollIntoView({ behavior: "smooth", block: "center" }); });
+  on("diagClose", "click", () => { ui.diag = null; render(); });
+  document.querySelectorAll("[data-dfix]").forEach((b) => b.addEventListener("click", () => {
+    const x = ui.diag?.[+b.dataset.dfix]; if (!x?.fix) return;
+    const before = snapBlocks(); x.fix[1](); ui.diag = diagnose(); store.save();
+    toast(`고침: ${x.fix[0]}`, () => { restoreBlocks(before); ui.diag = diagnose(); render(); });
+  }));
+  on("diagAsk", "click", () => {
+    if (asking || !ui.diag?.length) return;
+    ui.qShow = true; ui.open.ai = false;
+    ask(`프롬프트 점검에서 걸린 것:\n${ui.diag.map((x) => `- ${x.msg}`).join("\n")}\n고칠 줄만 블록으로 내 줘.`);
+  });
   on("bgOn", "click", () => { const s = store.data.settings; s.bgOn = !s.bgOn; toast(s.bgOn ? "배경 깔기 켬: 배경 칸이 그림에 감" : `배경 깔기 끔: ${BG_OFF}로 그림`); store.save(); });
   document.querySelectorAll("[data-pfold]").forEach((b) => b.addEventListener("click", () => { store.data.settings.foldPrompt = b.dataset.pfold === "1"; store.save(); }));
   const d = store.data, s = d.settings;
@@ -2915,7 +3013,7 @@ function wireAsk() {
     if (el.dataset.kind === "scene" && route()[0] === "ai") location.hash = "#/gen"; else render();
   }));
   // 한 답의 블록을 한 번에 넣는다. 이번 그림 → 인물 → 빼는 것 → 설정 → 화풍·작가(확인창) 순서. 되돌리기 한 번에 전부 돌아간다.
-  const ORDER = ["scene", "char", "refs", "negative", "params", "style"];
+  const ORDER = ["person", "scene", "char", "refs", "negative", "params", "style"]; // 인물을 먼저 넣고, 같은 답의 scene(의상 등)이 그 위에 덮는다
   document.querySelectorAll("[data-blkall]").forEach((el) => el.addEventListener("click", () => {
     const i = +el.dataset.blkall, m = d.chat[i]; if (!m) return;
     const again = el.dataset.again === "1", done = Array.isArray(m.done) ? m.done : [];
