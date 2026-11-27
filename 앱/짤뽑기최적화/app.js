@@ -2228,7 +2228,7 @@ function pimgPanel(e, works) {
         ${im ? `<button type="button" class="ghost sm" data-pimgref="${esc(key)}">참고 그림에 넣기</button><button type="button" class="ghost sm" data-pimgi2i="${esc(key)}">이미지→이미지로</button><button type="button" class="ghost sm" data-pimgdel="${esc(key)}">그림 빼기</button>` : ""}
       </div>
       ${im ? `<label class="line"><input type="checkbox" data-pimgauto="${esc(key)}" ${im.ref ? "checked" : ""}> 이 프리셋을 넣을 때 그림도 참고 그림으로 같이 넣기</label>` : ""}
-      <p class="hint">이 프리셋으로 만든 작품 ${works.length}장 <span class="hint">(프리셋 태그가 다 들어 있는 보관한 그림)</span></p>
+      <p class="hint">이 프리셋으로 만든 작품 ${works.length}장 <span class="hint">(프리셋 태그가 다 들어 있는 보관한 그림)</span>${works.length ? ` <button type="button" class="ghost mini" data-pworks="${esc(key)}">보관함에서 전부 보기</button>` : ""}</p>
       ${works.length ? `<div class="wgrid">${works.slice(0, 24).map((r) => `<div class="wk"><a href="#/keep/${r.id}" data-thumb="${r.id}" style="aspect-ratio:${r.w}/${r.h}" aria-label="시드 ${r.seed ?? ""} 그림"></a><button type="button" class="ghost sm" data-pimgpick="${esc(key)}" data-wid="${r.id}">대표로</button></div>`).join("")}</div>${works.length > 24 ? `<p class="hint">최근 24장만 보임</p>` : ""}` : ""}
     </div>`;
 }
@@ -3014,7 +3014,10 @@ const SCREENS = {
     const addBtn = sel
       ? `<div class="kbar"><b id="kselN">${sel.size}장 고름</b><button type="button" class="ghost sm" id="kAll">${sel.size === kept.length ? "전부 풀기" : "전부"}</button><button type="button" class="ghost sm" id="kSave">저장</button><button type="button" class="ghost sm" id="kZip">zip으로</button><button type="button" class="ghost sm danger" id="kDel">지우기</button><button type="button" class="ghost sm" id="kOff">취소</button></div>`
       : `<input id="inFile" type="file" accept="image/*" multiple hidden><div class="acts2 ktop"><button type="button" class="ghost sm" id="kOn">고르기</button><button type="button" class="ghost sm" id="inAdd">＋ 받은 그림 넣기</button></div>`;
-    const find = kept.length > 6 ? `<input id="kq" type="search" placeholder="프롬프트 낱말·시드로 찾기" value="${esc(ui.kq || "")}" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="보관함에서 찾기"><p class="hint" id="kqN" hidden></p>` : "";
+    // 프리셋으로 찾기 (2026-11-27 사용자): 그 프리셋 태그가 다 든 보관한 그림만. 작품이 한 장이라도 있는 프리셋만 고르게 보인다.
+    const sets = keptSets(), byKind = PKINDS.map((k) => [k, presetEntries(k).map((e) => ({ e, n: presetWorks(e.p, sets).length })).filter((x) => x.n)]).filter(([, l]) => l.length);
+    const psel = byKind.length ? `<select id="kpreset" aria-label="프리셋으로 찾기"><option value="">프리셋으로 찾기…</option>${byKind.map(([k, l]) => `<optgroup label="${esc(k)}">${l.map(({ e, n }) => `<option value="${esc(e.key)}" ${ui.kpreset === e.key ? "selected" : ""}>${esc(e.p.name || "이름 없음")} (${n}장)</option>`).join("")}</optgroup>`).join("")}</select>` : "";
+    const find = kept.length > 6 || ui.kpreset ? `<input id="kq" type="search" placeholder="프롬프트 낱말·시드로 찾기" value="${esc(ui.kq || "")}" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="보관함에서 찾기">${psel}<p class="hint" id="kqN" hidden></p>` : psel;
     return `${addBtn}${find}${groups.map(({ g, list }, gi) => `<h2 class="kday">${esc(g)} <small>${list.length}장</small>${sel ? `<button type="button" class="ghost mini" data-kday="${gi}">이 날 전부</button>` : ""}</h2><div class="kgrid ${sel ? "picking" : ""}" data-kg="${gi}">${list.map((r) =>
       `<a href="#/keep/${r.id}" class="${sel?.has(r.id) ? "sel" : ""}" data-thumb="${r.id}" aria-label="${r.ext ? "받은 그림" : `시드 ${r.seed} 그림`}">${r.ext ? `<span class="kbadge">받음</span>` : ""}</a>`).join("")}</div>`).join("")}<p class="hint kfoot">NovelAI PNG면 안에 든 프롬프트·시드를 읽어 ‘다시 뽑기’가 됨. 받은 그림은 취향 통계에 안 셈.</p>`;
   },
@@ -3719,6 +3722,7 @@ function wire(name, arg, seq) {
     // 프리셋 그림
     const pimgFail = (err) => toast(`그림을 못 넣음 (${err?.message || err}). 다른 파일로 시도`);
     document.querySelectorAll("[data-pimg]").forEach((b) => b.addEventListener("click", () => { ui.pimgOpen = ui.pimgOpen === b.dataset.pimg ? null : b.dataset.pimg; ui.open.preset = true; render(); }));
+    document.querySelectorAll("[data-pworks]").forEach((b) => b.addEventListener("click", () => { ui.kpreset = b.dataset.pworks; ui.kq = ""; location.hash = "#/keep"; }));
     document.querySelectorAll("[data-pimgfile]").forEach((b) => b.addEventListener("click", () => { ui.pimgTarget = b.dataset.pimgfile; $("pimgFile")?.click(); }));
     on("pimgFile", "change", async (e) => {
       const f = e.target.files[0]; e.target.value = "";
@@ -3774,24 +3778,26 @@ function wire(name, arg, seq) {
     const cells = [...document.querySelectorAll(".kgrid a[data-thumb]")];
     // 찾기: 다시 그리지 않고 안 맞는 칸만 숨긴다 (썸네일을 다시 읽지 않게). 낱말을 여럿 쓰면 전부 든 그림만.
     const byId = new Map(d.log.map((r) => [r.id, r]));
+    const pset = () => { const pp = ui.kpreset && presetByKey(ui.kpreset); return pp ? new Set(presetWorks(pp, keptSets()).map((r) => r.id)) : null; };
     const kFilter = () => {
-      const words = (ui.kq || "").toLowerCase().split(/[\s,]+/).filter(Boolean);
+      const words = (ui.kq || "").toLowerCase().split(/[\s,]+/).filter(Boolean), only = pset();
       let n = 0;
       document.querySelectorAll(".kgrid").forEach((g) => {
         let any = false;
         g.querySelectorAll("a[data-thumb]").forEach((a) => {
           const r = byId.get(a.dataset.thumb);
           const text = r ? `${r.scene || ""} ${r.style || ""} ${(r.chars || []).map((c) => c.text).join(" ")} ${r.name || ""} ${r.seed ?? ""}`.toLowerCase() : "";
-          const ok = words.every((w) => text.includes(w));
+          const ok = words.every((w) => text.includes(w)) && (!only || only.has(a.dataset.thumb));
           a.hidden = !ok; if (ok) { any = true; n++; }
         });
         g.hidden = !any;
         if (g.previousElementSibling?.classList.contains("kday")) g.previousElementSibling.hidden = !any;
       });
-      const el = $("kqN"); if (el) { el.hidden = !words.length; el.textContent = n ? `${n}장 찾음` : "찾은 그림이 없음"; }
+      const el = $("kqN"); if (el) { el.hidden = !words.length && !only; el.textContent = n ? `${n}장 찾음${only ? ` (프리셋 ‘${presetByKey(ui.kpreset)?.name || ""}’로 만든 그림)` : ""}` : "찾은 그림이 없음"; }
     };
     on("kq", "input", (e) => { ui.kq = e.target.value; kFilter(); });
-    if (ui.kq) kFilter();
+    on("kpreset", "change", (e) => { ui.kpreset = e.target.value || null; kFilter(); });
+    if (ui.kq || ui.kpreset) kFilter();
     const sync = () => {
       const n = ui.ksel?.size || 0;
       cells.forEach((a) => a.classList.toggle("sel", !!ui.ksel?.has(a.dataset.thumb)));

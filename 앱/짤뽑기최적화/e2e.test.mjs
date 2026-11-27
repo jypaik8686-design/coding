@@ -221,3 +221,14 @@ test("처음 기본값: 기본 그림체와 기본 빼는 것이 서로 지우�
   assert.doesNotMatch(txt, /기본 빼는 것에 둘 다/);
   assert.deepEqual(errs, []); await p.close();
 });
+test("보관함 프리셋으로 찾기: 그 프리셋 태그가 다 든 그림만 보인다", async () => {
+  const rec = (id, scene) => ({ id, scene, style: "", negative: "", seed: 1, verdict: "keep", at: 1e12, w: 832, h: 1216, steps: 28, scale: 5, model: "nai-diffusion-5-full" });
+  const { p, errs } = await open({ presets: [{ id: "m1", name: "메이드", text: "maid, apron", to: "scene", kind: "의상", slot: "outfit" }],
+    log: [rec("a", "1girl, {maid}, apron, smile"), rec("b", "1girl, maid, apron, sitting"), rec("c", "1girl, suit"), ...Array.from({ length: 5 }, (_, i) => rec(`x${i}`, "1girl, dress"))] });
+  await p.evaluate(() => { location.hash = "#/keep"; }); await p.waitForTimeout(500);
+  await p.selectOption("#kpreset", "own:m1"); await p.waitForTimeout(200);
+  const shown = await p.locator(".kgrid a[data-thumb]:not([hidden])").evaluateAll((els) => els.map((e) => e.dataset.thumb).sort());
+  assert.deepEqual(shown, ["a", "b"]);
+  assert.match(await p.locator("#kqN").innerText(), /2장 찾음/);
+  assert.deepEqual(errs, []); await p.close();
+});
