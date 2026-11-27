@@ -1508,7 +1508,7 @@ function refsText(full = true) {
 function personText() {
   const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
   const now = list.filter((e) => chipOn(e.p)).map((e) => e.p.name);
-  return `\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
+  return `\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 사용자가 프리셋으로 저장할 수 있다. 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
 }
 function fullPersona(sent, libFull = true) {
   const d = store.data;
@@ -1753,6 +1753,17 @@ function restoreBlocks(json) {
 
 // kind, 블록 글을 칸에 넣는다. 돌려주는 것은 사용자에게 알릴 한 줄 (null이면 아무것도 안 함)
 // from: 블록이 나온 곳(비서 답·받은 자료 항목)의 표시. 인물 칸에 남겨 두고, 다른 곳에서 온 새 그림·새 인물이 들어오면 옛 인물 칸을 뺀다 (2026-11-21, 사용자 요청).
+// person 블록에서 새 인물을 읽는다: `name: 이름` 줄(없어도 됨)과 쉼표 태그. 프리셋 이름 한 줄이면 null.
+function personFromBlock(v) {
+  const lines = String(v).split("\n").map((x) => x.trim()).filter(Boolean);
+  const nm = lines.find((x) => /^(name|이름)\s*[:：]/i.test(x));
+  const body = lines.filter((x) => x !== nm).join(", ");
+  if (!body.includes(",")) return null;
+  const { fixed, outfit } = splitPerson(body);
+  if (!tg(fixed)) return null;
+  return { name: nm ? nm.replace(/^(name|이름)\s*[:：]\s*/i, "").trim().slice(0, 30) : "", fixed: tg(fixed), outfit: tg(outfit) };
+}
+const personSaved = (v) => { const c = personFromBlock(v); if (!c) return false; const k = tg(c.fixed).split(", ").map(ckey).sort().join(); return presetEntries("인물").some((e) => tg(personParts(e.p).fixed).split(", ").map(ckey).sort().join() === k); };
 // person 블록: 프리셋 이름이면 그 인물 칩을 켠 것처럼 바꿔 넣고(고정 + 기본 의상, 금지 태그), 아니면 태그로 새 인물을 넣는다.
 function applyPerson(v) {
   const d = store.data, name = String(v).split("\n").map((x) => x.trim()).find(Boolean) || "";
@@ -1760,14 +1771,14 @@ function applyPerson(v) {
   const norm = (x) => x.toLowerCase().replace(/[\s()（）·]/g, "");
   const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
   const hit = list.find((e) => norm(e.p.name) === norm(name)) || list.find((e) => norm(e.p.name).includes(norm(name)) || norm(name).includes(norm(e.p.name)));
-  if (hit && !name.includes(",")) {
+  if (hit && !name.includes(",") && !personFromBlock(v)) {
     for (const e of list) if (e.key !== hit.key && chipOn(e.p)) chipOff(e.p);
     usePreset(hit.p, "replace");
     if (tidy(hit.p.neg || "")) usePreset(hit.p, "neg");
     d.draft.chipsOn = [...(d.draft.chipsOn || []).filter((x) => x !== hit.key), hit.key].slice(-40);
     return `인물을 ‘${hit.p.name}’으로 바꿈${tidy(personParts(hit.p).outfit) ? " (기본 의상도)" : ""}`;
   }
-  const { fixed, outfit } = splitPerson(String(v).replace(/\n/g, ", ")), { count, rest } = splitCount(fixed);
+  const nc = personFromBlock(v), { fixed, outfit } = nc || splitPerson(String(v).replace(/\n/g, ", ")), { count, rest } = splitCount(fixed);
   if (!tg(rest) && !tg(count)) return `‘${name.slice(0, 20)}’ 인물을 프리셋에서 못 찾음`;
   for (const e of list) if (chipOn(e.p)) chipOff(e.p);
   if (tg(count)) d.draft.slots.count = tg(count);
@@ -1879,6 +1890,8 @@ function msgHtml(m, i) {
     const btn = label ? (done.includes(j)
       ? `<button type="button" class="ghost done" data-blk="${id}" data-kind="${b.lang}" aria-label="${label} (넣음, 누르면 다시 넣음)">✓ 넣음</button>`
       : `<button type="button" class="line" data-blk="${id}" data-kind="${b.lang}">${label}</button>`) : "";
+    // 새 인물(태그로 쓴 person 블록)은 인물 프리셋으로 저장할 수 있다 (2026-11-27 사용자). 이미 같은 태그의 프리셋이 있으면 버튼을 안 둔다.
+    const psave = b.lang === "person" && personFromBlock(b.v) && !personSaved(b.v) ? `<button type="button" class="ghost" data-pcsave="${id}">인물 프리셋으로 저장</button>` : "";
     let check = "";
     if (b.lang === "scene" || b.lang === "char") {
       const c = checkTags(b.v);
@@ -1887,7 +1900,7 @@ function msgHtml(m, i) {
       else if (!c) check = `<p class="hint">태그 사전을 못 불러와 검사를 못 함.</p>`;
     }
     const prompty = ["scene", "style", "negative", "char"].includes(b.lang) || !b.lang;
-    return `<div class="code"><pre>${esc(showBlock(b))}</pre>${prompty ? `<p class="endmark">✅ 여기까지</p>` : ""}<div class="acts2">${btn}<button type="button" class="ghost" data-copy="${id}">복사</button></div>${check}</div>`;
+    return `<div class="code"><pre>${esc(showBlock(b))}</pre>${prompty ? `<p class="endmark">✅ 여기까지</p>` : ""}<div class="acts2">${btn}${psave}<button type="button" class="ghost" data-copy="${id}">복사</button></div>${check}</div>`;
   }).join("");
   const left = usable.filter((j) => !done.includes(j)).length;
   const all = usable.length >= 2
@@ -3145,6 +3158,19 @@ function wireAsk() {
   // 넣은 블록 표시: chat[i].done에 블록 번호를 남긴다. 되돌리면 넣기 전 표시로 돌린다.
   const fromOf = (i) => `m:${d.chat[i]?.at || i}`;
   const markDone = (i, js) => { const m = d.chat[i]; if (!m) return null; const was = Array.isArray(m.done) ? [...m.done] : []; m.done = [...new Set([...was, ...js])]; return () => { m.done = was; }; };
+  document.querySelectorAll("[data-pcsave]").forEach((el) => el.addEventListener("click", () => {
+    const [ci, cj] = el.dataset.pcsave.split(":").map(Number);
+    const b = parseBlocks(d.chat[ci]?.text || "")[cj], c = b && personFromBlock(b.v);
+    if (!c) return toast("인물 태그를 못 읽음");
+    const name = (prompt("인물 프리셋 이름", c.name) || "").trim().slice(0, 30);
+    if (!name) return;
+    const pr = { id: crypto.randomUUID(), name, text: c.fixed, outfit: c.outfit, to: "scene", kind: "인물", slot: "traits", at: "front" };
+    d.presets.unshift(pr);
+    // 지금 칸이 이 인물이면 칩이 켜진 것으로 보이게
+    const k = `own:${pr.id}`; if (chipPresent(pr)) d.draft.chipsOn = [...(d.draft.chipsOn || []), k].slice(-40);
+    toast(`‘${name}’을 인물 프리셋으로 저장함 (고정 ${c.fixed.split(", ").length}개 · 기본 의상 ${c.outfit ? c.outfit.split(", ").length : 0}개)`, () => { d.presets = d.presets.filter((x) => x !== pr); store.save(); });
+    store.save();
+  }));
   document.querySelectorAll("[data-blk]").forEach((el) => el.addEventListener("click", () => {
     const v = blockOf(el.dataset.blk); if (!v) return;
     const before = snapBlocks();
