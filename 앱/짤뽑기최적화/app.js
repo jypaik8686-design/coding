@@ -1475,13 +1475,16 @@ function stateText(sent = new Set()) { // sent: 이번 메시지에 그림으로
 // 최적화판: 서랍 목록에는 그림마다 바뀌지 않는 글만 둔다(이름표·이름·시드·메모). 켜짐·강도처럼 자주 바뀌는 것은 ‘지금 상태’로 보냈다.
 // 그래서 서랍을 건드리지 않는 한 지시문 앞부분(조각 + 서랍 목록)이 질문마다 똑같다. 제미니가 같은 앞부분을 캐시로 싸게 치는지는 모델에 달렸다(2026-11-22 gemini-flash-latest에서 cachedContentTokenCount가 찍히는 것은 봤다).
 const REF_LIST_MAX = 40;
-function refsText() {
+// 2026-11-27(사용자: 입력 토큰이 매번 만 개): 서랍 전체 목록은 참고 그림 얘기일 때만 보낸다. 평소에는 켠 그림만 + 남은 장수 한 줄.
+const REF_WORDS = /참고|서랍|바이브|레퍼|vibe|ref|비슷한 그림|따라|분위기 그대로|같은 느낌|그림체 따/i;
+function refsText(full = true) {
   const s = store.data.settings;
   if (!refPlan(s)) return ""; // 참고 그림을 못 보내는 모델이면 목록도 안 보낸다. ‘지금 상태’ 첫 줄에 "참고 그림 안 됨"이 간다
-  const pool = aiRefs().slice(0, REF_LIST_MAX);
-  if (!pool.length) return "";
+  const all = aiRefs(), pool = (full ? all : all.filter((r) => r.on)).slice(0, REF_LIST_MAX);
+  if (!all.length) return "";
+  if (!full && !pool.length) return `\n\n## 참고 그림 서랍\n${all.length}장 있음, 켠 것 없음. 목록은 사용자가 참고 그림 얘기를 하면 붙는다.`;
   const lib = pool.map((r) => `#${refCode(r)} ${r.name}${Number.isInteger(r.meta?.seed) ? ` | 시드 ${r.meta.seed}` : ""} | ${r.encOnly ? "바이브 파일(그림 없음)" : r.memo ? `메모: ${cut(r.memo, 140)}` : "메모 없음(비서가 아직 안 봄)"}`).join("\n");
-  return `\n\n## 참고 그림 서랍\n그림은 붙지 않는다. 아래 글이 그림을 대신한다. 고를 때는 refs 블록에 \`#이름표: 강도\`.\n${lib}`;
+  return `\n\n## 참고 그림 서랍\n그림은 붙지 않는다. 아래 글이 그림을 대신한다. 고를 때는 refs 블록에 \`#이름표: 강도\`.${full ? "" : ` 켠 그림만 적음(서랍 ${all.length}장, 나머지 목록은 사용자가 참고 그림 얘기를 하면 붙음).`}\n${lib}`;
 }
 // 인물 바꾸기 쓰는 법과 인물 프리셋 이름. 지시문 조각을 고쳐 두어도 늘 붙는다 (2026-11-27, 사용자: 비서가 인물을 편하게 바꾸게).
 function personText() {
@@ -1489,9 +1492,27 @@ function personText() {
   const now = list.filter((e) => chipOn(e.p)).map((e) => e.p.name);
   return `\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
 }
-function fullPersona(sent) {
+function fullPersona(sent, libFull = true) {
   const d = store.data;
-  return buildPersona(d.persona) + refsText() + personText() + (d.persona.auto.state ? stateText(sent) : "");
+  return buildPersona(d.persona) + refsText(libFull) + personText() + (d.persona.auto.state ? stateText(sent) : "");
+}
+// 보낸 요청을 부분마다 잰다 (2026-11-27). 글은 글자 수와 어림 토큰(한국어·태그 섞인 글을 재 보니 1.9자에 1토큰쯤), 그림은 장수 × 해상도별 토큰.
+function sizeParts(sys, contents, pics, conf) {
+  const est = (n) => Math.round(n / 1.9);
+  const out = [];
+  for (const sec of ("\n\n" + sys).split(/\n\n(?=## )/)) { if (!sec.trim()) continue; const name = sec.trim().startsWith("## ") ? sec.trim().split("\n")[0].slice(3, 24) : "지시문 앞머리"; out.push([name, sec.length, est(sec.length)]); }
+  const last = contents.at(-1), past = contents.slice(0, -1);
+  const pastN = past.reduce((a, c) => a + c.parts.reduce((b, x) => b + (x.text?.length || 0), 0), 0);
+  if (past.length) out.push([`지난 대화 ${past.length}개`, pastN, est(pastN)]);
+  const lastText = last.parts.filter((x) => x.text != null && !/^\[그림 #/.test(x.text)).map((x) => x.text).join("\n");
+  const cand = lastText.indexOf("\n\n[사전 후보]"), doc = lastText.indexOf("[붙인 파일:");
+  const qEnd = Math.min(...[cand, doc, lastText.length].filter((x) => x >= 0));
+  out.push(["이번 질문", qEnd, est(qEnd)]);
+  if (cand >= 0) { const n = (doc > cand ? doc : lastText.length) - cand; out.push(["사전 후보", n, est(n)]); }
+  if (doc >= 0) { const n = lastText.length - doc; out.push(["붙인 파일", n, est(n)]); }
+  const nPic = pics.filter((x) => x.inline_data).length;
+  if (nPic) { const per = conf.mediaResolution === "MEDIA_RESOLUTION_LOW" ? 270 : conf.mediaResolution === "MEDIA_RESOLUTION_MEDIUM" ? 550 : 1100; out.push([`그림 ${nPic}장`, 0, nPic * per]); }
+  return out;
 }
 
 // 비서 답에서 memo 블록을 떼어 낸다. 메모는 그림 줄에 따로 저장하고, 대화 기록에는 남기지 않는다(다음 질문에 같은 글이 두 번 가지 않게).
@@ -1577,7 +1598,8 @@ async function ask(text, opts = {}) {
     // 다시 보여 주는 그림뿐이면 해상도 설정을 낮춰 토큰을 줄인다(MEDIUM은 한 장 약 530~560, LOW는 260~280. 2026-11-22 countTokens로 잼). 처음 보는 그림이 섞이면 기본(약 1,080~1,120)으로 둔다.
     const conf = { temperature: 0.8 };
     if (!first.length && again.length) conf.mediaResolution = again.length >= 3 ? "MEDIA_RESOLUTION_LOW" : "MEDIA_RESOLUTION_MEDIUM";
-    const sys = fullPersona(new Set(shown.map((a) => a.code)));
+    const libFull = !!(ui.withRefs || opts.look?.length || REF_WORDS.test(text));
+    const sys = fullPersona(new Set(shown.map((a) => a.code)), libFull);
     const post = (generationConfig) => {
       return fetch(`${GEMINI}${encodeURIComponent(model)}:generateContent`, {
         method: "POST", signal: asking.signal,
@@ -1605,7 +1627,7 @@ async function ask(text, opts = {}) {
       if (e) e.memo = memo;
       saved.push([code, memo]);
     }
-    d.chat.push({ role: "model", text: out || "(메모만 남김)", at: Date.now(), ...(saved.length ? { mm: saved } : {}), ...(j.usageMetadata ? { tok: [j.usageMetadata.promptTokenCount || 0, j.usageMetadata.candidatesTokenCount || 0, j.usageMetadata.cachedContentTokenCount || 0] } : {}) });
+    d.chat.push({ role: "model", text: out || "(메모만 남김)", at: Date.now(), ...(saved.length ? { mm: saved } : {}), ...(j.usageMetadata ? { tok: [j.usageMetadata.promptTokenCount || 0, j.usageMetadata.candidatesTokenCount || 0, j.usageMetadata.cachedContentTokenCount || 0, j.usageMetadata.thoughtsTokenCount || 0] } : {}), brk: sizeParts(sys, contents, pics, conf) });
     scrollAi = true; // 새 답의 첫머리로
     if (doc && ui.attachDoc === doc) ui.attachDoc = null; // 파일도 보낸 한 번만
     if (fileImg) clearAttach(); // 사진은 보낸 한 번만. 실패하면 남겨 두어 다시 보낼 수 있다
@@ -1845,7 +1867,9 @@ function msgHtml(m, i) {
       ? `<button type="button" data-blkall="${i}">전부 넣기 <small>(${left === usable.length ? `${usable.length}개` : `남은 ${left}개`})</small></button>`
       : `<button type="button" class="ghost done" data-blkall="${i}" data-again="1">✓ 전부 넣음 <small>(다시 넣기)</small></button>`}</div>` : "";
   const memoLine = Array.isArray(m.mm) && m.mm.length ? `<p class="hint memosaved">메모 남김 (다음부터 그림 대신 감): ${m.mm.map(([c, t]) => `#${esc(c)} ${esc(cut(t, 80))}`).join(" / ")}</p>` : "";
-  const tok = Array.isArray(m.tok) && m.tok[0] ? `<p class="hint tok">이 질문에 든 토큰: 보낸 것 ${m.tok[0].toLocaleString("ko-KR")}${m.tok[2] ? ` (그중 캐시 ${m.tok[2].toLocaleString("ko-KR")})` : ""} · 받은 것 ${(m.tok[1] || 0).toLocaleString("ko-KR")}</p>` : "";
+  const L = (n) => Number(n || 0).toLocaleString("ko-KR");
+  const brk = Array.isArray(m.brk) && m.brk.length ? `<details class="tokbrk"><summary>어디서 들었나</summary><ul>${[...m.brk].sort((a, b) => b[2] - a[2]).map(([k, c, t]) => `<li><span>${esc(k)}</span><span>약 ${L(t)}${c ? ` <small>${L(c)}자</small>` : ""}</span></li>`).join("")}</ul><p class="hint">글은 1.9자에 1토큰으로 어림. 실제 보낸 것은 위 숫자. 서랍 목록은 참고 그림 얘기를 할 때만 전부 감.</p></details>` : "";
+  const tok = Array.isArray(m.tok) && m.tok[0] ? `<p class="hint tok">이 질문에 든 토큰: 보낸 것 ${L(m.tok[0])}${m.tok[2] ? ` (그중 캐시 ${L(m.tok[2])})` : ""} · 받은 것 ${L(m.tok[1])}${m.tok[3] ? ` · 생각 ${L(m.tok[3])}` : ""}</p>${brk}` : "";
   return `<div class="msg ai">${all}${parts || esc(m.text)}${memoLine}${tok}</div>`;
 }
 
