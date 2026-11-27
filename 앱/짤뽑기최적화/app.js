@@ -1505,7 +1505,7 @@ function refsText(full = true) {
 function personText() {
   const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
   const now = list.filter((e) => chipOn(e.p)).map((e) => e.p.name);
-  return `\n\n## 새 그림\n사용자가 앞 그림과 다른 새 그림(다른 장소·옷·상황)을 달라고 하면 scene 블록 첫 줄에 new를 쓰고 outfit·pose·bg 줄을 다 쓴다. 앱이 앞 장면 칸·이번 빼는 것·다른 답의 인물별 칸을 비우고 넣는다. 캐릭터를 바꿀 때만 count·traits 줄을 쓴다. 앞 그림을 고치는 것이면 new 없이 바뀐 줄만.\n\n## 내기 전 검토\n블록을 내기 전에 한 번 훑는다: 태그가 맞는 칸 줄에 있나, 같은 태그가 두 줄에 겹치나, 빼는 것(기본·이번)에 있는 태그를 넣으려 하나, 단부루에 없는 말(자연어·한국어)이 섞였나, 인원수가 인물 수와 맞나. 걸리면 고친 블록만 내고 무엇을 고쳤는지 한 줄. 확실하지 않은 태그는 search 블록으로 찾는다.\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상), 마지막 줄에 \`neg: 태그\`로 그 인물에게 나오면 안 되는 것을 3~8개 꼭 쓴다(반대되는 머리 길이·머리색·눈색·체형, 그 인물에게 없는 안경·장신구·귀·뿔 등. 기본 Undesired에 있는 것은 빼고). neg 줄 없는 person 블록을 내지 않는다. 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
+  return `\n\n## 새 그림\n사용자가 앞 그림과 다른 새 그림(다른 장소·옷·상황)을 달라고 하면 scene 블록 첫 줄에 new를 쓰고 outfit·pose·bg 줄을 다 쓴다. 앱이 앞 장면 칸·이번 빼는 것·다른 답의 인물별 칸을 비우고 넣는다. 캐릭터를 바꿀 때만 count·traits 줄을 쓴다. 앞 그림을 고치는 것이면 new 없이 바뀐 줄만.\n\n## 내기 전 검토\n블록을 내기 전에 한 번 훑는다: 태그가 맞는 칸 줄에 있나, 같은 태그가 두 줄에 겹치나, 빼는 것(기본·이번)에 있는 태그를 넣으려 하나, 단부루에 없는 말(자연어·한국어)이 섞였나, 인원수가 인물 수와 맞나. 걸리면 고친 블록만 내고 무엇을 고쳤는지 한 줄. 확실하지 않은 태그는 search 블록으로 찾는다.\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
 }
 function fullPersona(sent, libFull = true) {
   const d = store.data;
@@ -1782,7 +1782,7 @@ function peopleOf(text) {
     if (b.t !== "code") return;
     if (b.lang === "person") {
       const nc = personFromBlock(b.v);
-      if (nc) { out.push({ j, fixed: nc.fixed, outfit: nc.outfit, name: nc.name, neg: nc.neg }); return; }
+      if (nc) { out.push({ j, fixed: nc.fixed, outfit: nc.outfit, name: nc.name }); return; }
       const name = String(b.v).split("\n").map((x) => x.trim()).find(Boolean) || "";
       const hit = list.find((e) => norm(e.p.name) === norm(name)) || list.find((e) => norm(e.p.name).includes(norm(name)) || norm(name).includes(norm(e.p.name)));
       if (hit) { const pp = personParts(hit.p); out.push({ j, fixed: pp.fixed, outfit: pp.outfit, name: hit.p.name, neg: tidy(hit.p.neg || "") }); }
@@ -1795,7 +1795,7 @@ function peopleOf(text) {
   });
   return out;
 }
-function applyPeople(people, from = "people") {
+function applyPeople(people) {
   const d = store.data;
   if (!supportsChars(d.settings)) return "이 모델은 인물별 프롬프트가 안 됨 (V4 이상)";
   let girls = 0, boys = 0, others = 0;
@@ -1804,7 +1804,7 @@ function applyPeople(people, from = "people") {
     const c = tg(count).split(", ").map((t) => t.toLowerCase());
     const who = c.some((t) => /boy/.test(t)) ? "boy" : c.some((t) => /girl/.test(t)) ? "girl" : c.some((t) => /other/.test(t)) ? "other" : "girl";
     if (who === "boy") boys++; else if (who === "other") others++; else girls++;
-    return { id: crypto.randomUUID(), text: joinTags([who, rest, pp.outfit]), neg: pp.neg || "", pos: null, from };
+    return { id: crypto.randomUUID(), text: joinTags([who, rest, pp.outfit]), neg: pp.neg || "", pos: null, from: "people" };
   });
   const n = (k, w) => (k ? `${k}${w}${k > 1 ? "s" : ""}` : "");
   d.draft.slots.count = [n(girls, "girl"), n(boys, "boy"), n(others, "other")].filter(Boolean).join(", ");
@@ -1813,45 +1813,17 @@ function applyPeople(people, from = "people") {
   if (first) { if (tg(first.pose)) d.draft.slots.pose = first.pose; if (tg(first.bg)) d.draft.slots.bg = first.bg; }
   d.draft.chars = chars; d.draft.chipsOn = (d.draft.chipsOn || []).filter((k) => !k.startsWith("b:인물:") && !d.presets.some((p) => `own:${p.id}` === k && p.kind === "인물"));
   syncScene(); d.draft.seedLock = false; ui.open.chars = true;
-  const filled = crossNeg();
-  return `인물 ${chars.length}명을 인물별 프롬프트에 넣음 (${d.draft.slots.count})${filled ? " · 서로의 머리·눈 태그를 인물별 뺄 것에 넣음" : ""}${people.length > MAX_CHARS ? ` · ${people.length - MAX_CHARS}명은 넘침` : ""}`;
+  return `인물 ${chars.length}명을 인물별 프롬프트에 넣음 (${d.draft.slots.count})${people.length > MAX_CHARS ? ` · ${people.length - MAX_CHARS}명은 넘침` : ""}`;
 }
-// 인물을 한 명으로 바꿀 때(인물 칩, person 블록, 캐릭터 줄이 든 scene 블록) 비서가 넣어 둔 옛 인물별 칸을 뺀다 (2026-11-27 사용자 신고: 아직도 인물이 꼬여).
-// 안 빼면 새 인물(위 칸)과 옛 여러 명(인물별 칸)이 같이 NovelAI로 간다. 손으로 더한 칸(from 없음)과 keep으로 준 답의 칸은 남긴다. 돌려주는 것: 뺀 수.
-function dropAiChars(keep = "") {
-  const d = store.data, n = d.draft.chars.length;
-  d.draft.chars = d.draft.chars.filter((c) => !c.from || (keep && c.from === keep));
-  return n - d.draft.chars.length;
-}
-// 인물이 둘 이상이면 서로의 머리·눈이 섞인다(2026-11-27 사용자: 네거티브를 안 써서 꼬이는 것 같다). 인물마다 ‘뺄 것’이 비어 있으면
-// 다른 인물의 겉모습 태그(머리·눈·피부·귀·뿔·꼬리·날개) 가운데 자기에게 없는 것으로 채운다. 옷·몸·자세 태그는 안 넣는다(둘이 같은 옷일 수 있다).
-// 사람이나 비서가 적은 것은 안 건드린다(negAuto가 붙은 칸만 다시 계산). 한 명만 남으면 자동으로 채운 것은 지운다. 돌려주는 것: 채운 칸 수.
-const LOOK_RE = /\b(hair|eyes?|skin|ears?|horns?|tail|wings?|bangs|ponytail|twintails|braids?|ahoge|sidelocks|hair bun|bob cut|hime cut)\b/;
-function crossNeg() {
-  const cs = store.data.draft.chars, own = cs.map((c) => tg(c.text).split(", ").map(ckey).filter(Boolean));
-  let n = 0;
-  cs.forEach((c, i) => {
-    if (tidy(c.neg || "") && !c.negAuto) return;
-    const mine = new Set(own[i]), out = [];
-    if (cs.length >= 2) own.forEach((ts, j) => { if (j !== i) for (const t of ts) if (LOOK_RE.test(t) && !mine.has(t) && !out.includes(t)) out.push(t); });
-    c.neg = out.join(", ");
-    if (out.length) { c.negAuto = true; n++; } else delete c.negAuto;
-  });
-  return n;
-}
-const goneNote = (n) => (n ? ` · 옛 인물별 칸 ${n}명 뺌` : "");
-const PNEG_RE = /^(neg|negative|금지|빼는\s*것|뺄\s*것)\s*[:：]\s*/i;
 // person 블록에서 새 인물을 읽는다: `name: 이름` 줄(없어도 됨)과 쉼표 태그. 프리셋 이름 한 줄이면 null.
 function personFromBlock(v) {
   const lines = String(v).split("\n").map((x) => x.trim()).filter(Boolean);
   const nm = lines.find((x) => /^(name|이름)\s*[:：]/i.test(x));
-  // neg 줄: 그 인물에게 나오면 안 되는 태그 (2026-11-27 사용자: 비서가 인물 네거티브 태그를 출력을 안 한다. 줄이 아예 없었다)
-  const ng = lines.filter((x) => PNEG_RE.test(x));
-  const body = lines.filter((x) => x !== nm && !ng.includes(x)).join(", ");
+  const body = lines.filter((x) => x !== nm).join(", ");
   if (!body.includes(",")) return null;
   const { fixed, outfit } = splitPerson(body);
   if (!tg(fixed)) return null;
-  return { name: nm ? nm.replace(/^(name|이름)\s*[:：]\s*/i, "").trim().slice(0, 30) : "", fixed: tg(fixed), outfit: tg(outfit), neg: tg(ng.map((x) => x.replace(PNEG_RE, "")).join(", ")) };
+  return { name: nm ? nm.replace(/^(name|이름)\s*[:：]\s*/i, "").trim().slice(0, 30) : "", fixed: tg(fixed), outfit: tg(outfit) };
 }
 const personSaved = (v) => { const c = personFromBlock(v); if (!c) return false; const k = tg(c.fixed).split(", ").map(ckey).sort().join(); return presetEntries("인물").some((e) => tg(personParts(e.p).fixed).split(", ").map(ckey).sort().join() === k); };
 // person 블록: 프리셋 이름이면 그 인물 칩을 켠 것처럼 바꿔 넣고(고정 + 기본 의상, 금지 태그), 아니면 태그로 새 인물을 넣는다.
@@ -1866,17 +1838,16 @@ function applyPerson(v) {
     usePreset(hit.p, "replace");
     if (tidy(hit.p.neg || "")) usePreset(hit.p, "neg");
     d.draft.chipsOn = [...(d.draft.chipsOn || []).filter((x) => x !== hit.key), hit.key].slice(-40);
-    return `인물을 ‘${hit.p.name}’으로 바꿈${tidy(personParts(hit.p).outfit) ? " (기본 의상도)" : ""}${goneNote(dropAiChars())}`;
+    return `인물을 ‘${hit.p.name}’으로 바꿈${tidy(personParts(hit.p).outfit) ? " (기본 의상도)" : ""}`;
   }
-  const nc = personFromBlock(v), { fixed, outfit } = nc || splitPerson(String(v).split("\n").filter((x) => !PNEG_RE.test(x.trim())).join(", ")), { count, rest } = splitCount(fixed);
+  const nc = personFromBlock(v), { fixed, outfit } = nc || splitPerson(String(v).replace(/\n/g, ", ")), { count, rest } = splitCount(fixed);
   if (!tg(rest) && !tg(count)) return `‘${name.slice(0, 20)}’ 인물을 프리셋에서 못 찾음`;
   for (const e of list) if (chipOn(e.p)) chipOff(e.p);
   if (tg(count)) d.draft.slots.count = tg(count);
   d.draft.slots.traits = tg(rest);
   if (tg(outfit)) d.draft.slots.outfit = tg(outfit);
-  if (nc?.neg) d.draft.neg = mergeTags(d.draft.neg, nc.neg, false);
   syncScene(); d.draft.seedLock = false;
-  return `인물을 태그로 바꿈${tg(outfit) ? " (의상도)" : ""}${nc?.neg ? " (금지 태그도)" : ""}${goneNote(dropAiChars())}`;
+  return `인물을 태그로 바꿈${tg(outfit) ? " (의상도)" : ""}`;
 }
 function applyBlock(kind, v, from = "") {
   const d = store.data;
@@ -1907,10 +1878,7 @@ function applyBlock(kind, v, from = "") {
     }
     syncScene(); d.draft.seedLock = false;
     const goneN = isNew ? dropOld() : 0;
-    // 이 블록이 캐릭터를 한 명으로 정하면(특징 줄이 있거나 인원수가 한 명) 다른 답이 넣어 둔 인물별 칸을 뺀다. 2girls처럼 여러 명 인원수만 적은 줄은 인물별 칸과 같이 쓰는 것이라 둔다.
-    const cnt = tg(got.count).toLowerCase(), one = keys.includes("count") && (/\bsolo\b/.test(cnt) || /^1(girl|boy|other)$/.test(cnt));
-    const goneAi = !isNew && ((keys.includes("traits") && tg(got.traits)) || one) ? dropAiChars(from) : 0;
-    return `${isNew ? "새 장면: 장면 칸을 비우고 " : ""}${keys.map((k) => SLOT_NAMES[k] || k).join("·")} 칸을 바꿈${keys.some((k) => k === "count" || k === "traits") ? " (캐릭터도 바뀜)" : ""}${goneN ? ` · 옛 인물 ${goneN}명 뺌` : ""}${goneNote(goneAi)}`;
+    return `${isNew ? "새 장면: 장면 칸을 비우고 " : ""}${keys.map((k) => SLOT_NAMES[k] || k).join("·")} 칸을 바꿈${keys.some((k) => k === "count" || k === "traits") ? " (캐릭터도 바뀜)" : ""}${goneN ? ` · 옛 인물 ${goneN}명 뺌` : ""}`;
   }
   if (kind === "style") {
     if (!confirm(`화풍·작가를 바꿈. 앞으로 모든 그림에 붙음.\n\n지금 값: ${tidy(d.taste.style).slice(0, 140) || "(비어 있음)"}`)) return null;
@@ -1932,7 +1900,6 @@ function applyBlock(kind, v, from = "") {
     if (same < 0 && d.draft.chars.length >= MAX_CHARS) return `인물은 ${MAX_CHARS}명까지`;
     if (from) c.from = from;
     if (same >= 0) d.draft.chars[same] = c; else d.draft.chars.push(c);
-    crossNeg();
     ui.open.chars = true;
     return `인물 칸을 ${same >= 0 ? "새로 씀" : "더함"}${gone ? ` · 옛 인물 ${gone}명 뺌` : ""}`;
   }
@@ -2093,7 +2060,6 @@ function aiInner() {
     <textarea id="ask" rows="3" placeholder="예: 팔짱 끼고 내려다보게, 표정은 더 차갑게" autocomplete="off">${esc(askDraft)}</textarea>
     ${attachBar()}
     ${asking ? `<button type="button" id="stopAsk" class="ghost">눌러서 취소</button>` : `<button type="button" id="send">AI에게 부탁</button>`}
-    ${chat.length && !asking ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
     <p class="hint"><a href="#/ai">‘비서’ 탭</a> 맨 아래에서 비서 지시문을 고칠 수 있음.</p>`;
   return body;
 }
@@ -2105,7 +2071,7 @@ function charsInner() {
     <div class="char">
       <div class="charhead"><b>인물 ${i + 1}</b><button type="button" class="ghost sm" data-cdel="${c.id}">빼기</button></div>
       <textarea data-ctext="${c.id}" rows="3" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="girl, silver hair, tanned skin">${esc(c.text)}</textarea>
-      <input type="text" data-cneg="${c.id}" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="이 인물에서만 뺄 것 (선택)" value="${esc(c.neg || "")}">${c.negAuto ? `<p class="hint">↑ 다른 인물의 머리·눈 태그를 앱이 넣음 (섞이지 않게). 고치면 그대로 둠</p>` : ""}
+      <input type="text" data-cneg="${c.id}" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="이 인물에서만 뺄 것 (선택)" value="${esc(c.neg || "")}">
       <div class="posgrid" role="group" aria-label="인물 ${i + 1} 위치">
         ${Array.from({ length: 25 }, (_, n) => `<button type="button" class="${c.pos === n ? "on" : ""}" data-cpos="${c.id}:${n}" aria-label="${n % 5 + 1}열 ${Math.floor(n / 5) + 1}행"></button>`).join("")}
       </div>
@@ -2474,7 +2440,7 @@ function chipRow(slotKey) {
 function chipToggle(key) {
   const d = store.data, p = presetByKey(key); if (!p) return;
   const kind = key.startsWith("own:") ? p.kind : key.match(/^b:([^:]+):/)?.[1];
-  const snap = JSON.stringify({ slots: d.draft.slots, lock: d.draft.seedLock, style: d.taste.style, nd: d.draft.neg, on: d.draft.chipsOn || [], chars: d.draft.chars });
+  const snap = JSON.stringify({ slots: d.draft.slots, lock: d.draft.seedLock, style: d.taste.style, nd: d.draft.neg, on: d.draft.chipsOn || [] });
   let msg;
   if (chipOn(p)) { chipOff(p); msg = `‘${p.name}’을 뺌`; }
   else {
@@ -2485,9 +2451,9 @@ function chipToggle(key) {
     if (kind === "인물" && tidy(p.neg || "")) usePreset(p, "neg");
     d.draft.chipsOn = [...(d.draft.chipsOn || []).filter((x) => x !== key), key].slice(-40);
     autoRef(key, p);
-    msg = `‘${p.name}’을 ${CHIP_ONE.has(kind) ? "바꿔 " : ""}넣음${kind === "인물" && tidy(personParts(p).outfit) ? " (기본 의상도)" : ""}${kind === "인물" && tidy(p.neg || "") ? " (금지 태그도)" : ""}${out.length ? ` · ‘${out.join("’, ‘")}’은 뺌` : ""}${kind === "인물" ? goneNote(dropAiChars()) : ""}`;
+    msg = `‘${p.name}’을 ${CHIP_ONE.has(kind) ? "바꿔 " : ""}넣음${kind === "인물" && tidy(personParts(p).outfit) ? " (기본 의상도)" : ""}${kind === "인물" && tidy(p.neg || "") ? " (금지 태그도)" : ""}${out.length ? ` · ‘${out.join("’, ‘")}’은 뺌` : ""}`;
   }
-  toast(msg, () => { const o = JSON.parse(snap); d.draft.chars = o.chars; d.draft.slots = o.slots; syncScene(); d.draft.seedLock = o.lock; d.taste.style = o.style; d.draft.neg = o.nd; d.draft.chipsOn = o.on; store.save(); });
+  toast(msg, () => { const o = JSON.parse(snap); d.draft.slots = o.slots; syncScene(); d.draft.seedLock = o.lock; d.taste.style = o.style; d.draft.neg = o.nd; d.draft.chipsOn = o.on; store.save(); });
   store.save();
 }
 
@@ -2759,8 +2725,7 @@ function diagHtml() {
 }
 // 2026-11-22: 프롬프트 칸 전부 접기. 접으면 완성된 프롬프트 두 줄만 보이고, 그 줄을 눌러도 펼쳐진다. 접힌 상태는 settings.foldPrompt에 남는다(옛 데이터에는 없어 펼친 것으로 읽음).
 // 뽑기 화면의 비서 한 줄 (2026-11-27, 사용자: 편의성). 비서 탭으로 가지 않고 여기서 묻고, 답의 블록도 여기서 넣는다.
-// 아래 ‘AI 도우미’ 칸이 열려 있으면 그 칸과 입력칸이 겹치므로 이 줄은 안 그린다. 사진·파일 붙이기는 AI 도우미 칸·비서 탭에서.
-// 방금 그림 보여 주기 체크와 대화 지우기는 여기에도 둔다 (2026-11-27, 사용자: 그림 보여주기·대화 삭제를 뽑기에도).
+// 아래 ‘AI 도우미’ 칸이 열려 있으면 그 칸과 입력칸이 겹치므로 이 줄은 안 그린다. 그림 붙이기·사진은 AI 도우미 칸·비서 탭에서.
 function quickAsk() {
   if (ui.open.ai) return "";
   const { chat, settings: s } = store.data, last = chat.length - 1;
@@ -2770,7 +2735,6 @@ function quickAsk() {
       <input id="qask" type="text" enterkeyhint="send" autocomplete="off" placeholder="${s.aiKey.trim() ? "비서에게: 예) 앉게, 배경은 밤거리" : "비서를 쓰려면 설정에서 제미니 키"}" value="${esc(askDraft)}" aria-label="비서에게 부탁">
       ${asking ? `<button type="button" class="ghost" id="stopAsk">취소</button>` : `<button type="button" id="qsend">보내기</button>`}
     </div>
-    ${now || chat.length ? `<div class="qopts">${now ? `<label class="line mini"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> ${now.rec.memo ? "방금 그림 다시 보여 주기" : "방금 그림 보여 주기"} <span class="hint">구글로 감</span></label>` : "<span></span>"}${chat.length && !asking ? `<button type="button" class="ghost mini" id="clearChat">대화 지우기</button>` : ""}</div>` : ""}
     ${asking && ui.qShow ? `<p class="hint">비서가 생각 중…</p>` : ""}
     ${askErr && ui.qShow ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
     ${reply}`;
@@ -3043,7 +3007,7 @@ const SCREENS = {
       ${asking
         ? `<button type="button" id="stopAsk" class="ghost big">눌러서 취소</button>`
         : `<button type="button" id="send" class="big">보내기</button>`}
-      ${chat.length && !asking ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
+      ${chat.length ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
       ${dictPanel()}
       ${personaEditor()}
       <label for="aiModelQ">대답하는 모델 <span class="hint">${s.aiModel === "custom" ? "직접 입력한 이름은 설정(오른쪽 위 톱니바퀴)에서 고침" : ""}</span></label>
@@ -3265,7 +3229,7 @@ function wireAsk() {
   on("askUnpick", "click", () => { clearAttach(); render(); });
   on("send", "click", () => { const t = askDraft.trim(); if (t) ask(t, { image: ui.withImg && !!now }); });
   on("qask", "input", (e) => { askDraft = e.target.value; });
-  const qgo = () => { const t = askDraft.trim(); if (!t || asking) return; ui.qShow = true; ask(t, { image: ui.withImg && !!now }); };
+  const qgo = () => { const t = askDraft.trim(); if (!t || asking) return; ui.qShow = true; ask(t); };
   on("qsend", "click", qgo);
   on("qask", "keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); qgo(); } });
   on("qhide", "click", () => { ui.qShow = false; render(); });
@@ -3301,7 +3265,7 @@ function wireAsk() {
   document.querySelectorAll("[data-pplall]").forEach((el) => el.addEventListener("click", () => {
     const i = +el.dataset.pplall, m = d.chat[i]; if (!m) return;
     const ppl = peopleOf(m.text); if (ppl.length < 2) return;
-    const before = snapBlocks(), msg = applyPeople(ppl, fromOf(i));
+    const before = snapBlocks(), msg = applyPeople(ppl);
     const changed = snapBlocks() !== before, unmark = changed ? markDone(i, ppl.map((x) => x.j)) : null;
     toast(msg, changed ? () => { unmark?.(); restoreBlocks(before); } : null);
     store.persist(); render();
@@ -3312,11 +3276,11 @@ function wireAsk() {
     if (!c) return toast("인물 태그를 못 읽음");
     const name = (prompt("인물 프리셋 이름", c.name) || "").trim().slice(0, 30);
     if (!name) return;
-    const pr = { id: crypto.randomUUID(), name, text: c.fixed, outfit: c.outfit, ...(c.neg ? { neg: c.neg } : {}), to: "scene", kind: "인물", slot: "traits", at: "front" };
+    const pr = { id: crypto.randomUUID(), name, text: c.fixed, outfit: c.outfit, to: "scene", kind: "인물", slot: "traits", at: "front" };
     d.presets.unshift(pr);
     // 지금 칸이 이 인물이면 칩이 켜진 것으로 보이게
     const k = `own:${pr.id}`; if (chipPresent(pr)) d.draft.chipsOn = [...(d.draft.chipsOn || []), k].slice(-40);
-    toast(`‘${name}’을 인물 프리셋으로 저장함 (고정 ${c.fixed.split(", ").length}개 · 기본 의상 ${c.outfit ? c.outfit.split(", ").length : 0}개 · 금지 ${c.neg ? c.neg.split(", ").length : 0}개)`, () => { d.presets = d.presets.filter((x) => x !== pr); store.save(); });
+    toast(`‘${name}’을 인물 프리셋으로 저장함 (고정 ${c.fixed.split(", ").length}개 · 기본 의상 ${c.outfit ? c.outfit.split(", ").length : 0}개)`, () => { d.presets = d.presets.filter((x) => x !== pr); store.save(); });
     store.save();
   }));
   document.querySelectorAll("[data-blk]").forEach((el) => el.addEventListener("click", () => {
@@ -3342,7 +3306,7 @@ function wireAsk() {
     if (!todo.length) return;
     const before = snapBlocks(), msgs = [], ok = [];
     const ppl = peopleOf(m.text), pj = new Set(ppl.length >= 2 ? ppl.map((x) => x.j) : []);
-    if (pj.size) { msgs.push(applyPeople(ppl, fromOf(i))); ok.push(...pj); }
+    if (pj.size) { msgs.push(applyPeople(ppl)); ok.push(...pj); }
     for (const { b, j } of todo) { if (pj.has(j)) continue; const r = applyBlock(b.lang, b.v, fromOf(i)); if (r != null) { msgs.push(r); ok.push(j); } }
     if (!ok.length) return;
     const changed = snapBlocks() !== before;
@@ -3610,9 +3574,9 @@ function wire(name, arg, seq) {
     // 인물별 프롬프트
     const charOf = (el, k) => d.draft.chars.find((c) => c.id === el.dataset[k]);
     on("addChar", "click", () => { if (d.draft.chars.length < MAX_CHARS) { d.draft.chars.push({ id: crypto.randomUUID(), text: "", neg: "", pos: null }); ui.open.chars = true; store.save(); } });
-    document.querySelectorAll("[data-cdel]").forEach((el) => el.addEventListener("click", () => { d.draft.chars = d.draft.chars.filter((c) => c.id !== el.dataset.cdel); crossNeg(); store.save(); }));
+    document.querySelectorAll("[data-cdel]").forEach((el) => el.addEventListener("click", () => { d.draft.chars = d.draft.chars.filter((c) => c.id !== el.dataset.cdel); store.save(); }));
     document.querySelectorAll("[data-ctext]").forEach((el) => el.addEventListener("input", () => { const c = charOf(el, "ctext"); if (c) { c.text = el.value; store.persist(); } }));
-    document.querySelectorAll("[data-cneg]").forEach((el) => el.addEventListener("input", () => { const c = charOf(el, "cneg"); if (c) { c.neg = el.value; delete c.negAuto; store.persist(); } }));
+    document.querySelectorAll("[data-cneg]").forEach((el) => el.addEventListener("input", () => { const c = charOf(el, "cneg"); if (c) { c.neg = el.value; store.persist(); } }));
     document.querySelectorAll("[data-cpos]").forEach((el) => el.addEventListener("click", () => {
       const [id, v] = el.dataset.cpos.split(":"), c = d.draft.chars.find((x) => x.id === id);
       if (!c) return;
