@@ -600,3 +600,11 @@ button.line { color: var(--ink); background: transparent; border: 1px solid var(
 .diag li { display: grid; gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .diag li p { margin: 0; font-size: 14px; }
 .diag li button { justify-self: start; }
+
+/* 2026-11-27 토큰 내역 */
+.tokbrk { margin: 2px 0 6px; font-size: 13px; }
+.tokbrk ul { list-style: none; margin: 4px 0; padding: 0; }
+.tokbrk li { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; border-bottom: 1px solid var(--line); }
+
+/* 2026-11-27 칸 아래 버튼 넷이 폰 폭을 넘쳐서 줄바꿈 */
+.slotacts { flex-wrap: wrap; }
