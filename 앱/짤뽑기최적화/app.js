@@ -1795,7 +1795,7 @@ function peopleOf(text) {
   });
   return out;
 }
-function applyPeople(people) {
+function applyPeople(people, from = "people") {
   const d = store.data;
   if (!supportsChars(d.settings)) return "이 모델은 인물별 프롬프트가 안 됨 (V4 이상)";
   let girls = 0, boys = 0, others = 0;
@@ -1804,7 +1804,7 @@ function applyPeople(people) {
     const c = tg(count).split(", ").map((t) => t.toLowerCase());
     const who = c.some((t) => /boy/.test(t)) ? "boy" : c.some((t) => /girl/.test(t)) ? "girl" : c.some((t) => /other/.test(t)) ? "other" : "girl";
     if (who === "boy") boys++; else if (who === "other") others++; else girls++;
-    return { id: crypto.randomUUID(), text: joinTags([who, rest, pp.outfit]), neg: pp.neg || "", pos: null, from: "people" };
+    return { id: crypto.randomUUID(), text: joinTags([who, rest, pp.outfit]), neg: pp.neg || "", pos: null, from };
   });
   const n = (k, w) => (k ? `${k}${w}${k > 1 ? "s" : ""}` : "");
   d.draft.slots.count = [n(girls, "girl"), n(boys, "boy"), n(others, "other")].filter(Boolean).join(", ");
@@ -1815,6 +1815,14 @@ function applyPeople(people) {
   syncScene(); d.draft.seedLock = false; ui.open.chars = true;
   return `인물 ${chars.length}명을 인물별 프롬프트에 넣음 (${d.draft.slots.count})${people.length > MAX_CHARS ? ` · ${people.length - MAX_CHARS}명은 넘침` : ""}`;
 }
+// 인물을 한 명으로 바꿀 때(인물 칩, person 블록, 캐릭터 줄이 든 scene 블록) 비서가 넣어 둔 옛 인물별 칸을 뺀다 (2026-11-27 사용자 신고: 아직도 인물이 꼬여).
+// 안 빼면 새 인물(위 칸)과 옛 여러 명(인물별 칸)이 같이 NovelAI로 간다. 손으로 더한 칸(from 없음)과 keep으로 준 답의 칸은 남긴다. 돌려주는 것: 뺀 수.
+function dropAiChars(keep = "") {
+  const d = store.data, n = d.draft.chars.length;
+  d.draft.chars = d.draft.chars.filter((c) => !c.from || (keep && c.from === keep));
+  return n - d.draft.chars.length;
+}
+const goneNote = (n) => (n ? ` · 옛 인물별 칸 ${n}명 뺌` : "");
 // person 블록에서 새 인물을 읽는다: `name: 이름` 줄(없어도 됨)과 쉼표 태그. 프리셋 이름 한 줄이면 null.
 function personFromBlock(v) {
   const lines = String(v).split("\n").map((x) => x.trim()).filter(Boolean);
@@ -1838,7 +1846,7 @@ function applyPerson(v) {
     usePreset(hit.p, "replace");
     if (tidy(hit.p.neg || "")) usePreset(hit.p, "neg");
     d.draft.chipsOn = [...(d.draft.chipsOn || []).filter((x) => x !== hit.key), hit.key].slice(-40);
-    return `인물을 ‘${hit.p.name}’으로 바꿈${tidy(personParts(hit.p).outfit) ? " (기본 의상도)" : ""}`;
+    return `인물을 ‘${hit.p.name}’으로 바꿈${tidy(personParts(hit.p).outfit) ? " (기본 의상도)" : ""}${goneNote(dropAiChars())}`;
   }
   const nc = personFromBlock(v), { fixed, outfit } = nc || splitPerson(String(v).replace(/\n/g, ", ")), { count, rest } = splitCount(fixed);
   if (!tg(rest) && !tg(count)) return `‘${name.slice(0, 20)}’ 인물을 프리셋에서 못 찾음`;
@@ -1847,7 +1855,7 @@ function applyPerson(v) {
   d.draft.slots.traits = tg(rest);
   if (tg(outfit)) d.draft.slots.outfit = tg(outfit);
   syncScene(); d.draft.seedLock = false;
-  return `인물을 태그로 바꿈${tg(outfit) ? " (의상도)" : ""}`;
+  return `인물을 태그로 바꿈${tg(outfit) ? " (의상도)" : ""}${goneNote(dropAiChars())}`;
 }
 function applyBlock(kind, v, from = "") {
   const d = store.data;
@@ -1878,7 +1886,10 @@ function applyBlock(kind, v, from = "") {
     }
     syncScene(); d.draft.seedLock = false;
     const goneN = isNew ? dropOld() : 0;
-    return `${isNew ? "새 장면: 장면 칸을 비우고 " : ""}${keys.map((k) => SLOT_NAMES[k] || k).join("·")} 칸을 바꿈${keys.some((k) => k === "count" || k === "traits") ? " (캐릭터도 바뀜)" : ""}${goneN ? ` · 옛 인물 ${goneN}명 뺌` : ""}`;
+    // 이 블록이 캐릭터를 한 명으로 정하면(특징 줄이 있거나 인원수가 한 명) 다른 답이 넣어 둔 인물별 칸을 뺀다. 2girls처럼 여러 명 인원수만 적은 줄은 인물별 칸과 같이 쓰는 것이라 둔다.
+    const cnt = tg(got.count).toLowerCase(), one = keys.includes("count") && (/\bsolo\b/.test(cnt) || /^1(girl|boy|other)$/.test(cnt));
+    const goneAi = !isNew && ((keys.includes("traits") && tg(got.traits)) || one) ? dropAiChars(from) : 0;
+    return `${isNew ? "새 장면: 장면 칸을 비우고 " : ""}${keys.map((k) => SLOT_NAMES[k] || k).join("·")} 칸을 바꿈${keys.some((k) => k === "count" || k === "traits") ? " (캐릭터도 바뀜)" : ""}${goneN ? ` · 옛 인물 ${goneN}명 뺌` : ""}${goneNote(goneAi)}`;
   }
   if (kind === "style") {
     if (!confirm(`화풍·작가를 바꿈. 앞으로 모든 그림에 붙음.\n\n지금 값: ${tidy(d.taste.style).slice(0, 140) || "(비어 있음)"}`)) return null;
@@ -2441,7 +2452,7 @@ function chipRow(slotKey) {
 function chipToggle(key) {
   const d = store.data, p = presetByKey(key); if (!p) return;
   const kind = key.startsWith("own:") ? p.kind : key.match(/^b:([^:]+):/)?.[1];
-  const snap = JSON.stringify({ slots: d.draft.slots, lock: d.draft.seedLock, style: d.taste.style, nd: d.draft.neg, on: d.draft.chipsOn || [] });
+  const snap = JSON.stringify({ slots: d.draft.slots, lock: d.draft.seedLock, style: d.taste.style, nd: d.draft.neg, on: d.draft.chipsOn || [], chars: d.draft.chars });
   let msg;
   if (chipOn(p)) { chipOff(p); msg = `‘${p.name}’을 뺌`; }
   else {
@@ -2452,9 +2463,9 @@ function chipToggle(key) {
     if (kind === "인물" && tidy(p.neg || "")) usePreset(p, "neg");
     d.draft.chipsOn = [...(d.draft.chipsOn || []).filter((x) => x !== key), key].slice(-40);
     autoRef(key, p);
-    msg = `‘${p.name}’을 ${CHIP_ONE.has(kind) ? "바꿔 " : ""}넣음${kind === "인물" && tidy(personParts(p).outfit) ? " (기본 의상도)" : ""}${kind === "인물" && tidy(p.neg || "") ? " (금지 태그도)" : ""}${out.length ? ` · ‘${out.join("’, ‘")}’은 뺌` : ""}`;
+    msg = `‘${p.name}’을 ${CHIP_ONE.has(kind) ? "바꿔 " : ""}넣음${kind === "인물" && tidy(personParts(p).outfit) ? " (기본 의상도)" : ""}${kind === "인물" && tidy(p.neg || "") ? " (금지 태그도)" : ""}${out.length ? ` · ‘${out.join("’, ‘")}’은 뺌` : ""}${kind === "인물" ? goneNote(dropAiChars()) : ""}`;
   }
-  toast(msg, () => { const o = JSON.parse(snap); d.draft.slots = o.slots; syncScene(); d.draft.seedLock = o.lock; d.taste.style = o.style; d.draft.neg = o.nd; d.draft.chipsOn = o.on; store.save(); });
+  toast(msg, () => { const o = JSON.parse(snap); d.draft.chars = o.chars; d.draft.slots = o.slots; syncScene(); d.draft.seedLock = o.lock; d.taste.style = o.style; d.draft.neg = o.nd; d.draft.chipsOn = o.on; store.save(); });
   store.save();
 }
 
@@ -3268,7 +3279,7 @@ function wireAsk() {
   document.querySelectorAll("[data-pplall]").forEach((el) => el.addEventListener("click", () => {
     const i = +el.dataset.pplall, m = d.chat[i]; if (!m) return;
     const ppl = peopleOf(m.text); if (ppl.length < 2) return;
-    const before = snapBlocks(), msg = applyPeople(ppl);
+    const before = snapBlocks(), msg = applyPeople(ppl, fromOf(i));
     const changed = snapBlocks() !== before, unmark = changed ? markDone(i, ppl.map((x) => x.j)) : null;
     toast(msg, changed ? () => { unmark?.(); restoreBlocks(before); } : null);
     store.persist(); render();
@@ -3309,7 +3320,7 @@ function wireAsk() {
     if (!todo.length) return;
     const before = snapBlocks(), msgs = [], ok = [];
     const ppl = peopleOf(m.text), pj = new Set(ppl.length >= 2 ? ppl.map((x) => x.j) : []);
-    if (pj.size) { msgs.push(applyPeople(ppl)); ok.push(...pj); }
+    if (pj.size) { msgs.push(applyPeople(ppl, fromOf(i))); ok.push(...pj); }
     for (const { b, j } of todo) { if (pj.has(j)) continue; const r = applyBlock(b.lang, b.v, fromOf(i)); if (r != null) { msgs.push(r); ok.push(j); } }
     if (!ok.length) return;
     const changed = snapBlocks() !== before;
