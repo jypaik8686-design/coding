@@ -254,3 +254,11 @@ test("그 밖에 칸 ‘칸마다 나누기’: 아는 태그는 맞는 칸으�
   s = (await data()).draft.slots; assert.equal(s.rest, "red dress, sitting, night sky, zzqtag"); assert.equal(s.outfit, "business suit");
   assert.deepEqual(errs, []); await p.close();
 });
+test("설정의 ‘그림 zip 내보내기’가 오류 없이 돈다 (고른 것만 zip 기능을 넣으며 깨졌던 것)", async () => {
+  const { p, errs } = await open({ log: [{ id: "a", scene: "1girl", seed: 1, verdict: "keep", at: 1 }] });
+  await p.evaluate(() => { location.hash = "#/set"; }); await p.waitForTimeout(400);
+  await p.evaluate(() => document.getElementById("exportImg").click()); await p.waitForTimeout(600);
+  assert.deepEqual(errs, []);
+  assert.match(await p.locator(".toast").innerText(), /그림|보관/);
+  await p.close();
+});
