@@ -2714,7 +2714,7 @@ function diagHtml() {
   const list = ui.diag;
   return `<section class="diag" aria-label="프롬프트 점검 결과"><div class="toolhead"><h2>프롬프트 점검 <small>${list.length ? `${list.length}개` : "문제 없음"}</small></h2><button type="button" class="ghost mini" id="diagClose">닫기</button></div>
     ${list.length ? `<ul>${list.map((x, i) => `<li><p>${esc(x.msg)}</p>${x.fix ? `<button type="button" class="ghost sm" data-dfix="${i}">${esc(x.fix[0])}</button>` : ""}</li>`).join("")}</ul>
-    <button type="button" class="ghost sm" id="diagAsk">비서에게 고쳐 달라기</button>` + `<label class="line mini"><input type="checkbox" id="preCheck" ${store.data.settings.preCheck !== false ? "checked" : ""}> 프롬프트가 바뀐 뒤 처음 뽑기 전에 한 번 점검</label>` : `<p class="hint">칸 나누기·겹침·괄호·인원수·빼는 것과의 충돌을 봤고 걸린 것이 없음. 그림이 이상하면 태그 뜻이 문제일 수 있으니 비서에게 그림을 보여 주고 묻기.</p>`}</section>`;
+    <button type="button" class="ghost sm" id="diagAsk">비서에게 고쳐 달라기</button>` + `<label class="line mini"><input type="checkbox" id="preCheck" ${store.data.settings.preCheck === true ? "checked" : ""}> 뽑을 때 점검해서 걸린 게 있으면 알림 (멈추지 않음)</label>` : `<p class="hint">칸 나누기·겹침·괄호·인원수·빼는 것과의 충돌을 봤고 걸린 것이 없음. 그림이 이상하면 태그 뜻이 문제일 수 있으니 비서에게 그림을 보여 주고 묻기.</p>`}</section>`;
 }
 // 2026-11-22: 프롬프트 칸 전부 접기. 접으면 완성된 프롬프트 두 줄만 보이고, 그 줄을 눌러도 펼쳐진다. 접힌 상태는 settings.foldPrompt에 남는다(옛 데이터에는 없어 펼친 것으로 읽음).
 // 뽑기 화면의 비서 한 줄 (2026-11-27, 사용자: 편의성). 비서 탭으로 가지 않고 여기서 묻고, 답의 블록도 여기서 넣는다.
@@ -3533,11 +3533,13 @@ function wire(name, arg, seq) {
     on("go", "click", async () => {
       const st = d.settings;
       const key = JSON.stringify([composePrompt(d.draft.slots, d.taste.style, st), d.taste.negative, d.draft.neg, d.draft.chars.map((c) => c.text)]);
-      if (st.preCheck !== false && key !== checkedKey) {
+      // 2026-11-27(사용자: 점검 개열받음): 처음엔 끔(preCheck === true일 때만). 켜도 뽑기를 멈추지 않고, 걸린 게 있으면 알림만 띄운다.
+      if (st.preCheck === true && key !== checkedKey) {
         checkedKey = key;
-        await loadTags().catch(() => {});
-        const list = diagnose(), hard = list.filter((x) => !x.soft);
-        if (hard.length) { ui.diag = list; render(); $("diagClose")?.scrollIntoView({ behavior: "smooth", block: "center" }); toast(`뽑기 전에 한 번 점검함: ${hard.length}개 걸림. 고치거나, 그대로면 ‘뽑기’를 한 번 더`); return; }
+        const hard = diagnose().filter((x) => !x.soft);
+        generate();
+        if (hard.length) setTimeout(() => toast(`점검: ${hard.length}개 걸림 — ${cut(hard[0].msg, 40)}`, null), 50);
+        return;
       }
       generate();
     });

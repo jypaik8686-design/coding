@@ -137,12 +137,15 @@ test("비서 요청: 차단 기준 끔, 지난 태그 검색 결과는 한 줄�
   assert.deepEqual(errs, []);
 });
 
-test("뽑기 전 점검: 프롬프트가 바뀐 뒤 첫 뽑기는 멈추고, 한 번 더 누르면 뽑는다", async () => {
+// 시험 바꾼 이유: 사용자가 뽑기 전 점검이 멈춰 세우는 것을 싫어함(2026-11-27). 처음엔 끄고, 켜도 멈추지 않고 알림만.
+test("뽑기 전 점검: 처음엔 꺼져 있어 바로 뽑고, 켜면 멈추지 않고 알림만 띄운다", async () => {
   const { p, errs, gens } = await open({ settings: { token: "pst-x" }, draft: { slots: { ...slots, count: "1girl, solo, 2girls" } } });
-  await p.click("#go"); await p.waitForTimeout(500);
-  assert.equal(gens.length, 0); assert.equal(await p.locator(".diag").count(), 1);
   await p.click("#go"); await p.waitForTimeout(800);
-  assert.equal(gens.length, 1);
+  assert.equal(gens.length, 1); assert.equal(await p.locator(".diag").count(), 0);
+  await p.evaluate((k) => { const x = JSON.parse(localStorage.getItem(k)); x.settings.preCheck = true; x.draft.slots.pose = "kneeling"; localStorage.setItem(k, JSON.stringify(x)); }, KEY);
+  await p.reload(); await p.waitForTimeout(900);
+  await p.click("#go"); await p.waitForTimeout(800);
+  assert.equal(gens.length, 2); assert.match(await p.locator(".toast").innerText().catch(() => ""), /점검: \d+개 걸림|뽑기 실패/);
   assert.deepEqual(errs, []); await p.close();
 });
 
