@@ -276,3 +276,17 @@ test("새 장면(new) 블록: 앞 그림의 장면 칸·이번 빼는 것·인�
   assert.equal(d.neg, ""); assert.equal(d.chars.length, 0); assert.equal(d.slots.traits, "blonde hair, red eyes");
   assert.deepEqual(errs, []); await p.close();
 });
+test("보관함 한 장: 그림 프롬프트를 칸마다 보이고 칸 복사가 된다 (칸 없는 옛 기록은 짐작)", async () => {
+  const rec = { id: "k1", scene: "1girl, solo, blonde hair, maid, apron, sitting, garden", seed: 7, verdict: "keep", at: 1, w: 832, h: 1216, steps: 28, scale: 5, model: "nai-diffusion-5-full" };
+  const { p, errs } = await open({ log: [rec, { ...rec, id: "k2", slots: { count: "1girl", traits: "red hair", outfit: "suit", pose: "", bg: "", rest: "" } }] });
+  await p.evaluate(() => { location.hash = "#/keep/k1"; }); await p.waitForTimeout(400);
+  const labels = await p.locator(".kslot .kfh span").allInnerTexts();
+  assert.ok(labels.some((t) => /의상/.test(t)) && labels.some((t) => /짐작/.test(t)), labels.join("|"));
+  await p.evaluate(() => { location.hash = "#/keep/k2"; }); await p.waitForTimeout(400);
+  const l2 = await p.locator(".kslot .kfh span").allInnerTexts();
+  assert.equal(l2.length, 3); assert.ok(!l2.some((t) => /짐작/.test(t)));
+  await p.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await p.locator('[data-kcopy="slot:outfit"]').click(); await p.waitForTimeout(200);
+  assert.equal(await p.evaluate(() => navigator.clipboard.readText()), "suit,");
+  assert.deepEqual(errs, []); await p.close();
+});

@@ -3044,7 +3044,7 @@ const SCREENS = {
           <label>빼는 것 (이번)<textarea id="kNeg" rows="2" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(typeof r.nd === "string" ? r.nd : tagsMinus(r.negative || "", store.data.taste.negative))}</textarea></label>
           <div class="acts2"><button type="button" id="kEditSave">기록에 저장</button><button type="button" class="ghost" id="kEditOff">취소</button></div>
           <p class="hint">이 그림의 기록만 바뀜. 그림 파일은 그대로. ‘다시 뽑기’·‘프롬프트만 칸에’가 고친 글을 씀.</p></div>`
-          : `${field("scene", "그림", r.scene)}<div class="acts2"><button type="button" class="ghost mini" id="kEdit">프롬프트 고치기</button></div>`}
+          : `${keepSlots(r)}<div class="acts2"><button type="button" class="ghost mini" data-kcopy="scene">그림 프롬프트 통째 복사</button><button type="button" class="ghost mini" id="kEdit">프롬프트 고치기</button></div>`}
         ${r.chars?.length ? `<div class="kf"><div class="kfh"><span>인물별</span></div><p class="kfv">${r.chars.map((c, i) => `${i + 1}. ${esc(c.text)}${Number.isInteger(c.pos) ? ` (칸 ${c.pos + 1})` : ""}`).join("<br>")}</p></div>` : ""}
         ${field("style", "화풍·작가", r.style)}
         ${sec("kmore", "빼는 것 · 생성 값", `시드 ${r.seed ?? "모름"}`, `${field("negative", "빼는 것", r.negative)}<div class="kf"><div class="kfh"><span>값</span></div><p class="kfv">${vals}</p></div>`)}
@@ -3499,6 +3499,12 @@ function wireVault(id) {
 }
 
 // [data-thumb] 칸에 보관한 그림의 썸네일을 채운다. 화면이 다시 그려졌으면(seq가 바뀜) 그만둔다.
+// 보관함 한 장의 그림 프롬프트를 칸마다 (2026-11-27 사용자: 보관함도 프롬프트 구분). 칸 정보가 있으면 그대로, 없으면(옛 기록·받은 그림) 태그마다 칸을 짐작한다.
+function keepSlots(r) {
+  const has = !!(r.slots && SLOT_KEYS.some((k) => tg(r.slots[k]))), sl = has ? r.slots : parseSceneBlock(r.scene || "");
+  const rows = SLOT_KEYS.filter((k) => tg(sl[k])).map((k) => `<div class="kf kslot"><div class="kfh"><span>${esc(SLOT_NAMES[k])}${has ? "" : " <small>(짐작)</small>"}</span><button type="button" class="ghost mini" data-kcopy="slot:${k}">복사</button></div><p class="kfv">${esc(tg(sl[k]))}</p></div>`);
+  return rows.length ? rows.join("") : `<div class="kf"><div class="kfh"><span>그림</span></div><p class="kfv">—</p></div>`;
+}
 function fillThumbs(seq) {
   document.querySelectorAll("[data-thumb]").forEach(async (a) => {
     let bad = false;
@@ -3937,7 +3943,9 @@ function wire(name, arg, seq) {
     });
     on("del", "click", () => { if (confirm("이 그림을 지움. 되돌릴 수 없음.")) removeKept(arg); });
     document.querySelectorAll("[data-kcopy]").forEach((b) => b.addEventListener("click", async () => {
-      let v = String(rec?.[b.dataset.kcopy] || ""); if (!v) return;
+      const kc = b.dataset.kcopy, sk = kc.startsWith("slot:") ? kc.slice(5) : null;
+      let v = sk ? tg((rec?.slots && SLOT_KEYS.some((k) => tg(rec.slots[k])) ? rec.slots : parseSceneBlock(rec?.scene || ""))[sk]) : String(rec?.[kc] || ""); if (!v) return;
+      if (sk) v = withComma(v);
       if (["scene", "style", "negative"].includes(b.dataset.kcopy)) v = withComma(v);
       try { await navigator.clipboard.writeText(v); b.textContent = "복사함"; } catch { b.textContent = "복사 못 함"; }
     }));
