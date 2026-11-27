@@ -927,7 +927,7 @@ async function generate() {
   const chars = supportsChars(s) ? d.draft.chars.filter((c) => tidy(c.text)).map((c) => ({ text: tidy(c.text), neg: tidy(c.neg || ""), pos: Number.isInteger(c.pos) ? c.pos : null })) : [];
   const useI2i = d.draft.i2i.on && src;
   const rec = {
-    id: crypto.randomUUID(), scene: sceneOf(d.draft.slots), slots: { ...d.draft.slots }, style: tidy(d.taste.style), negative: joinTags([d.taste.negative, d.draft.neg]),
+    id: crypto.randomUUID(), scene: sceneOf(d.draft.slots), slots: { ...d.draft.slots }, style: tidy(d.taste.style), negative: negOut(d),
     seed, model: modelId(s), w, h, steps: clamp(s.steps, 1, MAX_STEPS, DEFAULT_STEPS), scale: clamp(s.scale, 0, 10, 5), at: Date.now(), verdict: null,
     sampler: SAMPLERS[s.sampler] ? s.sampler : "k_euler_ancestral", noise: NOISES.includes(s.noise) ? s.noise : "karras",
     cr: clamp(s.cfgRescale, 0, 1, 0), vb: !!s.variety, bg: !!s.bgOn,
@@ -2330,6 +2330,17 @@ function mergeTags(cur, add, front) {
 }
 // 프리셋을 칸에 넣는다. mode: add | replace | neg(금지 태그를 빼는 것에 더함). 알릴 한 줄을 돌려준다.
 // 인물 프리셋 = 고정(인원수·얼굴·머리·몸) + 기본 의상. outfit 칸이 있으면(내장 인물) 그대로, 없으면 text에서 의상 태그를 갈라 낸다 (원본 짤뽑기와 같음, 2026-11-27).
+// 보내는 빼는 것 = 기본 빼는 것 + 이번 빼는 것 + 켜 둔 인물의 금지 태그(neg).
+// 인물 neg는 칩을 켤 때 이번 빼는 것에 한 번 들어가지만, 새 장면·빼는 것 블록·칸 비우기가 그 칸을 갈아 끼우면 사라졌다 (2026-11-27 사용자: 인물 네거티브를 안 넣고 퀄이 나빠짐).
+// 그래서 뽑을 때마다 켜 둔 인물에서 다시 모은다. 그림 프롬프트에 든 태그와 겹치는 금지 태그는 빼고 보낸다(서로 지우지 않게).
+function personNegs(d = store.data) {
+  const out = [];
+  for (const e of presetEntries("인물")) if (!e.hidden && tidy(e.p.neg || "") && chipOn(e.p)) out.push(e.p.neg);
+  if (!out.length) return "";
+  const pos = new Set(tg(sceneOf(d.draft.slots)).split(", ").map(ckey));
+  return tg(joinTags(out)).split(", ").filter((t) => t && !pos.has(ckey(t))).join(", ");
+}
+function negOut(d = store.data) { return joinTags([d.taste.negative, d.draft.neg, personNegs(d)]); }
 function personParts(p) {
   if (typeof p.outfit === "string") return { fixed: tagsMinus(tidy(p.text || ""), p.outfit), outfit: tidy(p.outfit) };
   const o = splitPerson(p.text || ""); return { fixed: o.fixed, outfit: o.outfit };
@@ -2643,7 +2654,7 @@ function slotsPanel() {
   const head = (key, n, title, extra = "") => `<div class="slothead"><label for="slot-${key}">${/^\d/.test(n) ? `<span class="num">${parseInt(n, 10)}</span>` : `<b>${n}</b>`} ${title}</label>${extra || undo(key)}</div>`;
   const row = (key, n, title, hint, val, ph) => `<div class="slot${flashKeys.has(key) ? " flash" : ""}">${head(key, n, title)}${area(key, val, ph)}${chipRow(key)}</div>`;
   const full = composePrompt(sl, d.taste.style, s);
-  const negAll = joinTags([d.taste.negative, d.draft.neg]);
+  const negAll = negOut(d);
   // 최적화판: 고정(품질·그림체·캐릭터·기본 Undesired)은 접어 두고, 장면 줄(의상·자세·장소)만 펼쳐 둔다. NovelAI로 가는 순서(1→7순위)는 그대로다.
   const fixedHint = [sl.count, sl.traits, d.taste.style].map(tg).filter(Boolean).join(", ");
   return `
@@ -2790,7 +2801,7 @@ function wireSlots() {
   const prev = () => {
     const t = composePrompt(d.draft.slots, d.taste.style, s); const a = $("sprevtxt"), c = $("scount"), n = $("snegtxt");
     if (a) a.textContent = withComma(t) || "(비어 있음)"; if (c) c.textContent = `${t.length}자`;
-    if (n) n.textContent = withComma(joinTags([d.taste.negative, d.draft.neg])) || "(비어 있음)";
+    if (n) n.textContent = withComma(negOut(d)) || "(비어 있음)";
   };
   // 칸 높이를 글에 맞춘다. 2026-11-27(사용자: 렉): 칸마다 높이를 비우고 재고 바꾸기를 되풀이해 그릴 때마다 배치를 칸 수만큼 다시 계산했다(칩 하나에 폰 기준 0.2초).
   // 이제 브라우저가 맞추게(field-sizing: content, style.css) 하고, 그걸 모르는 브라우저만 모아서 한 번에 잰다.
