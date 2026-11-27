@@ -323,3 +323,49 @@ test("보관함 한 장: 인물별 프롬프트도 인물마다 칸으로 나눠
   assert.equal(await p.evaluate(() => navigator.clipboard.readText()), "girl, blue hair, school uniform,");
   assert.deepEqual(errs, []); await p.close();
 });
+
+// 2026-11-27 사용자: 그림 보여주기, 대화 삭제 기능을 뽑기에도. 뽑기 화면 비서 한 줄에서 방금 그림을 붙이고 대화를 지운다.
+test("뽑기 화면 비서 한 줄: 방금 그림 보여 주기를 켜면 그림이 같이 가고, 대화 지우기로 대화가 비워진다", async () => {
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  const { p, errs, asks, data, ask } = await open({ settings: { aiKey: "x", token: "pst-x" }, draft: { slots } });
+  p.on("dialog", (d) => d.accept());
+  assert.equal(await p.locator("#withImg").count(), 0); // 뽑은 그림이 없으면 체크 칸도 없다
+  assert.equal(await p.locator("#clearChat").count(), 0); // 대화가 없으면 지우기도 없다
+  await p.route(/generate-image/, (r) => r.fulfill({ status: 200, contentType: "image/png", body: PNG }));
+  await p.click("#go"); await p.waitForSelector("figure.result img");
+  await ask("그림 없이");
+  assert.ok(!asks[0].contents.at(-1).parts.some((x) => x.inline_data));
+  await p.check("#withImg");
+  await ask("이 그림 고쳐 줘");
+  assert.ok(asks[1].contents.at(-1).parts.some((x) => x.inline_data), "방금 그림이 요청에 붙어야 함");
+  assert.equal((await data()).chat.length, 4);
+  // 폰 폭(390)에서 체크 칸과 지우기 버튼이 한 줄에 들어가고, 손가락으로 누를 만큼 크다(44px)
+  await p.check("#withImg");
+  const box = await p.evaluate(() => ({ w: document.documentElement.scrollWidth, l: document.querySelector(".qopts label").getBoundingClientRect().height, b: document.querySelector("#clearChat").getBoundingClientRect().height, r: document.querySelector("#clearChat").getBoundingClientRect().right }));
+  assert.ok(box.w <= 390 && box.r <= 390, `옆으로 넘침: ${JSON.stringify(box)}`);
+  assert.ok(box.l >= 44 && box.b >= 44, `누를 것이 작음: ${JSON.stringify(box)}`);
+  await p.click("#clearChat"); await p.waitForTimeout(200);
+  assert.deepEqual((await data()).chat, []);
+  assert.equal(await p.locator(".qreply").count(), 0);
+  // 아래 ‘AI 도우미’ 칸에서도 지운다
+  await ask("다시");
+  await p.click('[data-tool="ai"]'); await p.click("#clearChat"); await p.waitForTimeout(200);
+  assert.deepEqual((await data()).chat, []);
+  assert.deepEqual(errs, []); await p.close();
+});
+
+// 답을 기다리는 중에 대화를 지우면 질문 없이 답만 남는다(다음 요청이 비서 말로 시작함). 기다리는 동안에는 지우기 버튼을 안 둔다.
+test("대화 지우기: 답을 기다리는 동안에는 뽑기 화면에도 비서 탭에도 버튼이 없다", async () => {
+  const { p, errs, data } = await open({ settings: { aiKey: "x" }, chat: [{ role: "user", text: "q", at: 1 }, { role: "model", text: "a", at: 2 }] });
+  let go; const held = new Promise((r) => { go = r; });
+  await p.route(/generativelanguage/, async (r) => { await held; r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ candidates: [{ content: { parts: [{ text: "늦은 답" }] } }] }) }); });
+  assert.equal(await p.locator("#clearChat").count(), 1);
+  await p.fill("#qask", "앉게"); await p.click("#qsend"); await p.waitForSelector("#stopAsk");
+  assert.equal(await p.locator("#clearChat").count(), 0, "뽑기 화면");
+  await p.click('a[data-tab="ai"]'); await p.waitForSelector("textarea#ask"); await p.waitForSelector("#stopAsk");
+  assert.equal(await p.locator("#clearChat").count(), 0, "비서 탭");
+  go(); await p.waitForSelector("#clearChat");
+  const chat = (await data()).chat;
+  assert.deepEqual(chat.map((m) => m.role), ["user", "model", "user", "model"]);
+  assert.deepEqual(errs, []); await p.close();
+});

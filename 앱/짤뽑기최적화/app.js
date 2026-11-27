@@ -2060,6 +2060,7 @@ function aiInner() {
     <textarea id="ask" rows="3" placeholder="예: 팔짱 끼고 내려다보게, 표정은 더 차갑게" autocomplete="off">${esc(askDraft)}</textarea>
     ${attachBar()}
     ${asking ? `<button type="button" id="stopAsk" class="ghost">눌러서 취소</button>` : `<button type="button" id="send">AI에게 부탁</button>`}
+    ${chat.length && !asking ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
     <p class="hint"><a href="#/ai">‘비서’ 탭</a> 맨 아래에서 비서 지시문을 고칠 수 있음.</p>`;
   return body;
 }
@@ -2725,7 +2726,8 @@ function diagHtml() {
 }
 // 2026-11-22: 프롬프트 칸 전부 접기. 접으면 완성된 프롬프트 두 줄만 보이고, 그 줄을 눌러도 펼쳐진다. 접힌 상태는 settings.foldPrompt에 남는다(옛 데이터에는 없어 펼친 것으로 읽음).
 // 뽑기 화면의 비서 한 줄 (2026-11-27, 사용자: 편의성). 비서 탭으로 가지 않고 여기서 묻고, 답의 블록도 여기서 넣는다.
-// 아래 ‘AI 도우미’ 칸이 열려 있으면 그 칸과 입력칸이 겹치므로 이 줄은 안 그린다. 그림 붙이기·사진은 AI 도우미 칸·비서 탭에서.
+// 아래 ‘AI 도우미’ 칸이 열려 있으면 그 칸과 입력칸이 겹치므로 이 줄은 안 그린다. 사진·파일 붙이기는 AI 도우미 칸·비서 탭에서.
+// 방금 그림 보여 주기 체크와 대화 지우기는 여기에도 둔다 (2026-11-27, 사용자: 그림 보여주기·대화 삭제를 뽑기에도).
 function quickAsk() {
   if (ui.open.ai) return "";
   const { chat, settings: s } = store.data, last = chat.length - 1;
@@ -2735,6 +2737,7 @@ function quickAsk() {
       <input id="qask" type="text" enterkeyhint="send" autocomplete="off" placeholder="${s.aiKey.trim() ? "비서에게: 예) 앉게, 배경은 밤거리" : "비서를 쓰려면 설정에서 제미니 키"}" value="${esc(askDraft)}" aria-label="비서에게 부탁">
       ${asking ? `<button type="button" class="ghost" id="stopAsk">취소</button>` : `<button type="button" id="qsend">보내기</button>`}
     </div>
+    ${now || chat.length ? `<div class="qopts">${now ? `<label class="line mini"><input type="checkbox" id="withImg" ${ui.withImg ? "checked" : ""}> ${now.rec.memo ? "방금 그림 다시 보여 주기" : "방금 그림 보여 주기"} <span class="hint">구글로 감</span></label>` : "<span></span>"}${chat.length && !asking ? `<button type="button" class="ghost mini" id="clearChat">대화 지우기</button>` : ""}</div>` : ""}
     ${asking && ui.qShow ? `<p class="hint">비서가 생각 중…</p>` : ""}
     ${askErr && ui.qShow ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
     ${reply}`;
@@ -3007,7 +3010,7 @@ const SCREENS = {
       ${asking
         ? `<button type="button" id="stopAsk" class="ghost big">눌러서 취소</button>`
         : `<button type="button" id="send" class="big">보내기</button>`}
-      ${chat.length ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
+      ${chat.length && !asking ? `<button type="button" class="ghost" id="clearChat">대화 지우기</button>` : ""}
       ${dictPanel()}
       ${personaEditor()}
       <label for="aiModelQ">대답하는 모델 <span class="hint">${s.aiModel === "custom" ? "직접 입력한 이름은 설정(오른쪽 위 톱니바퀴)에서 고침" : ""}</span></label>
@@ -3229,7 +3232,7 @@ function wireAsk() {
   on("askUnpick", "click", () => { clearAttach(); render(); });
   on("send", "click", () => { const t = askDraft.trim(); if (t) ask(t, { image: ui.withImg && !!now }); });
   on("qask", "input", (e) => { askDraft = e.target.value; });
-  const qgo = () => { const t = askDraft.trim(); if (!t || asking) return; ui.qShow = true; ask(t); };
+  const qgo = () => { const t = askDraft.trim(); if (!t || asking) return; ui.qShow = true; ask(t, { image: ui.withImg && !!now }); };
   on("qsend", "click", qgo);
   on("qask", "keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); qgo(); } });
   on("qhide", "click", () => { ui.qShow = false; render(); });
