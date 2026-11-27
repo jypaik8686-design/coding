@@ -1861,13 +1861,25 @@ function chipOn(p) {
   const have = new Set(tg(chipTarget(p)).toLowerCase().split(", "));
   return want.every((t) => have.has(t));
 }
+// 같은 칸에 켜 둔 다른 칩의 태그(겹치는 것)는 남긴다. 안 그러면 하나를 뺄 때 겹친 태그까지 빠져 다른 칩이 망가진다 (2026-11-27, 사용자: 키워드를 빼면 최근에 넣은 게 빠짐).
+function chipKeep(p, part = (x) => chipBody(x), only = null) {
+  const keep = [];
+  for (const kind of PKINDS) for (const e of presetEntries(kind)) {
+    const q = e.p;
+    if (e.hidden || q.to !== p.to || (q.name === p.name && q.text === p.text)) continue;
+    if (p.to === "scene" && q.slot !== (only || p.slot)) continue;
+    if (chipOn(q)) keep.push(part(q));
+  }
+  return keep.join(", ");
+}
+const minusKeep = (body, keep) => tagsMinus(body, keep);
 function chipOff(p) {
-  const d = store.data;
-  if (p.to === "style") d.taste.style = tagsMinus(d.taste.style, p.text);
-  else if (p.to === "neg") d.draft.neg = tagsMinus(d.draft.neg, p.text);
+  const d = store.data, keep = chipKeep(p);
+  if (p.to === "style") d.taste.style = tagsMinus(d.taste.style, minusKeep(p.text, keep));
+  else if (p.to === "neg") d.draft.neg = tagsMinus(d.draft.neg, minusKeep(p.text, keep));
   else {
-    const k = SLOT_KEYS.includes(p.slot) ? p.slot : "rest"; d.draft.slots[k] = tagsMinus(d.draft.slots[k], chipBody(p));
-    if (k === "traits") d.draft.slots.outfit = tagsMinus(d.draft.slots.outfit, personParts(p).outfit); // 인물을 끄면 그 기본 의상도 뺀다(다른 의상으로 바꿨으면 남는 게 없다)
+    const k = SLOT_KEYS.includes(p.slot) ? p.slot : "rest"; d.draft.slots[k] = tagsMinus(d.draft.slots[k], minusKeep(chipBody(p), keep));
+    if (k === "traits") d.draft.slots.outfit = tagsMinus(d.draft.slots.outfit, minusKeep(personParts(p).outfit, chipKeep(p, (x) => x.text, "outfit"))); // 인물을 끄면 그 기본 의상도 뺀다(다른 의상으로 바꿨으면 남는 게 없다)
     syncScene();
   }
   if (p.neg && p.to !== "neg") d.draft.neg = tagsMinus(d.draft.neg, p.neg);
