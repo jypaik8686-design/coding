@@ -587,9 +587,6 @@ button.line { color: var(--ink); background: transparent; border: 1px solid var(
 .qask { display: flex; gap: 6px; margin: 8px 0 4px; }
 .qask input { flex: 1; min-width: 0; min-height: 44px; }
 .qask button { min-height: 44px; white-space: nowrap; }
-.qopts { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 6px; }
-.qopts label.line.mini { min-height: 44px; display: flex; align-items: center; gap: 6px; white-space: normal; }
-.qopts button { min-height: 44px; white-space: nowrap; }
 .qreply { margin: 6px 0 10px; }
 
 /* 2026-11-27 배경 깔기, 그림체 바로 바꾸기 */
