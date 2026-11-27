@@ -439,3 +439,28 @@ test("인물별 뺄 것: 둘 이상이면 빈 칸을 다른 인물의 머리·�
   assert.equal(c.length, 1); assert.equal(c[0].neg, "");
   assert.deepEqual(errs, []); await p.close();
 });
+
+// 2026-11-27 사용자: 비서가 인물 네거티브 태그를 출력을 안 한다. person 블록에 neg 줄이 아예 없었다(지시문에도, 읽는 코드에도).
+// person 블록의 `neg:` 줄을 읽어 한 명이면 ‘이번 빼는 것’에, 여러 명이면 그 인물의 뺄 것에 넣고, 프리셋으로 저장할 때 금지 태그로 남긴다. 지시문에 꼭 쓰라고 적는다.
+test("인물 금지 태그: person 블록의 neg 줄이 빼는 것·인물별 뺄 것·프리셋 금지 태그로 간다, 지시문이 neg 줄을 시킨다", async () => {
+  let n = 0;
+  const ONE = "```person\nname: 분홍\n1girl, pink hair, twintails, maid, apron\nneg: short hair, black hair, glasses\n```";
+  const TWO2 = "```person\nname: 은발\ngirl, silver hair, long hair\nneg: glasses, short hair\n```\n```person\nname: 금발\ngirl, blonde hair, short hair\nneg: long hair, hat\n```";
+  const { p, errs, asks, gens, data, ask } = await open({ settings: { aiKey: "x", token: "pst-x", model: "nai-diffusion-4-5-full" } }, () => (++n === 1 ? ONE : TWO2));
+  p.on("dialog", (d) => d.accept(d.defaultValue()));
+  await ask("새 인물"); await p.click('.qreply [data-kind="person"]'); await p.waitForTimeout(200);
+  assert.match(asks[0].systemInstruction.parts[0].text, /person 블록[^]*neg:/, "지시문에 person 블록의 neg 줄이 없음");
+  let d = await data();
+  assert.equal(d.draft.neg, "short hair, black hair, glasses");
+  assert.doesNotMatch(d.draft.slots.traits + d.draft.slots.outfit, /neg|glasses|short hair/);
+  await p.click("#go"); await p.waitForTimeout(800);
+  assert.match(gens.at(-1).parameters.negative_prompt, /short hair, black hair, glasses/);
+  await p.click(".qreply [data-pcsave]"); await p.waitForTimeout(300);
+  d = await data();
+  assert.equal(d.presets[0].name, "분홍"); assert.equal(d.presets[0].neg, "short hair, black hair, glasses");
+  await ask("둘"); await p.click(".qreply [data-pplall]"); await p.waitForTimeout(300);
+  d = await data();
+  assert.deepEqual(d.draft.chars.map((c) => c.neg), ["glasses, short hair", "long hair, hat"]);
+  assert.doesNotMatch(d.draft.chars.map((c) => c.text).join(), /glasses|hat|neg/);
+  assert.deepEqual(errs, []); await p.close();
+});

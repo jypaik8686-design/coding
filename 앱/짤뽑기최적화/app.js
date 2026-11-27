@@ -1505,7 +1505,7 @@ function refsText(full = true) {
 function personText() {
   const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
   const now = list.filter((e) => chipOn(e.p)).map((e) => e.p.name);
-  return `\n\n## 새 그림\n사용자가 앞 그림과 다른 새 그림(다른 장소·옷·상황)을 달라고 하면 scene 블록 첫 줄에 new를 쓰고 outfit·pose·bg 줄을 다 쓴다. 앱이 앞 장면 칸·이번 빼는 것·다른 답의 인물별 칸을 비우고 넣는다. 캐릭터를 바꿀 때만 count·traits 줄을 쓴다. 앞 그림을 고치는 것이면 new 없이 바뀐 줄만.\n\n## 내기 전 검토\n블록을 내기 전에 한 번 훑는다: 태그가 맞는 칸 줄에 있나, 같은 태그가 두 줄에 겹치나, 빼는 것(기본·이번)에 있는 태그를 넣으려 하나, 단부루에 없는 말(자연어·한국어)이 섞였나, 인원수가 인물 수와 맞나. 걸리면 고친 블록만 내고 무엇을 고쳤는지 한 줄. 확실하지 않은 태그는 search 블록으로 찾는다.\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
+  return `\n\n## 새 그림\n사용자가 앞 그림과 다른 새 그림(다른 장소·옷·상황)을 달라고 하면 scene 블록 첫 줄에 new를 쓰고 outfit·pose·bg 줄을 다 쓴다. 앱이 앞 장면 칸·이번 빼는 것·다른 답의 인물별 칸을 비우고 넣는다. 캐릭터를 바꿀 때만 count·traits 줄을 쓴다. 앞 그림을 고치는 것이면 new 없이 바뀐 줄만.\n\n## 내기 전 검토\n블록을 내기 전에 한 번 훑는다: 태그가 맞는 칸 줄에 있나, 같은 태그가 두 줄에 겹치나, 빼는 것(기본·이번)에 있는 태그를 넣으려 하나, 단부루에 없는 말(자연어·한국어)이 섞였나, 인원수가 인물 수와 맞나. 걸리면 고친 블록만 내고 무엇을 고쳤는지 한 줄. 확실하지 않은 태그는 search 블록으로 찾는다.\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상), 마지막 줄에 \`neg: 태그\`로 그 인물에게 나오면 안 되는 것을 3~8개 꼭 쓴다(반대되는 머리 길이·머리색·눈색·체형, 그 인물에게 없는 안경·장신구·귀·뿔 등. 기본 Undesired에 있는 것은 빼고). neg 줄 없는 person 블록을 내지 않는다. 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
 }
 function fullPersona(sent, libFull = true) {
   const d = store.data;
@@ -1782,7 +1782,7 @@ function peopleOf(text) {
     if (b.t !== "code") return;
     if (b.lang === "person") {
       const nc = personFromBlock(b.v);
-      if (nc) { out.push({ j, fixed: nc.fixed, outfit: nc.outfit, name: nc.name }); return; }
+      if (nc) { out.push({ j, fixed: nc.fixed, outfit: nc.outfit, name: nc.name, neg: nc.neg }); return; }
       const name = String(b.v).split("\n").map((x) => x.trim()).find(Boolean) || "";
       const hit = list.find((e) => norm(e.p.name) === norm(name)) || list.find((e) => norm(e.p.name).includes(norm(name)) || norm(name).includes(norm(e.p.name)));
       if (hit) { const pp = personParts(hit.p); out.push({ j, fixed: pp.fixed, outfit: pp.outfit, name: hit.p.name, neg: tidy(hit.p.neg || "") }); }
@@ -1840,15 +1840,18 @@ function crossNeg() {
   return n;
 }
 const goneNote = (n) => (n ? ` · 옛 인물별 칸 ${n}명 뺌` : "");
+const PNEG_RE = /^(neg|negative|금지|빼는\s*것|뺄\s*것)\s*[:：]\s*/i;
 // person 블록에서 새 인물을 읽는다: `name: 이름` 줄(없어도 됨)과 쉼표 태그. 프리셋 이름 한 줄이면 null.
 function personFromBlock(v) {
   const lines = String(v).split("\n").map((x) => x.trim()).filter(Boolean);
   const nm = lines.find((x) => /^(name|이름)\s*[:：]/i.test(x));
-  const body = lines.filter((x) => x !== nm).join(", ");
+  // neg 줄: 그 인물에게 나오면 안 되는 태그 (2026-11-27 사용자: 비서가 인물 네거티브 태그를 출력을 안 한다. 줄이 아예 없었다)
+  const ng = lines.filter((x) => PNEG_RE.test(x));
+  const body = lines.filter((x) => x !== nm && !ng.includes(x)).join(", ");
   if (!body.includes(",")) return null;
   const { fixed, outfit } = splitPerson(body);
   if (!tg(fixed)) return null;
-  return { name: nm ? nm.replace(/^(name|이름)\s*[:：]\s*/i, "").trim().slice(0, 30) : "", fixed: tg(fixed), outfit: tg(outfit) };
+  return { name: nm ? nm.replace(/^(name|이름)\s*[:：]\s*/i, "").trim().slice(0, 30) : "", fixed: tg(fixed), outfit: tg(outfit), neg: tg(ng.map((x) => x.replace(PNEG_RE, "")).join(", ")) };
 }
 const personSaved = (v) => { const c = personFromBlock(v); if (!c) return false; const k = tg(c.fixed).split(", ").map(ckey).sort().join(); return presetEntries("인물").some((e) => tg(personParts(e.p).fixed).split(", ").map(ckey).sort().join() === k); };
 // person 블록: 프리셋 이름이면 그 인물 칩을 켠 것처럼 바꿔 넣고(고정 + 기본 의상, 금지 태그), 아니면 태그로 새 인물을 넣는다.
@@ -1865,14 +1868,15 @@ function applyPerson(v) {
     d.draft.chipsOn = [...(d.draft.chipsOn || []).filter((x) => x !== hit.key), hit.key].slice(-40);
     return `인물을 ‘${hit.p.name}’으로 바꿈${tidy(personParts(hit.p).outfit) ? " (기본 의상도)" : ""}${goneNote(dropAiChars())}`;
   }
-  const nc = personFromBlock(v), { fixed, outfit } = nc || splitPerson(String(v).replace(/\n/g, ", ")), { count, rest } = splitCount(fixed);
+  const nc = personFromBlock(v), { fixed, outfit } = nc || splitPerson(String(v).split("\n").filter((x) => !PNEG_RE.test(x.trim())).join(", ")), { count, rest } = splitCount(fixed);
   if (!tg(rest) && !tg(count)) return `‘${name.slice(0, 20)}’ 인물을 프리셋에서 못 찾음`;
   for (const e of list) if (chipOn(e.p)) chipOff(e.p);
   if (tg(count)) d.draft.slots.count = tg(count);
   d.draft.slots.traits = tg(rest);
   if (tg(outfit)) d.draft.slots.outfit = tg(outfit);
+  if (nc?.neg) d.draft.neg = mergeTags(d.draft.neg, nc.neg, false);
   syncScene(); d.draft.seedLock = false;
-  return `인물을 태그로 바꿈${tg(outfit) ? " (의상도)" : ""}${goneNote(dropAiChars())}`;
+  return `인물을 태그로 바꿈${tg(outfit) ? " (의상도)" : ""}${nc?.neg ? " (금지 태그도)" : ""}${goneNote(dropAiChars())}`;
 }
 function applyBlock(kind, v, from = "") {
   const d = store.data;
@@ -3308,11 +3312,11 @@ function wireAsk() {
     if (!c) return toast("인물 태그를 못 읽음");
     const name = (prompt("인물 프리셋 이름", c.name) || "").trim().slice(0, 30);
     if (!name) return;
-    const pr = { id: crypto.randomUUID(), name, text: c.fixed, outfit: c.outfit, to: "scene", kind: "인물", slot: "traits", at: "front" };
+    const pr = { id: crypto.randomUUID(), name, text: c.fixed, outfit: c.outfit, ...(c.neg ? { neg: c.neg } : {}), to: "scene", kind: "인물", slot: "traits", at: "front" };
     d.presets.unshift(pr);
     // 지금 칸이 이 인물이면 칩이 켜진 것으로 보이게
     const k = `own:${pr.id}`; if (chipPresent(pr)) d.draft.chipsOn = [...(d.draft.chipsOn || []), k].slice(-40);
-    toast(`‘${name}’을 인물 프리셋으로 저장함 (고정 ${c.fixed.split(", ").length}개 · 기본 의상 ${c.outfit ? c.outfit.split(", ").length : 0}개)`, () => { d.presets = d.presets.filter((x) => x !== pr); store.save(); });
+    toast(`‘${name}’을 인물 프리셋으로 저장함 (고정 ${c.fixed.split(", ").length}개 · 기본 의상 ${c.outfit ? c.outfit.split(", ").length : 0}개 · 금지 ${c.neg ? c.neg.split(", ").length : 0}개)`, () => { d.presets = d.presets.filter((x) => x !== pr); store.save(); });
     store.save();
   }));
   document.querySelectorAll("[data-blk]").forEach((el) => el.addEventListener("click", () => {
