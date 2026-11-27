@@ -574,3 +574,12 @@ button.mini { min-height: 44px; font-size: 13.5px; }
 /* 보관을 물릴 수 있다는 표시, 비서 답의 블록 버튼은 선으로(채운 것은 ‘전부 넣기’ 하나) */
 .acts button.kept { color: var(--gold); }
 button.line { color: var(--ink); background: transparent; border: 1px solid var(--accent, #a8203a); }
+
+/* 2026-11-27 편의: 그림 아래 장면 요약, 바뀐 칸 표시 */
+.scenesum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 10px 0 4px; }
+.scenesum button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 48px; padding: 6px 10px; text-align: left; background: transparent; border: 1px solid var(--line, #333); border-radius: 10px; color: inherit; font: inherit; }
+.scenesum small { font-size: 12px; opacity: .7; }
+.scenesum span { font-size: 13px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot.flash > textarea, .scenesum .flash { animation: slotflash 2.4s ease-out 1; }
+@keyframes slotflash { 0%, 40% { box-shadow: 0 0 0 2px var(--gold, #c9a45c); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .slot.flash > textarea, .scenesum .flash { animation: none; box-shadow: 0 0 0 2px var(--gold, #c9a45c); } }

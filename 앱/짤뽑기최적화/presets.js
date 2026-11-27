@@ -1,24 +1,29 @@
 // 쓸 만한 프롬프트 모음. 눌러서 이번 그림·취향 그림체·빼는 것에 넣는다.
 // 확정 = art 저장소(프롬프트/NAI.md, NAI사용법.md)에서 사용자가 확정한 것을 그대로 옮김.
 // 가안 = 사용자의 취향(art/취향.md)에서 이 앱이 짠 것. 태그는 전부 art/태그사전(tags.json)에서 게시물 수를 확인했다(2026-11-18).
-// 한 줄: { name, text, to: "scene" | "style" | "neg", at?: "front"(맨 앞에 더함), neg?: 같이 더할 빼는 것, note, ok: 확정이면 true }
+// 인물은 text(고정: 인원수·얼굴·머리·몸·머리 장식·보석)와 outfit(기본 의상: 의상 칩으로 바뀜)으로 나눈다. 태그는 그대로 옮겼고 나누기만 했다 (2026-11-27).
+// 한 줄: { name, text, outfit?, to: "scene" | "style" | "neg", at?: "front"(맨 앞에 더함), neg?: 같이 더할 빼는 것, note, ok: 확정이면 true }
 
 export const PRESETS = {
   인물: [
     { name: "킅순이 (KT 저지)", ok: true, to: "scene", at: "front",
-      text: "1girl, solo, young adult woman, {red hair}, very long hair, {high ponytail}, {large black hair bow}, ahoge, hair between eyes, long sidelocks, {red eyes}, beautiful face, large breasts, {black jersey}, {crew neck}, short sleeves, raglan sleeves, {gold piping}, curved gold lines from shoulders down the sides, gold stripes on sleeve hems, {gradient clothes}, vertical-striped clothes, small white logos,",
+      text: "1girl, solo, young adult woman, {red hair}, very long hair, {high ponytail}, {large black hair bow}, ahoge, hair between eyes, long sidelocks, {red eyes}, beautiful face, large breasts,",
+      outfit: "{black jersey}, {crew neck}, short sleeves, raglan sleeves, {gold piping}, curved gold lines from shoulders down the sides, gold stripes on sleeve hems, {gradient clothes}, vertical-striped clothes, small white logos,",
       neg: "earrings, piercing, ear piercing, collared shirt, zipper, clothes writing, english text,",
       note: "하의 기본값: 검은 플리츠스커트, 검은 팬티스타킹, 검은 운동화" },
     { name: "키아나", ok: true, to: "scene", at: "front",
-      text: "1girl, solo, {tanned skin}, {silver hair}, white hair, medium hair, wavy hair, messy hair, {blunt bangs}, {golden eyes}, half-closed eyes, red lips, beautiful face, aloof, cold expression, {gold tiara}, teal gemstone, gold hair rings, gold crescent earrings, gold choker, teal gem, gold armlet, gold bracelets, {dark teal one-piece swimsuit}, gold trim,",
+      text: "1girl, solo, {tanned skin}, {silver hair}, white hair, medium hair, wavy hair, messy hair, {blunt bangs}, {golden eyes}, half-closed eyes, red lips, beautiful face, aloof, cold expression, {gold tiara}, teal gemstone, gold hair rings, gold crescent earrings, gold choker, teal gem, gold armlet, gold bracelets,",
+      outfit: "{dark teal one-piece swimsuit}, gold trim,",
       neg: "pale skin, white skin, long hair, straight hair, flat color, cel shading, wrinkles, aged, elf ears,",
       note: "그림체는 취향 프롬프트에 이미 있음. 얼굴이 크게 잡히는 upper body 구도에서 느낌이 가장 잘 남" },
     { name: "TS 말포이", ok: true, to: "scene", at: "front",
       text: "1girl, solo, {slender}, {small breasts}, adult proportions, {tiny silver snake stud earrings}, {platinum blonde hair}, long hair, straight hair, {blunt bangs}, hair over one eye, silver hairclip, grey eyes, {half-closed eyes}, pale skin, beautiful face,",
+      outfit: "",
       neg: "large breasts, dangling earrings, elf ears, green hair, white hair, short hair, wavy hair, old, long neck,",
       note: "감정·자세·의상·장소는 이 뒤에" },
     { name: "아도", ok: true, to: "scene", at: "front",
-      text: "1girl, solo, young adult woman, adult face and proportions, {very long hair}, {dark blue hair}, {cyan gradient hair}, gradient hair, {cyan hair streak on bangs}, streaked hair, hair between eyes, {blue eyes}, large eyes, black collar, {blue rose brooch}, black ribbon tie, white collared shirt, {black blazer}, black pants,",
+      text: "1girl, solo, young adult woman, adult face and proportions, {very long hair}, {dark blue hair}, {cyan gradient hair}, gradient hair, {cyan hair streak on bangs}, streaked hair, hair between eyes, {blue eyes}, large eyes, {blue rose brooch},",
+      outfit: "black collar, black ribbon tie, white collared shirt, {black blazer}, black pants,",
       note: "브로치가 약하면 blue flower, brooch 추가" },
   ],
   그림체: [
