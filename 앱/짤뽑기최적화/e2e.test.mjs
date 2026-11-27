@@ -232,3 +232,16 @@ test("보관함 프리셋으로 찾기: 그 프리셋 태그가 다 든 그림�
   assert.match(await p.locator("#kqN").innerText(), /2장 찾음/);
   assert.deepEqual(errs, []); await p.close();
 });
+test("태그 사전: 뽑기 화면에서 찾고 눌러 맞는 칸에 넣는다, 비서 검색 결과도 대화에서 눌러 넣는다", async () => {
+  const res = "[태그 검색 결과] (앱이 찾음)\n‘은발’: 앱 사전: 은발 → grey hair, white hair | 비슷한 태그: grey hair(312,000), silver trim(2,253)\n이 결과로 고른 태그를 블록으로 내 줘.";
+  const { p, errs, data } = await open({ settings: { aiKey: "x" }, draft: { slots }, chat: [{ role: "user", text: "은발", at: 1 }, { role: "model", text: "```search\n은발\n```", at: 2 }, { role: "user", text: res, at: 3 }, { role: "model", text: "grey hair로.", at: 4 }] });
+  await p.locator('button.tool[data-tool="dict"]').click(); await p.waitForTimeout(300);
+  await p.fill("#dq", "smile"); await p.waitForTimeout(1500);
+  await p.locator('#dres [data-dadd="smile"]').first().click(); await p.waitForTimeout(200);
+  assert.match((await data()).draft.slots.traits, /smile/);
+  await p.evaluate(() => { location.hash = "#/ai"; }); await p.waitForTimeout(500);
+  const card = p.locator(".msg.srch"); assert.equal(await card.count(), 1);
+  await card.locator("summary").click(); await card.locator('[data-tagadd="grey hair"]').click(); await p.waitForTimeout(200);
+  assert.match((await data()).draft.slots.traits, /grey hair/);
+  assert.deepEqual(errs, []); await p.close();
+});

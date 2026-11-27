@@ -615,3 +615,8 @@ button.line { color: var(--ink); background: transparent; border: 1px solid var(
 .rt .basev { position: absolute; left: 4px; bottom: 22px; font-style: normal; font-size: 11px; padding: 1px 5px; border-radius: 6px; background: var(--gold); color: #111; }
 
 /* 2026-11-27 렉·튐 줄이기: 고정 막대의 뒤 흐림(backdrop-filter)을 뺌(폰에서 스크롤마다 다시 계산) */
+
+/* 2026-11-27 검색 결과 카드 */
+.msg.srch summary { cursor: pointer; font-size: 14px; }
+.msg.srch .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.msg.srch .srchraw { white-space: pre-wrap; font-size: 12px; opacity: .75; max-height: 30vh; overflow: auto; }
