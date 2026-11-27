@@ -589,3 +589,7 @@ button.line { color: var(--ink); background: transparent; border: 1px solid var(
 .qask input { flex: 1; min-width: 0; min-height: 44px; }
 .qask button { min-height: 44px; white-space: nowrap; }
 .qreply { margin: 6px 0 10px; }
+
+/* 2026-11-27 배경 깔기, 그림체 바로 바꾸기 */
+.slot.bgoff > textarea { opacity: .45; }
+.stylebar { margin: 6px 0 2px; }
