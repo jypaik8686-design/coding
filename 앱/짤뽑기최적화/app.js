@@ -8,7 +8,7 @@ import { PRESETS } from "./presets.js";
 // 받은 파일을 블록으로 펼치는 것은 해체기와 같은 코드를 쓴다(같은 주소 아래 있어서 바로 불러옴). 해체기 폴더를 옮기면 이 줄도 고친다.
 import { parseFile, vaultItems } from "../해체기/risu.js";
 // scene 블록 칸 읽기는 원본 짤뽑기와 같은 코드(`- outfit:`·`**outfit:**`·`의상:` 꼴도 읽고, 칸 이름 없는 태그는 칸을 짐작함. 시험: ../짤뽑기/slots.test.mjs). 2026-11-27 사용자: 프롬프트가 엉뚱한 칸으로 감.
-import { parseSceneBlock, sceneKeys, setSlotData, splitPerson, guessSlot } from "../짤뽑기/slots.js";
+import { parseSceneBlock, sceneKeys, setSlotData, splitPerson, guessSlot, autoSlots } from "../짤뽑기/slots.js";
 try { const r = await fetch("../짤뽑기/slots.json"); if (r.ok) setSlotData((await r.json()).slots); else console.warn("slots.json 못 받음", r.status); }
 catch (e) { console.warn("slots.json 못 받음", e); }
 
@@ -3056,7 +3056,7 @@ const SCREENS = {
           <div class="acts2"><button type="button" id="kEditSave">기록에 저장</button><button type="button" class="ghost" id="kEditOff">취소</button></div>
           <p class="hint">이 그림의 기록만 바뀜. 그림 파일은 그대로. ‘다시 뽑기’·‘프롬프트만 칸에’가 고친 글을 씀.</p></div>`
           : `${keepSlots(r)}<div class="acts2"><button type="button" class="ghost mini" data-kcopy="scene">그림 프롬프트 통째 복사</button><button type="button" class="ghost mini" id="kEdit">프롬프트 고치기</button></div>`}
-        ${r.chars?.length ? `<div class="kf"><div class="kfh"><span>인물별</span></div><p class="kfv">${r.chars.map((c, i) => `${i + 1}. ${esc(c.text)}${Number.isInteger(c.pos) ? ` (칸 ${c.pos + 1})` : ""}`).join("<br>")}</p></div>` : ""}
+        ${r.chars?.length ? keepChars(r) : ""}
         ${field("style", "화풍·작가", r.style)}
         ${sec("kmore", "빼는 것 · 생성 값", `시드 ${r.seed ?? "모름"}`, `${field("negative", "빼는 것", r.negative)}<div class="kf"><div class="kfh"><span>값</span></div><p class="kfv">${vals}</p></div>`)}
         <div class="kdel"><button type="button" id="del" class="ghost danger">이 그림 지우기</button></div>`;
@@ -3511,6 +3511,20 @@ function wireVault(id) {
 
 // [data-thumb] 칸에 보관한 그림의 썸네일을 채운다. 화면이 다시 그려졌으면(seq가 바뀜) 그만둔다.
 // 보관함 한 장의 그림 프롬프트를 칸마다 (2026-11-27 사용자: 보관함도 프롬프트 구분). 칸 정보가 있으면 그대로, 없으면(옛 기록·받은 그림) 태그마다 칸을 짐작한다.
+// 인물별 프롬프트도 인물마다 칸으로 (2026-11-27 사용자: 캐릭터도 장면 쪽처럼 분류). 인물별 글에는 칸 이름이 없으니 늘 짐작이다. girl·boy·other는 인원수·성별 칸.
+function charSlots(text) {
+  const sl = autoSlots(text), who = tg(sl.rest).split(", ").filter((t) => /^(girl|boy|other)$/i.test(t));
+  if (who.length) { sl.count = joinTags([who.join(", "), sl.count]); sl.rest = tg(sl.rest).split(", ").filter((t) => !who.includes(t)).join(", "); }
+  return sl;
+}
+function keepChars(r) {
+  return r.chars.map((c, i) => {
+    const sl = charSlots(c.text || ""), head = `인물 ${i + 1}${Number.isInteger(c.pos) ? ` (자리 ${c.pos + 1})` : ""}`;
+    const rows = SLOT_KEYS.filter((k) => tg(sl[k])).map((k) => `<div class="kf kslot"><div class="kfh"><span>${head} · ${esc(SLOT_NAMES[k])} <small>(짐작)</small></span><button type="button" class="ghost mini" data-kcopy="char:${i}:${k}">복사</button></div><p class="kfv">${esc(tg(sl[k]))}</p></div>`);
+    const neg = tidy(c.neg || "") ? `<div class="kf kslot"><div class="kfh"><span>${head} · 이 인물에서 뺄 것</span></div><p class="kfv">${esc(tidy(c.neg))}</p></div>` : "";
+    return `<div class="kchar">${rows.join("")}${neg}<div class="acts2"><button type="button" class="ghost mini" data-kcopy="char:${i}">${head} 통째 복사</button></div></div>`;
+  }).join("");
+}
 function keepSlots(r) {
   const has = !!(r.slots && SLOT_KEYS.some((k) => tg(r.slots[k]))), sl = has ? r.slots : parseSceneBlock(r.scene || "");
   const rows = SLOT_KEYS.filter((k) => tg(sl[k])).map((k) => `<div class="kf kslot"><div class="kfh"><span>${esc(SLOT_NAMES[k])}${has ? "" : " <small>(짐작)</small>"}</span><button type="button" class="ghost mini" data-kcopy="slot:${k}">복사</button></div><p class="kfv">${esc(tg(sl[k]))}</p></div>`);
@@ -3954,7 +3968,13 @@ function wire(name, arg, seq) {
     });
     on("del", "click", () => { if (confirm("이 그림을 지움. 되돌릴 수 없음.")) removeKept(arg); });
     document.querySelectorAll("[data-kcopy]").forEach((b) => b.addEventListener("click", async () => {
-      const kc = b.dataset.kcopy, sk = kc.startsWith("slot:") ? kc.slice(5) : null;
+      const kc = b.dataset.kcopy, sk = kc.startsWith("slot:") ? kc.slice(5) : null, ch = kc.match(/^char:(\d+)(?::(\w+))?$/);
+      if (ch) {
+        const c = rec?.chars?.[Number(ch[1])]; if (!c) return;
+        const v = withComma(ch[2] ? tg(charSlots(c.text || "")[ch[2]]) : tg(c.text || "")); if (!v) return;
+        try { await navigator.clipboard.writeText(v); b.textContent = "복사함"; } catch { b.textContent = "복사 못 함"; }
+        return;
+      }
       let v = sk ? tg((rec?.slots && SLOT_KEYS.some((k) => tg(rec.slots[k])) ? rec.slots : parseSceneBlock(rec?.scene || ""))[sk]) : String(rec?.[kc] || ""); if (!v) return;
       if (sk) v = withComma(v);
       if (["scene", "style", "negative"].includes(b.dataset.kcopy)) v = withComma(v);
