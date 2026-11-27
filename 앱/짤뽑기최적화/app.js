@@ -1458,7 +1458,7 @@ function stateText(sent = new Set()) { // sent: 이번 메시지에 그림으로
     chars ? `인물별 프롬프트:\n${chars}` : "",
     `설정: ${s.sampler}, ${s.steps}스텝, 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, ${s.noise}${s.variety ? ", Variety+" : ""}, ${w}x${h}, 시드 ${draft.seedLock && Number.isInteger(draft.seed) ? `${draft.seed} 고정` : "무작위"}`,
     plan ? `켠 참고 그림: ${on.length ? on.map((r) => `#${refCode(r)} 강도 ${r.strength} 정보량 ${r.info}`).join(", ") : "없음"}` : "",
-    ...on.filter((r) => r.meta?.prompt).map((r) => `  #${refCode(r)} 프롬프트: ${cut(sceneOnly(r.meta.prompt), 300)}`),
+    ...on.filter((r) => r.meta?.prompt).map((r) => `  #${refCode(r)} 프롬프트: ${cut(sceneOnly(r.meta.prompt), 160)}`),
     draft.i2i.on && src ? `이미지→이미지 켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "",
   ];
   if (now) {
@@ -1474,17 +1474,19 @@ function stateText(sent = new Set()) { // sent: 이번 메시지에 그림으로
 // 참고 그림 서랍과 refs 블록 쓰는 법. 지시문 조각을 사용자가 고쳐 두면 새 기본 글이 안 들어가므로(2026-11-21: 블록이 안 나옴) 조각과 따로 늘 붙인다.
 // 최적화판: 서랍 목록에는 그림마다 바뀌지 않는 글만 둔다(이름표·이름·시드·메모). 켜짐·강도처럼 자주 바뀌는 것은 ‘지금 상태’로 보냈다.
 // 그래서 서랍을 건드리지 않는 한 지시문 앞부분(조각 + 서랍 목록)이 질문마다 똑같다. 제미니가 같은 앞부분을 캐시로 싸게 치는지는 모델에 달렸다(2026-11-22 gemini-flash-latest에서 cachedContentTokenCount가 찍히는 것은 봤다).
-const REF_LIST_MAX = 40;
+const REF_LIST_MAX = 24; // 2026-11-27 40→24 (사용자: 서랍 글이 토큰을 많이 먹음). 켠 것 먼저, 그다음 최근에 넣은 것
 // 2026-11-27(사용자: 입력 토큰이 매번 만 개): 서랍 전체 목록은 참고 그림 얘기일 때만 보낸다. 평소에는 켠 그림만 + 남은 장수 한 줄.
-const REF_WORDS = /참고|서랍|바이브|레퍼|vibe|ref|비슷한 그림|따라|분위기 그대로|같은 느낌|그림체 따/i;
+const REF_WORDS = /참고 ?그림|서랍|바이브|레퍼런스|\bvibe\b|\brefs?\b/i; // 2026-11-27 좁힘: ‘따라’·‘같은 느낌’ 같은 말에 평소 질문도 걸려 목록이 자주 갔다
 function refsText(full = true) {
   const s = store.data.settings;
   if (!refPlan(s)) return ""; // 참고 그림을 못 보내는 모델이면 목록도 안 보낸다. ‘지금 상태’ 첫 줄에 "참고 그림 안 됨"이 간다
-  const all = aiRefs(), pool = (full ? all : all.filter((r) => r.on)).slice(0, REF_LIST_MAX);
+  const all = aiRefs(), pool = (full ? [...all].sort((a, b) => (b.on ? 1 : 0) - (a.on ? 1 : 0) || (b.at || 0) - (a.at || 0)) : all.filter((r) => r.on)).slice(0, REF_LIST_MAX);
   if (!all.length) return "";
   if (!full && !pool.length) return `\n\n## 참고 그림 서랍\n${all.length}장 있음, 켠 것 없음. 목록은 사용자가 참고 그림 얘기를 하면 붙는다.`;
-  const lib = pool.map((r) => `#${refCode(r)} ${r.name}${Number.isInteger(r.meta?.seed) ? ` | 시드 ${r.meta.seed}` : ""} | ${r.encOnly ? "바이브 파일(그림 없음)" : r.memo ? `메모: ${cut(r.memo, 140)}` : "메모 없음(비서가 아직 안 봄)"}`).join("\n");
-  return `\n\n## 참고 그림 서랍\n그림은 붙지 않는다. 아래 글이 그림을 대신한다. 고를 때는 refs 블록에 \`#이름표: 강도\`.${full ? "" : ` 켠 그림만 적음(서랍 ${all.length}장, 나머지 목록은 사용자가 참고 그림 얘기를 하면 붙음).`}\n${lib}`;
+  // 한 줄을 짧게: 이름 20자, 메모는 켠 그림 120자·나머지 50자, 시드는 뺌(고를 때 안 씀). 2026-11-27 한 줄 최대 약 200자 → 켠 것 150자·나머지 80자.
+  const lib = pool.map((r) => `#${refCode(r)} ${cut(r.name, 20)}${r.on ? " (켬)" : ""} | ${r.encOnly ? "바이브 파일" : r.memo ? cut(r.memo, r.on ? 120 : 50) : "메모 없음"}`).join("\n");
+  const more = full && all.length > pool.length ? `\n(이 밖에 ${all.length - pool.length}장 더 있음)` : "";
+  return `\n\n## 참고 그림 서랍\n그림은 붙지 않는다. 아래 글이 그림을 대신한다. 고를 때는 refs 블록에 \`#이름표: 강도\`.${full ? "" : ` 켠 그림만 적음(서랍 ${all.length}장, 나머지 목록은 사용자가 참고 그림 얘기를 하면 붙음).`}\n${lib}${more}`;
 }
 // 인물 바꾸기 쓰는 법과 인물 프리셋 이름. 지시문 조각을 고쳐 두어도 늘 붙는다 (2026-11-27, 사용자: 비서가 인물을 편하게 바꾸게).
 function personText() {
