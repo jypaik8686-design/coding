@@ -265,3 +265,14 @@ test("설정의 ‘그림 zip 내보내기’가 오류 없이 돈다 (고른 �
   assert.match(await p.locator(".toast").innerText(), /그림|보관/);
   await p.close();
 });
+test("새 장면(new) 블록: 앞 그림의 장면 칸·이번 빼는 것·인물별 칸이 남지 않고, 캐릭터는 그대로", async () => {
+  const { p, errs, data, ask } = await open({ settings: { aiKey: "x", model: "nai-diffusion-4-5-full" }, draft: { slots: { ...slots, rest: "rain, umbrella" }, neg: "earrings", chars: [{ id: "c1", text: "girl, old char", neg: "", pos: null }] } },
+    "아예 다른 그림.\n```scene\nnew\noutfit: swimsuit\npose: running\n```");
+  await ask("해변에서 뛰는 그림으로 새로");
+  assert.match(await p.locator('.qreply [data-kind="scene"]').innerText(), /새 장면/);
+  await p.click('.qreply [data-kind="scene"]'); await p.waitForTimeout(200);
+  const d = (await data()).draft;
+  assert.equal(d.slots.outfit, "swimsuit"); assert.equal(d.slots.pose, "running"); assert.equal(d.slots.bg, ""); assert.equal(d.slots.rest, "");
+  assert.equal(d.neg, ""); assert.equal(d.chars.length, 0); assert.equal(d.slots.traits, "blonde hair, red eyes");
+  assert.deepEqual(errs, []); await p.close();
+});
