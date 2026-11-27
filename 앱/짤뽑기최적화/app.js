@@ -2052,9 +2052,8 @@ const quickChips = () => `<div class="chips">
 function aiInner() {
   const { settings: s, chat } = store.data;
   const last = chat.length ? chat.length - 1 : -1;
-  // 마지막 질문과 그 답만 여기서 보인다. 전체 대화는 ‘비서’ 탭.
-  const shown = [];
-  if (last >= 0) { if (chat[last].role === "model" && last > 0) shown.push(last - 1); shown.push(last); }
+  // 마지막 메시지 하나만 여기서 보인다 (2026-11-27 사용자: 최근 메시지만). 전체 대화는 ‘비서’ 탭.
+  const shown = last >= 0 ? [last] : [];
   const body = `
     ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/set">설정(오른쪽 위 톱니바퀴)</a>에서 넣어야 대답함.</p>`}
     ${quickChips()}
@@ -2732,16 +2731,20 @@ function diagHtml() {
 // 아래 ‘AI 도우미’ 칸이 열려 있으면 그 칸과 입력칸이 겹치므로 이 줄은 안 그린다. 그림 붙이기·사진은 AI 도우미 칸·비서 탭에서.
 function quickAsk() {
   if (ui.open.ai) return "";
-  const { chat, settings: s } = store.data, last = chat.length - 1;
-  const reply = ui.qShow && last >= 0 && chat[last].role === "model" && !asking
-    ? `<div class="chat qreply">${msgHtml(chat[last], last)}<button type="button" class="ghost mini" id="qhide">답 닫기</button></div>` : "";
+  const { settings: s } = store.data;
   return `<div class="qask">
       <input id="qask" type="text" enterkeyhint="send" autocomplete="off" placeholder="${s.aiKey.trim() ? "비서에게: 예) 앉게, 배경은 밤거리" : "비서를 쓰려면 설정에서 제미니 키"}" value="${esc(askDraft)}" aria-label="비서에게 부탁">
       ${asking ? `<button type="button" class="ghost" id="stopAsk">취소</button>` : `<button type="button" id="qsend">보내기</button>`}
-    </div>
-    ${asking && ui.qShow ? `<p class="hint">비서가 생각 중…</p>` : ""}
-    ${askErr && ui.qShow ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
-    ${reply}`;
+    </div>`;
+}
+// 비서 답은 그림 바로 아래에, 마지막 답 하나만 (2026-11-27 사용자: 최근 메시지만, 이미지 바로 아래로). 입력칸은 장면 요약 밑 그대로.
+function qReply() {
+  if (ui.open.ai || !ui.qShow) return "";
+  const { chat } = store.data, last = chat.length - 1;
+  if (asking) return `<p class="hint qreply qwait">비서가 생각 중…</p>`;
+  if (askErr) return `<p class="error qreply" role="alert">${esc(askErr)}</p>`;
+  return last >= 0 && chat[last].role === "model"
+    ? `<div class="chat qreply">${msgHtml(chat[last], last)}<button type="button" class="ghost mini" id="qhide">답 닫기</button></div>` : "";
 }
 function sceneSum() {
   trackSlots(); trackSlots.done = true;
@@ -2958,6 +2961,7 @@ const SCREENS = {
           <img src="${now.url}" alt="방금 뽑은 그림" width="${now.rec.w}" height="${now.rec.h}">
           <figcaption class="hint">시드 ${now.rec.seed} · ${now.rec.w}×${now.rec.h} · ${esc(now.rec.model)} · ${esc(SAMPLERS[now.rec.sampler] || "")} ${now.rec.steps}스텝${now.rec.refs?.length ? ` · 참고 ${now.rec.refs.length}장` : ""}${now.rec.chars?.length ? ` · 인물 ${now.rec.chars.length}` : ""}${now.rec.i2i ? " · 이미지→이미지" : ""}</figcaption>
         </figure>
+        ${qReply()}
         <div class="acts">
           ${now.rec.verdict === "keep"
             ? `<button type="button" id="unkeep" class="ghost kept">♥ 보관됨 · 빼기</button>`
@@ -2970,7 +2974,7 @@ const SCREENS = {
           <button type="button" id="toI2i" class="ghost">변형하기</button>
           <button type="button" id="toRef" class="ghost">참고 그림</button>
         </div>
-` : `<div class="stage${busy ? " busy" : ""}" style="aspect-ratio:${w}/${h}"><p>${busy ? esc(phase || "뽑는 중…") : "뽑은 그림이 여기 뜸"}</p><small>아래 칸을 채우고 ‘뽑기’</small></div>`}
+` : `<div class="stage${busy ? " busy" : ""}" style="aspect-ratio:${w}/${h}"><p>${busy ? esc(phase || "뽑는 중…") : "뽑은 그림이 여기 뜸"}</p><small>아래 칸을 채우고 ‘뽑기’</small></div>${qReply()}`}
       ${histStrip()}
       ${errMsg ? `<p class="error" role="alert">${esc(errMsg)}</p>` : ""}
       ${sceneSum()}

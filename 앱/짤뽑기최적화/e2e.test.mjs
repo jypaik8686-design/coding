@@ -348,3 +348,17 @@ test("인물 금지 태그: person 블록의 neg 줄이 빼는 것·인물별 �
   assert.doesNotMatch(d.draft.chars.map((c) => c.text).join(), /glasses|hat|neg/);
   assert.deepEqual(errs, []); await p.close();
 });
+
+test("뽑기 화면 비서: 답은 그림 바로 아래에 마지막 답 하나만, AI 도우미 칸도 마지막 메시지 하나만", async () => {
+  const chat = [{ role: "user", text: "옛 질문", at: 1 }, { role: "model", text: "옛 답", at: 2 }];
+  const { p, errs, ask } = await open({ settings: { aiKey: "x" }, chat }, "새 답\n```scene\npose: sitting\n```");
+  await ask("앉게");
+  const next = await p.evaluate(() => document.querySelector(".stage, figure.result")?.nextElementSibling?.className || "");
+  assert.match(next, /qreply/);
+  assert.equal(await p.locator(".qreply .msg").count(), 1);
+  assert.match(await p.locator(".qreply").innerText(), /새 답/);
+  await p.locator('.tool[data-tool="ai"]').click(); await p.waitForTimeout(200);
+  const msgs = await p.locator('[data-toolbody="ai"] .msg').allInnerTexts();
+  assert.equal(msgs.length, 1, msgs.join("|")); assert.match(msgs[0], /새 답/);
+  assert.deepEqual(errs, []); await p.close();
+});
