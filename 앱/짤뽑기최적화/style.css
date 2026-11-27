@@ -54,7 +54,7 @@ main {
 /* 하단 탭 — 손가락 닿는 높이 44px 이상 */
 .tabs {
   position: fixed; inset: auto 0 0 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(4, 1fr);
   padding-bottom: env(safe-area-inset-bottom);
   background: color-mix(in srgb, var(--bg) 97%, transparent);
   border-top: 1px solid var(--line);
@@ -621,3 +621,6 @@ button.line { color: var(--ink); background: transparent; border: 1px solid var(
 .msg.srch summary { cursor: pointer; font-size: 14px; }
 .msg.srch .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .msg.srch .srchraw { white-space: pre-wrap; font-size: 12px; opacity: .75; max-height: 30vh; overflow: auto; }
+
+/* 2026-11-27 렉(사용자: 아직도 턱턱): 비서 대화가 길면 탭을 열 때 맨 끝으로 옮기며 대화 전체를 배치해 폰에서 0.2초 넘게 멈췄다. 화면 밖 말풍선은 배치를 건너뛴다 */
+.chat > .msg { content-visibility: auto; contain-intrinsic-size: auto 240px; }

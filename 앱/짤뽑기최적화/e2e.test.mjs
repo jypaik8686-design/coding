@@ -42,7 +42,8 @@ async function open(seed = {}, reply = "응") {
   await p.route(/danbooru/, (r) => r.abort());
   await p.addInitScript(([k, v]) => { if (!sessionStorage.getItem("seeded")) { localStorage.setItem(k, JSON.stringify(v)); sessionStorage.setItem("seeded", "1"); } }, [KEY, seed]);
   await p.goto(`${base}#/gen`); await p.waitForTimeout(900);
-  const data = () => p.evaluate((k) => JSON.parse(localStorage.getItem(k)), KEY);
+  // 앱은 저장을 0.3초 모아 한다(2026-11-27). 읽기 전에 pagehide를 보내 바로 쓰게 한다
+  const data = () => p.evaluate((k) => { dispatchEvent(new Event("pagehide")); return JSON.parse(localStorage.getItem(k)); }, KEY);
   const ask = async (q) => { await p.fill("#qask", q); await p.click("#qsend"); await p.waitForSelector(".qreply"); await p.waitForTimeout(200); };
   return { p, errs, asks, gens, data, ask };
 }
@@ -142,7 +143,7 @@ test("뽑기 전 점검: 처음엔 꺼져 있어 바로 뽑고, 켜면 멈추지
   const { p, errs, gens } = await open({ settings: { token: "pst-x" }, draft: { slots: { ...slots, count: "1girl, solo, 2girls" } } });
   await p.click("#go"); await p.waitForTimeout(800);
   assert.equal(gens.length, 1); assert.equal(await p.locator(".diag").count(), 0);
-  await p.evaluate((k) => { const x = JSON.parse(localStorage.getItem(k)); x.settings.preCheck = true; x.draft.slots.pose = "kneeling"; localStorage.setItem(k, JSON.stringify(x)); }, KEY);
+  await p.evaluate((k) => { dispatchEvent(new Event("pagehide")); const x = JSON.parse(localStorage.getItem(k)); x.settings.preCheck = true; x.draft.slots.pose = "kneeling"; localStorage.setItem(k, JSON.stringify(x)); }, KEY);
   await p.reload(); await p.waitForTimeout(900);
   await p.click("#go"); await p.waitForTimeout(800);
   assert.equal(gens.length, 2); assert.match(await p.locator(".toast").innerText().catch(() => ""), /점검: \d+개 걸림|뽑기 실패/);
@@ -151,7 +152,7 @@ test("뽑기 전 점검: 처음엔 꺼져 있어 바로 뽑고, 켜면 멈추지
 
 test("모든 화면: 콘솔 오류가 없고 폰 폭(390)을 넘치지 않는다", async () => {
   const { p, errs } = await open({ settings: { aiKey: "x" }, draft: { slots } });
-  for (const r of ["gen", "ai", "keep", "vault", "taste", "set"]) {
+  for (const r of ["gen", "ai", "keep", "vault", "set"]) {
     await p.evaluate((h) => { location.hash = h; }, `#/${r}`); await p.waitForTimeout(400);
     assert.equal(await p.evaluate(() => document.documentElement.scrollWidth > 390), false, `${r} 화면이 옆으로 넘침`);
   }
@@ -185,7 +186,7 @@ for (const [name, raw] of [
   test(`저장 데이터: ${name} — 열리고 뽑기 버튼이 보이며 콘솔 오류가 없다`, async () => {
     const { p, errs } = await openRaw(raw);
     assert.equal(await p.locator("#go").count(), 1, "뽑기 버튼이 안 보임");
-    for (const r of ["ai", "keep", "taste", "set", "gen"]) { await p.evaluate((h) => { location.hash = h; }, `#/${r}`); await p.waitForTimeout(250); }
+    for (const r of ["ai", "keep", "set", "gen"]) { await p.evaluate((h) => { location.hash = h; }, `#/${r}`); await p.waitForTimeout(250); }
     assert.deepEqual(errs, []); await p.close();
   });
 }
