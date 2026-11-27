@@ -1038,9 +1038,9 @@ async function unkeep() {
 const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 const crc32 = (u8) => { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
 let zipping = false;
-async function exportImages() {
+async function exportImages(ids = null) { // ids: 고른 그림만 (보관함 고르기의 ‘zip으로’)
   if (zipping) return;
-  const recs = store.data.log.filter((r) => r.verdict === "keep");
+  const recs = store.data.log.filter((r) => r.verdict === "keep" && (!ids || ids.includes(r.id)));
   if (!recs.length) return toast("보관한 그림이 없음");
   zipping = true;
   const parts = [], central = [], enc = new TextEncoder();
@@ -1102,21 +1102,20 @@ async function removeKeptMany(ids) {
   store.save();
 }
 // 고른 그림을 한 장씩 차례로 내려받는다. 브라우저가 처음에 ‘여러 파일 내려받기’를 허락할지 물을 수 있다.
+// 2026-11-27 고침(사용자: 여러 장 저장이 잘 안 됨): 전에는 한 장 받을 때마다 저장소를 읽으며 기다려서, 누른 손길(사용자 동작)이 끊긴 뒤의 내려받기를 브라우저가 막을 수 있었다.
+// 이제 그림을 전부 먼저 읽고 나서 짧은 틈으로 이어서 누른다. 그래도 몇 장만 받아지면 ‘zip으로’(한 파일)를 쓴다.
 async function saveKeptMany(ids) {
-  let n = 0;
-  for (const id of ids) {
-    const row = await imgGet(id).catch(() => null);
-    if (!row?.full) continue;
-    const rec = store.data.log.find((r) => r.id === id) || {};
+  const rows = (await Promise.all(ids.map((id) => imgGet(id).catch(() => null)))).filter((r) => r?.full);
+  if (!rows.length) return toast("고른 그림의 파일을 못 읽음");
+  rows.forEach((row, i) => setTimeout(() => {
+    const rec = store.data.log.find((r) => r.id === row.id) || {};
     const a = document.createElement("a");
     a.href = URL.createObjectURL(row.full);
-    a.download = `jjal-${rec.seed ?? "x"}-${id.slice(0, 4)}.png`;
+    a.download = `jjal-${rec.seed ?? "x"}-${row.id.slice(0, 4)}.png`;
     document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 8000);
-    n++;
-    await new Promise((r) => setTimeout(r, 350));
-  }
-  toast(n === ids.length ? `${n}장 내려받음` : `${n}장 내려받음 · ${ids.length - n}장은 그림 파일이 없음`);
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+  }, i * 150));
+  toast(`${rows.length}장 내려받기를 시작함${rows.length < ids.length ? ` · ${ids.length - rows.length}장은 그림 파일이 없음` : ""}. 몇 장만 받아지면 브라우저가 묻는 ‘여러 파일 다운로드’를 허용하거나 ‘zip으로’`);
 }
 
 async function removeKept(id) {
@@ -1488,7 +1487,7 @@ function refsText() {
 function personText() {
   const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
   const now = list.filter((e) => chipOn(e.p)).map((e) => e.p.name);
-  return `\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
+  return `\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
 }
 function fullPersona(sent) {
   const d = store.data;
@@ -1583,7 +1582,8 @@ async function ask(text, opts = {}) {
       return fetch(`${GEMINI}${encodeURIComponent(model)}:generateContent`, {
         method: "POST", signal: asking.signal,
         headers: { "Content-Type": "application/json", "x-goog-api-key": s.aiKey.trim() },
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig, safetySettings: SAFETY }),
+        // 태그 검색 결과를 돌려주는 질문에만 구글 검색을 켠다: 앱이 단부루에 못 닿아도 제미니가 단부루 위키를 직접 찾는다 (2026-11-27 확인: silver_hair → grey_hair·white_hair)
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig, safetySettings: SAFETY, ...(opts.searched ? { tools: [{ google_search: {} }] } : {}) }),
       });
     };
     let res = await post(conf);
@@ -1612,6 +1612,9 @@ async function ask(text, opts = {}) {
     ui.withImg = false; ui.withRefs = false; // 그림 붙이기는 이번 질문만
     while (d.chat.length > CHAT_MAX) d.chat.shift();
     store.persist();
+    // 태그 검색: 답에 search 블록이 있으면 앱이 찾아 결과를 다음 메시지로 한 번만 돌려준다(검색이 꼬리를 물지 않게 opts.searched)
+    const qs = parseBlocks(out).filter((b) => b.t === "code" && b.lang === "search").flatMap((b) => b.v.split("\n").map((x) => x.replace(/^[-*\s]+/, "").trim()).filter(Boolean)).slice(0, 6);
+    if (qs.length && !opts.searched) searchNext = qs;
   } catch (e) {
     // 답이 없는 질문은 대화에서 빼고 입력칸에 되돌려 놓는다 (사용자 말을 잃지 않게)
     const i = d.chat.indexOf(mine);
@@ -1626,8 +1629,16 @@ async function ask(text, opts = {}) {
   } finally {
     asking = null;
     render();
+    if (searchNext) {
+      const qs = searchNext; searchNext = null;
+      toast(`비서가 태그를 찾아 달라고 함: ${qs.join(", ").slice(0, 60)}`);
+      const res = [];
+      for (const q of qs) res.push(await tagSearch(q));
+      ask(`[태그 검색 결과] (앱이 찾음)\n${res.join("\n")}\n이 결과로 고른 태그를 블록으로 내 줘. 결과가 모자라거나 단부루에 못 닿았으면 구글 검색으로 단부루 위키(danbooru.donmai.us/wiki_pages/태그)를 확인해도 됨.`, { searched: true });
+    }
   }
 }
+let searchNext = null;
 
 // ── 비서 답의 코드 블록을 칸에 넣기 ──────────────────────────
 // 블록 종류: scene(이번 그림) / style(취향 그림체) / negative(빼는 것) / char(인물 한 명) / params(생성 설정 JSON)
@@ -2309,12 +2320,72 @@ function dictSearch(q) {
   }
   return rows.slice(0, 20);
 }
+// ── 태그 검색 (2026-11-27, 사용자: 비서가 태그를 찾고, 비슷한 태그도 찾게) ──
+// 앱 안 사전(tags.json: 단부루 태그 약 1.7만 개와 게시물 수, 한국어 낱말)에서 먼저 찾고, 단부루 공개 API에서 이름·별칭으로 더 찾는다.
+// 단부루는 브라우저에서 바로 부를 수 있게 열려 있다(access-control-allow-origin: *, 2026-11-27 확인). 망이 없거나 막히면 앱 안 사전만.
+// 낱말이 겹치는 태그. 흔한 낱말(hair 등)보다 드문 낱말(silver 등)이 겹친 것을 먼저 (낱말마다 들어 있는 태그 수로 무게).
+let wordDf = null;
+function similarTags(q, max = 10) {
+  if (!tags) return [];
+  const words = [...new Set(q.toLowerCase().replace(/_/g, " ").split(/\s+/).filter((w) => w.length > 1))];
+  if (!words.length) return [];
+  if (!wordDf) { wordDf = new Map(); for (const t of Object.keys(tags.n)) for (const w of new Set(t.split(" "))) wordDf.set(w, (wordDf.get(w) || 0) + 1); }
+  const N = Object.keys(tags.n).length, idf = (w) => Math.log(1 + N / (1 + (wordDf.get(w) || 0)));
+  const total = words.reduce((a, w) => a + idf(w), 0), self = q.toLowerCase().replace(/_/g, " ").trim(), out = [];
+  for (const [t, n] of Object.entries(tags.n)) {
+    if (t === self) continue;
+    const tw = t.split(" "), got = words.filter((w) => tw.includes(w)).reduce((a, w) => a + idf(w), 0);
+    if (got) out.push([t, n, got / total - 0.02 * Math.max(0, tw.length - words.length)]);
+  }
+  return out.sort((a, b) => b[2] - a[2] || b[1] - a[1]).slice(0, max).map(([t, n]) => [t, n]);
+}
+async function danbooruFind(q) {
+  const name = q.trim().toLowerCase().replace(/\s+/g, "_");
+  const u = (path) => `https://danbooru.donmai.us/${path}`;
+  const out = { alias: "", hits: [] };
+  const ctl = AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined;
+  try {
+    const al = await (await fetch(u(`tag_aliases.json?search[antecedent_name]=${encodeURIComponent(name)}&search[status]=active&limit=1`), { signal: ctl })).json();
+    if (Array.isArray(al) && al[0]?.consequent_name) out.alias = al[0].consequent_name.replace(/_/g, " ");
+    const t = await (await fetch(u(`tags.json?search[name_or_alias_matches]=${encodeURIComponent(`*${name}*`)}&search[order]=count&search[hide_empty]=true&limit=8`), { signal: ctl })).json();
+    if (Array.isArray(t)) out.hits = t.filter((x) => x.post_count > 0 && !x.is_deprecated).map((x) => [x.name.replace(/_/g, " "), x.post_count]);
+    // 별칭이 없고 그 이름의 태그가 안 쓰는(deprecated) 태그거나 게시물이 없으면 위키 안내를 읽는다 (silver hair → "Use grey hair or white hair")
+    if (!out.alias) {
+      const ex = await (await fetch(u(`tags.json?search[name]=${encodeURIComponent(name)}&limit=1`), { signal: ctl })).json();
+      if (Array.isArray(ex) && ex[0] && (ex[0].is_deprecated || !ex[0].post_count)) {
+        out.deprecated = true;
+        const w = await (await fetch(u(`wiki_pages/${encodeURIComponent(name)}.json`), { signal: ctl })).json().catch(() => null);
+        const body = String(w?.body || "").split(/h4\.\s*See also/i)[0];
+        out.wiki = [...body.matchAll(/\[\[([^\]|]+)/g)].map((m) => m[1].trim()).filter((x) => !/^tag group/i.test(x)).slice(0, 4);
+      }
+    }
+  } catch (e) { out.err = e?.name === "TimeoutError" ? "단부루가 늦게 답함" : "단부루에 못 닿음"; }
+  return out;
+}
+async function tagSearch(q, online = true) {
+  q = q.trim(); if (!q) return "";
+  await loadTags().catch(() => {});
+  const lines = [], fmt = (list) => list.map(([t, n]) => `${t}(${n.toLocaleString("ko-KR")})`).join(", ");
+  const local = dictSearch(q).slice(0, 8).map((r) => (r.eng ? r.word : `${r.word} → ${r.tags.join(", ")}`));
+  if (local.length) lines.push(`앱 사전: ${local.join(" / ")}`);
+  const sim = similarTags(q); if (sim.length) lines.push(`비슷한 태그: ${fmt(sim)}`);
+  if (online && !/[가-힣]/.test(q)) {
+    const dan = await danbooruFind(q);
+    if (dan.alias) lines.push(`단부루 별칭: ${q} → ${dan.alias} (이 이름을 씀)`);
+    if (dan.deprecated) lines.push(`단부루에서 안 쓰는 태그${dan.wiki?.length ? `, 위키 안내: ${dan.wiki.join(" 또는 ")}` : ""}`);
+    if (dan.hits.length) lines.push(`단부루: ${fmt(dan.hits)}`);
+    if (dan.err) lines.push(`(${dan.err})`);
+  }
+  return `‘${q}’: ${lines.join(" | ") || "못 찾음"}`;
+}
 function dictResults() {
   const q = ui.dq.trim();
   if (!q) return `<p class="hint">한국어 낱말이나 영어 태그로 찾음. 태그를 누르면 ‘이번 그림’에 더함. 예: 금발, blonde</p>`;
-  const rows = dictSearch(q);
+  const rows = dictSearch(q), sim = similarTags(q, 8).filter(([t]) => !rows.some((r) => r.tags.includes(t)));
+  const extra = `${sim.length ? `<p class="hint">비슷한 태그 (낱말이 겹침): ${sim.map(([t, n]) => `<button type="button" class="chip" data-dadd="${esc(t)}">${esc(t)} <small>${n.toLocaleString("ko-KR")}</small></button>`).join(" ")}</p>` : ""}
+    <div class="acts2"><button type="button" class="ghost sm" id="dDan" ${/[가-힣]/.test(q) ? "disabled" : ""}>단부루에서도 찾기</button></div>${ui.dDan && ui.dDan.q === q ? `<p class="hint">${esc(ui.dDan.text)}</p>` : ""}`;
   const none = `<p class="hint">${rows.length ? "" : tags ? "찾은 것이 없음. " : "기본 사전을 못 받아서 내 단어만 찾음. "}‘${esc(q)}’를 내 단어로 직접 더할 수 있음.</p><button type="button" class="ghost sm" data-dnew="${esc(q)}">‘${esc(q)}’ 내 단어로 더하기</button>`;
-  return rows.map((r) => `<div class="drow"><b>${esc(r.word)}</b>${r.own ? " <small>내 단어</small>" : ""}<div class="chips">${r.tags.map((t) => `<button type="button" class="chip" data-dadd="${esc(t)}">${esc(t)} <small>${tags && !r.own ? fmtN(tags.n[t]).replace("게시물 ", "") : tags ? fmtN(tags.n[t.toLowerCase()]).replace("게시물 ", "") : ""}</small></button>`).join("")}</div></div>`).join("") + none;
+  return rows.map((r) => `<div class="drow"><b>${esc(r.word)}</b>${r.own ? " <small>내 단어</small>" : ""}<div class="chips">${r.tags.map((t) => `<button type="button" class="chip" data-dadd="${esc(t)}">${esc(t)} <small>${tags && !r.own ? fmtN(tags.n[t]).replace("게시물 ", "") : tags ? fmtN(tags.n[t.toLowerCase()]).replace("게시물 ", "") : ""}</small></button>`).join("")}</div></div>`).join("") + none + extra;
 }
 function dictPanel() {
   const list = store.data.userDict.map((e) => {
@@ -2764,12 +2835,18 @@ const SCREENS = {
         <p class="hint kwhen">${r.ext ? `받은 그림${r.name ? ` · ${esc(r.name)}` : ""} · ` : ""}${r.at ? new Date(r.at).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</p>
         <div class="acts two">
           <button type="button" id="again">다시 뽑기</button>
+          <button type="button" id="kUse" class="ghost">프롬프트만 칸에</button>
           <button type="button" id="share" class="ghost">저장</button>
           <button type="button" id="keepI2i" class="ghost">이미지→이미지로</button>
           <button type="button" id="keepRef" class="ghost">참고 그림으로</button>
         </div>
         ${r.ext ? `<p class="hint">${r.scene ? "그림 안에 든 생성 정보를 읽었음." : "생성 정보가 없는 그림."} ‘다시 뽑기’는 지금 화풍·작가를 같이 붙임.</p>` : ""}
-        ${field("scene", "그림", r.scene)}
+        ${ui.kedit === r.id ? `<div class="kf"><div class="kfh"><span>그림 프롬프트 고치기</span></div>
+          <textarea id="kScene" rows="4" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(r.scene || "")}</textarea>
+          <label>빼는 것 (이번)<textarea id="kNeg" rows="2" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(typeof r.nd === "string" ? r.nd : tagsMinus(r.negative || "", store.data.taste.negative))}</textarea></label>
+          <div class="acts2"><button type="button" id="kEditSave">기록에 저장</button><button type="button" class="ghost" id="kEditOff">취소</button></div>
+          <p class="hint">이 그림의 기록만 바뀜. 그림 파일은 그대로. ‘다시 뽑기’·‘프롬프트만 칸에’가 고친 글을 씀.</p></div>`
+          : `${field("scene", "그림", r.scene)}<div class="acts2"><button type="button" class="ghost mini" id="kEdit">프롬프트 고치기</button></div>`}
         ${r.chars?.length ? `<div class="kf"><div class="kfh"><span>인물별</span></div><p class="kfv">${r.chars.map((c, i) => `${i + 1}. ${esc(c.text)}${Number.isInteger(c.pos) ? ` (칸 ${c.pos + 1})` : ""}`).join("<br>")}</p></div>` : ""}
         ${field("style", "화풍·작가", r.style)}
         ${sec("kmore", "빼는 것 · 생성 값", `시드 ${r.seed ?? "모름"}`, `${field("negative", "빼는 것", r.negative)}<div class="kf"><div class="kfh"><span>값</span></div><p class="kfv">${vals}</p></div>`)}
@@ -2783,7 +2860,7 @@ const SCREENS = {
     for (const r of kept) { const g = dayKey(r.at); if (groups.at(-1)?.g === g) groups.at(-1).list.push(r); else groups.push({ g, list: [r] }); }
     const sel = ui.ksel;
     const addBtn = sel
-      ? `<div class="kbar"><b id="kselN">${sel.size}장 고름</b><button type="button" class="ghost sm" id="kAll">${sel.size === kept.length ? "전부 풀기" : "전부"}</button><button type="button" class="ghost sm" id="kSave">저장</button><button type="button" class="ghost sm danger" id="kDel">지우기</button><button type="button" class="ghost sm" id="kOff">취소</button></div>`
+      ? `<div class="kbar"><b id="kselN">${sel.size}장 고름</b><button type="button" class="ghost sm" id="kAll">${sel.size === kept.length ? "전부 풀기" : "전부"}</button><button type="button" class="ghost sm" id="kSave">저장</button><button type="button" class="ghost sm" id="kZip">zip으로</button><button type="button" class="ghost sm danger" id="kDel">지우기</button><button type="button" class="ghost sm" id="kOff">취소</button></div>`
       : `<input id="inFile" type="file" accept="image/*" multiple hidden><div class="acts2 ktop"><button type="button" class="ghost sm" id="kOn">고르기</button><button type="button" class="ghost sm" id="inAdd">＋ 받은 그림 넣기</button></div>`;
     const find = kept.length > 6 ? `<input id="kq" type="search" placeholder="프롬프트 낱말·시드로 찾기" value="${esc(ui.kq || "")}" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="보관함에서 찾기"><p class="hint" id="kqN" hidden></p>` : "";
     return `${addBtn}${find}${groups.map(({ g, list }, gi) => `<h2 class="kday">${esc(g)} <small>${list.length}장</small>${sel ? `<button type="button" class="ghost mini" data-kday="${gi}">이 날 전부</button>` : ""}</h2><div class="kgrid ${sel ? "picking" : ""}" data-kg="${gi}">${list.map((r) =>
@@ -3051,7 +3128,13 @@ function wireDict() {
   if (!tags && tagsState !== "loading") { tagsState = ""; loadTags().then(upd); upd(); }
   $("dstatus")?.addEventListener("click", (e) => { if (e.target.closest("[data-dretry]")) { tags = null; tagsState = ""; loadTags().then(upd); upd(); } });
   on("dq", "input", (e) => { ui.dq = e.target.value; const r = $("dres"); if (r) r.innerHTML = dictResults(); });
-  $("dres")?.addEventListener("click", (e) => {
+  $("dres")?.addEventListener("click", async (e) => {
+    if (e.target.closest("#dDan")) {
+      const q = ui.dq.trim(); ui.dDan = { q, text: "단부루에서 찾는 중…" }; upd();
+      const dan = await danbooruFind(q);
+      ui.dDan = { q, text: dan.err ? dan.err : `${dan.alias ? `별칭: ${q} → ${dan.alias} · ` : ""}${dan.deprecated ? `단부루에서 안 쓰는 태그${dan.wiki?.length ? ` → ${dan.wiki.join(" 또는 ")}` : ""} · ` : ""}${dan.hits.length ? dan.hits.map(([t, n]) => `${t}(${n.toLocaleString("ko-KR")})`).join(", ") : "단부루에도 없음"}` };
+      return upd();
+    }
     const add = e.target.closest("[data-dadd]"), nw = e.target.closest("[data-dnew]");
     if (add) {
       const before = JSON.stringify(d.draft.slots), lock = d.draft.seedLock;
@@ -3533,6 +3616,7 @@ function wire(name, arg, seq) {
       a.addEventListener("contextmenu", (e) => { e.preventDefault(); if (ui.ksel) return; ui.ksel = new Set([a.dataset.thumb]); render(); });
     });
     on("kSave", "click", () => { const ids = [...ui.ksel]; if (!ids.length) return toast("고른 그림이 없음"); saveKeptMany(ids); });
+    on("kZip", "click", () => { const ids = [...ui.ksel]; if (!ids.length) return toast("고른 그림이 없음"); exportImages(ids); });
     on("kDel", "click", () => { const ids = [...ui.ksel]; if (!ids.length) return toast("고른 그림이 없음"); if (confirm(`고른 ${ids.length}장을 보관함에서 지움.`)) removeKeptMany(ids); });
   }
   if (name === "keep" && arg) {
@@ -3576,6 +3660,23 @@ function wire(name, arg, seq) {
       location.hash = "#/gen";
     });
     on("share", "click", () => blob && shareImage(blob, rec));
+    // 2026-11-27 사용자: 보관함에서 바로 프롬프트를 바꾸기. 칸에 넣기는 설정은 그대로 두고 프롬프트(칸·이번 빼는 것·인물별)만.
+    on("kUse", "click", () => {
+      const before = snapBlocks();
+      d.draft.slots = rec.slots ? normSlots(rec.slots) : normSlots(null, rec.scene); syncScene(); d.draft.seedLock = false;
+      d.draft.neg = typeof rec.nd === "string" ? rec.nd : tagsMinus(rec.negative || "", d.taste.negative);
+      d.draft.chars = (rec.chars || []).map((c) => ({ id: crypto.randomUUID(), text: c.text, neg: c.neg || "", pos: Number.isInteger(c.pos) ? c.pos : null }));
+      store.persist();
+      location.hash = "#/gen";
+      toast("그 그림 프롬프트를 칸에 넣음 (설정은 그대로)", () => restoreBlocks(before));
+    });
+    on("kEdit", "click", () => { ui.kedit = rec.id; render(); });
+    on("kEditOff", "click", () => { ui.kedit = null; render(); });
+    on("kEditSave", "click", () => {
+      const sc = tidy($("kScene").value), nd = tidy($("kNeg").value);
+      rec.scene = sc; rec.slots = parseSceneBlock(sc); rec.nd = nd; rec.negative = joinTags([d.taste.negative, nd]);
+      ui.kedit = null; store.save(); toast("이 그림의 기록을 고침");
+    });
     const label = `보관함 그림 (시드 ${rec?.seed ?? "모름"})`;
     on("keepI2i", "click", async () => {
       if (!blob) return toast("그림을 아직 못 읽음");
