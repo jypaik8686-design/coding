@@ -1508,7 +1508,7 @@ function refsText(full = true) {
 function personText() {
   const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
   const now = list.filter((e) => chipOn(e.p)).map((e) => e.p.name);
-  return `\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
+  return `\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
 }
 function fullPersona(sent, libFull = true) {
   const d = store.data;
@@ -1705,10 +1705,16 @@ function showBlock(b) {
   }).join("\n");
 }
 
+// 2026-11-27(사용자: 생성 설정·시드도 비서가): JSON이 아니어도 `키: 값` 줄로 읽는다. seed(숫자면 고정, random이면 풀기), width·height(64 단위, 크기 ‘직접’),
+// quality(품질 태그 붙임), bg(배경 깔기), model(v5·v4.5)을 더 받는다.
 function applyParams(text) {
   let j;
-  try { j = JSON.parse(text); } catch { return null; }
-  const s = store.data.settings, done = [];
+  try { j = JSON.parse(text); } catch {
+    j = {};
+    for (const line of String(text).split("\n")) { const m = line.match(/^\s*"?([a-z_]+)"?\s*[:=]\s*"?([^",]+)"?,?\s*$/i); if (m) j[m[1].toLowerCase()] = /^(true|false)$/i.test(m[2]) ? /^true$/i.test(m[2]) : /^-?\d+(\.\d+)?$/.test(m[2].trim()) ? Number(m[2]) : m[2].trim(); }
+    if (!Object.keys(j).length) return null;
+  }
+  const s = store.data.settings, d = store.data, done = [];
   const set = (k, v, label) => { s[k] = v; done.push(`${label} ${v}`); };
   if (SAMPLERS[j.sampler]) set("sampler", j.sampler, "샘플러");
   if (j.steps != null) set("steps", clamp(j.steps, 1, MAX_STEPS, 28), "스텝");
@@ -1717,6 +1723,17 @@ function applyParams(text) {
   if (NOISES.includes(j.noise_schedule)) set("noise", j.noise_schedule, "노이즈 스케줄");
   if (typeof j.variety === "boolean") set("variety", j.variety, "Variety+");
   if (SIZES[j.size]) set("size", j.size, "크기");
+  if (j.width != null || j.height != null) {
+    const r64 = (v, dv) => Math.round(clamp(v, 64, 1536, dv) / 64) * 64;
+    s.customW = r64(j.width ?? s.customW, 832); s.customH = r64(j.height ?? s.customH, 1216); s.size = "직접"; done.push(`크기 ${s.customW}×${s.customH}`);
+  }
+  if (j.seed != null) {
+    if (/^(random|무작위|none|null)$/i.test(String(j.seed))) { d.draft.seedLock = false; d.draft.seed = null; done.push("시드 무작위"); }
+    else if (Number.isInteger(Number(j.seed)) && Number(j.seed) >= 0 && Number(j.seed) <= 4294967295) { d.draft.seed = Number(j.seed); d.draft.seedLock = true; done.push(`시드 ${j.seed} 고정`); }
+  }
+  if (typeof j.quality === "boolean") set("quality", j.quality, "품질 태그");
+  if (typeof j.bg === "boolean") { s.bgOn = j.bg; done.push(`배경 깔기 ${j.bg ? "켬" : "끔"}`); }
+  if (j.model != null) { const m = String(j.model).toLowerCase(); const id = /4\.?5|v4/.test(m) ? "nai-diffusion-4-5-full" : /5/.test(m) ? "nai-diffusion-5-full" : MODELS[j.model] ? j.model : ""; if (id) { s.model = id; done.push(`모델 ${MODELS[id].이름}`); } }
   return done;
 }
 
@@ -1734,7 +1751,7 @@ function applyChar(text) {
 }
 
 // 블록을 넣기 전 값을 통째로 기억해 두고 ‘되돌리기’로 돌린다. 블록이 건드리는 것: 이번 그림, 취향 그림체, 빼는 것, 인물 칸, 생성 설정.
-const SETTING_KEYS = ["sampler", "steps", "scale", "cfgRescale", "noise", "variety", "size"];
+const SETTING_KEYS = ["sampler", "steps", "scale", "cfgRescale", "noise", "variety", "size", "customW", "customH", "quality", "bgOn", "model"];
 function snapBlocks() {
   const d = store.data;
   return JSON.stringify({ slots: d.draft.slots, lock: d.draft.seedLock, chars: d.draft.chars, style: d.taste.style, neg: d.taste.negative, nd: d.draft.neg, seed: d.draft.seed, refs: refs.map((r) => [r.id, r.on, r.strength, r.info]), rm: d.settings.refMode, set: Object.fromEntries(SETTING_KEYS.map((k) => [k, d.settings[k]])) });
