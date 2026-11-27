@@ -67,6 +67,7 @@ const SHAPE = () => ({
     token: "", model: "nai-diffusion-5-full", customModel: "", size: "세로", steps: 28, scale: 5, quality: true,
     aiKey: "", aiModel: MODEL_CHOICES[0], aiCustom: "", qualityText: "",
     sampler: "k_euler_ancestral", noise: "karras", cfgRescale: 0, variety: false, customW: 832, customH: 1216, refMode: "vibe",
+    bgOn: false, // 배경 깔기. 끄면 배경 칸 대신 simple background (2026-11-27)
     autoMemo: false, // 최적화판: 켜면 서랍에 새 그림을 넣을 때 비서가 한 번 보고 메모를 남긴다 (그 그림이 구글로 한 번 감). 2026-11-27 사용자: 처음엔 끔 (노출 그림이 구글 차단에 걸림)
     memoOff1: 0, // 옛 데이터의 autoMemo를 한 번만 껐다는 표시
   },
@@ -365,8 +366,10 @@ const qDefault = (s) => (MODELS[modelId(s)] || MODELS["nai-diffusion-5-full"]).�
 const qText = (s) => tg(s.qualityText) || qDefault(s);
 function syncScene() { store.data.draft.scene = sceneOf(store.data.draft.slots); }
 // NovelAI로 보낼 글: 1 인원수 → 2 화풍·작가 → 3 특징 → 4 의상 → 5 포즈 → 6 배경 → 그 밖에 → 7 품질. 같은 태그는 먼저 나온 것만.
+// 배경: 처음엔 안 그린다(2026-11-27 사용자). ‘배경 깔기’(settings.bgOn)를 켜야 6순위 칸이 간다. 끄면 칸 글은 남겨 두고 BG_OFF를 대신 보낸다.
+const BG_OFF = "simple background, white background";
 function composePrompt(sl, style, s) {
-  return joinTags([sl.count, style, sl.traits, sl.outfit, sl.pose, sl.bg, sl.rest, s.quality ? qText(s) : ""]);
+  return joinTags([sl.count, style, sl.traits, sl.outfit, sl.pose, s.bgOn ? sl.bg : BG_OFF, sl.rest, s.quality ? qText(s) : ""]);
 }
 
 // ── 참고 그림 (V4.5 바이브 트랜스퍼) ─────────────────────────
@@ -906,7 +909,7 @@ async function generate() {
     id: crypto.randomUUID(), scene: sceneOf(d.draft.slots), slots: { ...d.draft.slots }, style: tidy(d.taste.style), negative: joinTags([d.taste.negative, d.draft.neg]),
     seed, model: modelId(s), w, h, steps: clamp(s.steps, 1, MAX_STEPS, 28), scale: clamp(s.scale, 0, 10, 5), at: Date.now(), verdict: null,
     sampler: SAMPLERS[s.sampler] ? s.sampler : "k_euler_ancestral", noise: NOISES.includes(s.noise) ? s.noise : "karras",
-    cr: clamp(s.cfgRescale, 0, 1, 0), vb: !!s.variety,
+    cr: clamp(s.cfgRescale, 0, 1, 0), vb: !!s.variety, bg: !!s.bgOn,
   };
   if (used.length) { rec.refs = used.map((r) => ({ s: r.strength, i: r.info, id: r.id, n: r.name })); rec.mode = plan; } // id: 다시 뽑기 때 서랍에서 같은 그림을 찾아 켠다
   if (chars.length) rec.chars = chars;
@@ -1452,7 +1455,7 @@ function stateText(sent = new Set()) { // sent: 이번 메시지에 그림으로
   const lines = [
     `모델 ${modelId(s)}: 참고 그림 ${plan ? (plan === "vibe" ? "바이브" : "정밀 참조") : "안 됨"}, 인물별 프롬프트 ${supportsChars(s) ? "됨" : "안 됨"}`,
     `[고정] 품질 태그 ${s.quality ? "붙음" : "꺼짐"} / 그림체: ${v(taste.style)} / count: ${v(sl.count)} / traits: ${v(sl.traits)} / 기본 Undesired ${negN}개`,
-    `[장면] outfit: ${v(sl.outfit)} / pose: ${v(sl.pose)} / bg: ${v(sl.bg)}${tg(sl.rest) ? ` / 그 밖에: ${tg(sl.rest)}` : ""} / 이번 빼는 것: ${v(draft.neg)}`,
+    `[장면] outfit: ${v(sl.outfit)} / pose: ${v(sl.pose)} / bg: ${v(sl.bg)}${s.bgOn ? "" : " (배경 깔기 꺼짐: 배경 대신 simple background가 감. 배경을 바꾸라고 하면 bg 줄을 쓰고 사용자에게 ‘배경 깔기’를 켜라고 한 줄)"}${tg(sl.rest) ? ` / 그 밖에: ${tg(sl.rest)}` : ""} / 이번 빼는 것: ${v(draft.neg)}`,
     chars ? `인물별 프롬프트:\n${chars}` : "",
     `설정: ${s.sampler}, ${s.steps}스텝, 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, ${s.noise}${s.variety ? ", Variety+" : ""}, ${w}x${h}, 시드 ${draft.seedLock && Number.isInteger(draft.seed) ? `${draft.seed} 고정` : "무작위"}`,
     plan ? `켠 참고 그림: ${on.length ? on.map((r) => `#${refCode(r)} 강도 ${r.strength} 정보량 ${r.info}`).join(", ") : "없음"}` : "",
@@ -1911,6 +1914,7 @@ function refInner() {
         <label class="line"><input type="checkbox" data-rai="${r.id}" ${r.ai !== false ? "checked" : ""}> 비서가 써도 됨</label>
         ${r.encOnly ? "" : `<label>메모 <span class="hint">비서에게 그림 대신 가는 글${memoStale(r) ? " · 옛 그림의 메모임" : r.memoBy === "user" ? " · 직접 고침" : ""}</span><textarea rows="2" data-rmemo="${r.id}" autocomplete="off" placeholder="${r.ai === false ? "비서가 못 쓰는 그림이라 메모 없음" : "아직 없음. ‘비서가 보기’를 누르면 한 번 보고 적음"}">${esc(r.memo || "")}</textarea></label>
         <div class="acts2">${r.ai === false ? "" : `<button type="button" class="ghost sm" data-rlook="${r.id}" ${memoJob ? "disabled" : ""}>${r.memo ? "비서가 다시 보기" : "비서가 보기"}</button>`}<button type="button" class="ghost sm" data-rswap="${r.id}">그림 바꾸기</button></div>`}
+        ${r.meta?.prompt ? `<button type="button" class="line" data-rprompt="${r.id}">이 그림 프롬프트 넣기</button>` : ""}
         <button type="button" class="ghost" data-roff="${r.id}">끄기 (서랍에 남음)</button>
       </div>
     </li>`;
@@ -2167,7 +2171,7 @@ function paddForm() {
       <div class="acts2"><button type="button" id="paddSave">저장</button><button type="button" class="ghost" id="paddCancel">취소</button></div>
     </div>`;
 }
-const CHIP_ONE = new Set(["인물", "의상", "자세·구도"]); // 하나만 켜지고, 누르면 그 칸을 바꿔 넣는다(덧붙이지 않음, 2026-11-27 사용자: 편의성). 그림체·작가·빼는 것은 섞어 쓰므로 더한다
+const CHIP_ONE = new Set(["인물", "의상", "자세·구도", "그림체"]); // 하나만 켜지고, 누르면 그 칸을 바꿔 넣는다(덧붙이지 않음, 2026-11-27 사용자: 편의성). 그림체·작가·빼는 것은 섞어 쓰므로 더한다
 const chipTarget = (p) => (p.to === "style" ? store.data.taste.style : p.to === "neg" ? store.data.draft.neg : store.data.draft.slots[SLOT_KEYS.includes(p.slot) ? p.slot : "rest"]);
 const chipBody = (p) => (p.to === "scene" && p.slot === "traits" ? splitCount(personParts(p).fixed).rest : p.text); // 인물은 고정 부분만, 인원수 태그를 빼고 견준다(의상은 바뀌어도 같은 인물)
 // 켜짐 = 칩의 태그가 칸에 다 들어 있음. 단, 태그가 전부 다른 칩 안에 들어 있는 칩(Heavy ⊂ Human Focus)은 그 큰 칩 때문에 켜져 보이므로,
@@ -2236,7 +2240,8 @@ function chipToggle(key) {
   else {
     const out = [];
     if (CHIP_ONE.has(kind)) for (const e of presetEntries(kind)) if (e.key !== key && !e.hidden && chipOn(e.p)) { chipOff(e.p); out.push(e.p.name); }
-    usePreset(p, CHIP_ONE.has(kind) ? "replace" : "add");
+    if (kind === "그림체") { const art = tg(d.taste.style).split(", ").filter((t) => t && isArtist(t)); d.taste.style = mergeTags(p.text, art.join(", "), false); } // 그림체만 바꾸고 작가 태그는 남긴다 (2026-11-27)
+    else usePreset(p, CHIP_ONE.has(kind) ? "replace" : "add");
     if (kind === "인물" && tidy(p.neg || "")) usePreset(p, "neg");
     d.draft.chipsOn = [...(d.draft.chipsOn || []).filter((x) => x !== key), key].slice(-40);
     autoRef(key, p);
@@ -2376,7 +2381,7 @@ function slotsPanel() {
     <div class="scenehead"><b>장면</b><small>매번 바꾸는 줄. 비서는 이 줄만 바꿔 줌</small></div>
     ${row("outfit", "4순위", "의상·장신구", "", sl.outfit, "black suit, necktie")}
     ${row("pose", "5순위", "자세·시선·구도", "", sl.pose, "crossed arms, from below, upper body")}
-    ${row("bg", "6순위", "장소·조명·분위기", "", sl.bg, "palace, backlighting")}
+    <div class="slot${flashKeys.has("bg") ? " flash" : ""}${s.bgOn ? "" : " bgoff"}">${head("bg", "6순위", "장소·조명·분위기", `<button type="button" class="chip ${s.bgOn ? "on" : ""}" id="bgOn" aria-pressed="${!!s.bgOn}">${s.bgOn ? "배경 깔기 켬" : "배경 깔기"}</button>${undo("bg")}`)}${area("bg", sl.bg, "palace, backlighting")}${s.bgOn ? "" : `<p class="hint">꺼짐: 이 칸은 안 가고 ${BG_OFF}로 그림</p>`}${chipRow("bg")}</div>
     ${tg(sl.rest) ? row("rest", "그 밖에", "칸을 나누기 전의 글", "", sl.rest, "") : ""}
     <div class="slot${flashKeys.has("neg") ? " flash" : ""}">${head("neg", "Undesired", "이번 장면만")}
       ${area("neg", d.draft.neg, "earrings, gloves")}${chipRow("neg")}</div>
@@ -2403,7 +2408,10 @@ function sceneSum() {
   trackSlots(); trackSlots.done = true;
   const sl = store.data.draft.slots;
   const item = (k, name) => `<button type="button" class="${flashKeys.has(k) ? "flash" : ""}" data-jump="${k}"><small>${name}</small><span>${esc(tg(sl[k])) || "비어 있음"}</span></button>`;
-  return `<nav class="scenesum" aria-label="지금 장면 (누르면 그 칸으로)">${item("outfit", "의상")}${item("pose", "자세")}${item("bg", "배경")}</nav>`;
+  const bg = store.data.settings.bgOn ? item("bg", "배경") : `<button type="button" data-jump="bg"><small>배경</small><span>안 그림 (흰 배경)</span></button>`;
+  const styles = presetEntries("그림체").filter((e) => !e.hidden && tidy(e.p.text || ""));
+  const sbar = styles.length ? `<div class="pchips stylebar" role="group" aria-label="그림체 바꾸기"><span class="pkl">그림체</span>${styles.map((e) => `<button type="button" class="chip ${chipOn(e.p) ? "on" : ""}" data-pchip="${esc(e.key)}" aria-pressed="${chipOn(e.p)}">${esc(e.p.name) || "이름 없음"}</button>`).join("")}</div>` : "";
+  return `<nav class="scenesum" aria-label="지금 장면 (누르면 그 칸으로)">${item("outfit", "의상")}${item("pose", "자세")}${bg}</nav>${sbar}`;
 }
 function promptBlock() {
   if (!trackSlots.done) trackSlots(); trackSlots.done = false;
@@ -2414,6 +2422,7 @@ function promptBlock() {
     <button type="button" class="pfold" data-pfold="0" aria-label="프롬프트 펼치기"><span>${esc(withComma(full)) || "(비어 있음)"}</span></button>`;
 }
 function wireSlots() {
+  on("bgOn", "click", () => { const s = store.data.settings; s.bgOn = !s.bgOn; toast(s.bgOn ? "배경 깔기 켬: 배경 칸이 그림에 감" : `배경 깔기 끔: ${BG_OFF}로 그림`); store.save(); });
   document.querySelectorAll("[data-pfold]").forEach((b) => b.addEventListener("click", () => { store.data.settings.foldPrompt = b.dataset.pfold === "1"; store.save(); }));
   const d = store.data, s = d.settings;
   const prev = () => {
@@ -3162,6 +3171,16 @@ function wire(name, arg, seq) {
     on("addRef", "click", () => $("refFile").click());
     on("refFile", "change", (e) => { const f = [...e.target.files]; e.target.value = ""; addRefs(f); });
     document.querySelectorAll("[data-roff]").forEach((el) => el.addEventListener("click", () => { const r = byId(el, "roff"); if (!r) return; r.on = false; saveRef(r); render(); }));
+    // 서랍 그림에 든 NovelAI 프롬프트를 칸에 넣는다 (2026-11-27 사용자). 고정 칸에 이미 있는 품질·그림체 태그는 빼고, 칸마다 짐작해 이번 그림을 통째로 바꾼다. 빼는 것·인물별도. 되돌리기 한 번에 돌아간다.
+    document.querySelectorAll("[data-rprompt]").forEach((el) => el.addEventListener("click", () => {
+      const r = byId(el, "rprompt"); if (!r?.meta?.prompt) return;
+      const before = snapBlocks(), done = ["그림 칸"];
+      applyBlock("scene", sceneOnly(r.meta.prompt), "ref");
+      if (tidy(r.meta.uc || "")) { d.draft.neg = tagsMinus(r.meta.uc, d.taste.negative); done.push("빼는 것"); }
+      if (Array.isArray(r.meta.chars) && r.meta.chars.length && supportsChars(d.settings)) { d.draft.chars = r.meta.chars.slice(0, MAX_CHARS).map((c) => ({ id: crypto.randomUUID(), text: tidy(typeof c === "string" ? c : c?.text || ""), neg: "", pos: null, from: "ref" })).filter((c) => c.text); if (d.draft.chars.length) done.push(`인물 ${d.draft.chars.length}명`); }
+      store.save();
+      toast(`‘${r.name.slice(0, 20)}’ 프롬프트를 넣음: ${done.join(" · ")}`, () => restoreBlocks(before));
+    }));
     document.querySelectorAll("[data-rpick]").forEach((el) => el.addEventListener("click", () => {
       // 서랍 격자에 켠 것도 같이 있어서 누르는 대로 켜지고 꺼진다 (2026-11-21, 사용자: 여러 장을 한 번에 켜고 끄게)
       const r = byId(el, "rpick"); if (!r) return;
