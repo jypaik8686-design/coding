@@ -1942,7 +1942,19 @@ function applyBlock(kind, v, from = "") {
 }
 
 // 비서 한 메시지를 HTML로. i는 chat 안의 번호. 블록 버튼의 data-blk는 "i:j"
+// 앱이 비서에게 돌려준 태그 검색 결과를 사용자도 보고 눌러 넣게 (2026-11-27 사용자: 사전을 나도 보게)
+function searchCard(text) {
+  const seen = new Set(), chips = [];
+  const push = (t) => { t = t.trim().replace(/^[‘'"]|[’'"]$/g, ""); const k = t.toLowerCase(); if (!t || t.length > 40 || /[가-힣]/.test(t) || seen.has(k)) return; seen.add(k); chips.push(t); };
+  for (const m of text.matchAll(/([a-z0-9][a-z0-9 _'.\-]*?)\((\d[\d,]*)\)/gi)) push(m[1]);
+  for (const m of text.matchAll(/→\s*([^/|\n]+)/g)) m[1].split(",").forEach((x) => push(x.replace(/\(.*$/, "")));
+  const qs = [...text.matchAll(/^‘([^’]+)’:/gm)].map((x) => x[1]);
+  return `<div class="msg me srch"><details><summary>비서에게 돌려준 태그 검색 결과${qs.length ? `: ${esc(qs.join(", "))}` : ""} <small>(${chips.length}개, 눌러서 칸에 넣기)</small></summary>
+    <div class="chips">${chips.map((t) => `<button type="button" class="chip" data-tagadd="${esc(t)}">${esc(t)}</button>`).join("")}</div>
+    <pre class="srchraw">${esc(text.replace(/^\[태그 검색 결과\][^\n]*\n/, "").replace(/\n이 결과로[\s\S]*$/, ""))}</pre></details></div>`;
+}
 function msgHtml(m, i) {
+  if (m.role === "user" && m.text.startsWith("[태그 검색 결과]")) return searchCard(m.text);
   if (m.role === "user") {
     const att = Array.isArray(m.att) ? m.att.map((a) => `<small class="att">그림 #${esc(a.c)}${a.n ? ` ${esc(a.n)}` : a.k === "now" ? " 방금 그림" : a.k === "file" ? " 고른 사진" : ""} ${a.re ? "축소본" : "처음 한 번"} 첨부</small>`).join("") : "";
     return `<div class="msg me">${esc(m.text)}${att}${m.img ? `<small class="att">${m.img === "file" ? "사진 첨부" : "방금 그림 첨부"}</small>` : ""}${m.rn ? `<small class="att">서랍 그림 ${m.rn}장 첨부</small>` : ""}${m.doc ? `<small class="att">파일 첨부: ${esc(m.doc)}</small>` : ""}</div>`;
@@ -2531,8 +2543,8 @@ function dictResults() {
   const none = `<p class="hint">${rows.length ? "" : tags ? "찾은 것이 없음. " : "기본 사전을 못 받아서 내 단어만 찾음. "}‘${esc(q)}’를 내 단어로 직접 더할 수 있음.</p><button type="button" class="ghost sm" data-dnew="${esc(q)}">‘${esc(q)}’ 내 단어로 더하기</button>`;
   return rows.map((r) => `<div class="drow"><b>${esc(r.word)}</b>${r.own ? " <small>내 단어</small>" : ""}<div class="chips">${r.tags.map((t) => `<button type="button" class="chip" data-dadd="${esc(t)}">${esc(t)} <small>${tags && !r.own ? fmtN(tags.n[t]).replace("게시물 ", "") : tags ? fmtN(tags.n[t.toLowerCase()]).replace("게시물 ", "") : ""}</small></button>`).join("")}</div></div>`).join("") + none + extra;
 }
-function dictPanel() {
-  const list = store.data.userDict.map((e) => {
+function dictList() {
+  return store.data.userDict.map((e) => {
     const ts = splitTags(e.tags);
     const info = tags && ts.length ? ts.map((t) => `${esc(t)}(${fmtN(tags.n[t.toLowerCase()])})`).join(" · ") : "";
     return `
@@ -2543,7 +2555,18 @@ function dictPanel() {
         <button type="button" class="ghost sm" data-ddel="${esc(e.id)}">지우기</button>
       </div>`;
   }).join("");
-  const body = `
+}
+function dictPanel() { return sec("dict", "단어 사전", `내 단어 ${store.data.userDict.filter((e) => e.word.trim()).length}개`, dictBody()); }
+// 사전·검색 결과의 태그 하나를 짐작한 칸에 더한다(전에는 늘 ‘그 밖에’). 되돌리기 9초.
+function addTagSmart(tag) {
+  const d = store.data, k = guessSlot(tag), before = JSON.stringify(d.draft.slots), lock = d.draft.seedLock;
+  d.draft.slots[k] = mergeTags(d.draft.slots[k], tag, false); syncScene(); d.draft.seedLock = false;
+  toast(`‘${tag}’를 ${SLOT_NAMES[k] || "그 밖에"} 칸에 더함`, () => { d.draft.slots = JSON.parse(before); syncScene(); d.draft.seedLock = lock; store.save(); });
+  store.persist();
+}
+// 사전 본문: 비서 탭 ‘단어 사전’과 뽑기 화면 ‘태그 사전’이 같이 쓴다 (2026-11-27 사용자: 사전을 나도 보게, 통합)
+function dictBody(list = dictList()) {
+  return `
     <p class="hint" id="dstatus">${dictStatus()}</p>
     <label for="dq">사전에서 찾기</label>
     <input id="dq" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="금발, blonde, 팔짱 …" value="${esc(ui.dq)}">
@@ -2552,7 +2575,6 @@ function dictPanel() {
     <p class="hint">여기 적은 낱말이 비서에게 한 말에 들어 있으면 그 태그가 사전 후보로 먼저 붙음. 숫자는 기본 사전의 게시물 수(1000 미만이면 잘 안 먹을 수 있음).</p>
     ${list || `<p class="hint">아직 없음.</p>`}
     <button type="button" class="ghost" id="dadd" ${store.data.userDict.length >= DICT_MAX ? "disabled" : ""}>＋ 단어 더하기</button>`;
-  return sec("dict", "단어 사전", `내 단어 ${store.data.userDict.filter((e) => e.word.trim()).length}개`, body);
 }
 
 // ── 비서 지시문 고치기 ───────────────────────────────────────
@@ -2945,6 +2967,7 @@ const SCREENS = {
         ["i2i", "이미지→이미지", draft.i2i.on && src ? "켬" : "", i2iInner],
         ["adv", "생성 설정·시드", `${s.steps}스텝 · 강도 ${s.scale}`, advInner],
         ["preset", "프리셋", "", presetInner],
+        ["dict", "태그 사전", "", () => dictBody()],
       ])}`;
   },
 
@@ -3237,6 +3260,7 @@ function wireAsk() {
   // 넣은 블록 표시: chat[i].done에 블록 번호를 남긴다. 되돌리면 넣기 전 표시로 돌린다.
   const fromOf = (i) => `m:${d.chat[i]?.at || i}`;
   const markDone = (i, js) => { const m = d.chat[i]; if (!m) return null; const was = Array.isArray(m.done) ? [...m.done] : []; m.done = [...new Set([...was, ...js])]; return () => { m.done = was; }; };
+  document.querySelectorAll("[data-tagadd]").forEach((b) => b.addEventListener("click", () => addTagSmart(b.dataset.tagadd)));
   document.querySelectorAll("[data-pplall]").forEach((el) => el.addEventListener("click", () => {
     const i = +el.dataset.pplall, m = d.chat[i]; if (!m) return;
     const ppl = peopleOf(m.text); if (ppl.length < 2) return;
@@ -3319,12 +3343,8 @@ function wireDict() {
       return upd();
     }
     const add = e.target.closest("[data-dadd]"), nw = e.target.closest("[data-dnew]");
-    if (add) {
-      const before = JSON.stringify(d.draft.slots), lock = d.draft.seedLock;
-      d.draft.slots.rest = mergeTags(d.draft.slots.rest, add.dataset.dadd, false); syncScene(); d.draft.seedLock = false;
-      toast(`‘${add.dataset.dadd}’를 ‘그 밖에’ 칸에 더함`, () => { d.draft.slots = JSON.parse(before); syncScene(); d.draft.seedLock = lock; store.save(); });
-      store.persist();
-    } else if (nw) {
+    if (add) addTagSmart(add.dataset.dadd);
+    else if (nw) {
       if (d.userDict.length >= DICT_MAX) return toast(`내 단어는 ${DICT_MAX}개까지`);
       d.userDict.unshift({ id: crypto.randomUUID(), word: nw.dataset.dnew.slice(0, 40), tags: "" });
       ui.open.dict = true; store.save();
@@ -3476,6 +3496,7 @@ function wire(name, arg, seq) {
     document.querySelectorAll("details[data-sec]").forEach((el) => el.addEventListener("toggle", () => { ui.open[el.dataset.sec] = el.open; }));
     wireAsk();
     wireSlots();
+    if ($("dq")) wireDict(); // 뽑기 화면 ‘태그 사전’을 열었을 때만
     on("seedLock", "change", (e) => { d.draft.seedLock = e.target.checked; store.save(); });
     on("seed", "change", (e) => {
       const v = e.target.value.trim();
