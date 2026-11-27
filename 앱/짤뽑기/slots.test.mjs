@@ -2,6 +2,7 @@
 // 2026-11-27 사용자 신고 "프롬프트 분류가 안 되고 꼬임"에서 나온 꼴을 그대로 쓴다.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { parseSceneBlock, autoSlots, guessSlot, plainTags, setSlotData, setSlotMemo, learnSlots, splitPerson, sceneKeys } from "./slots.js";
 
 test("정상 꼴은 그대로", () => {
@@ -67,6 +68,19 @@ test("칸 정보 파일이 틀린 것은 굳은 규칙이 먼저, 그 밖에로 
     };
     for (const [k, ts] of Object.entries(want)) for (const t of ts) assert.equal(guessSlot(t), k, t);
   } finally { setSlotData({}); }
+});
+
+test("많이 쓰는 태그(단부루 위 1500개)가 거의 다 칸을 찾는다: 관계·소품·효과·종족·무기·동작 (2026-11-27 신고 \"태그 미분류 너무 많다\")", () => {
+  const want = {
+    count: ["multiple girls", "couple", "siblings", "age difference", "family"],
+    traits: ["fox girl", "{cat girl}", "black nails", "colored sclera", "child", "white fur", "vampire", "inkling"],
+    outfit: ["highleg", "backpack", "single thighhigh", "red capelet", "assault rifle", "partially unbuttoned", "red scrunchie"],
+    pose: ["mouth hold", "laughing", "playing instrument", "lap pillow", "on ground", "aiming at viewer"],
+    bg: ["pillow", "book", "4koma", "musical note", "thought bubble", "spoken ellipsis", "christmas", "fishing rod", "photo (object)", "potted plant", "?"],
+    rest: ["watermark", "artist name", "twitter username", "virtual youtuber"],
+  };
+  setSlotData(JSON.parse(readFileSync(new URL("./slots.json", import.meta.url), "utf8")).slots); // 앱과 같게 칸 정보 파일을 깔고 본다
+  try { for (const [k, ts] of Object.entries(want)) for (const t of ts) assert.equal(guessSlot(t), k, t); } finally { setSlotData({}); }
 });
 
 test("plainTags는 칸 이름 꼴(- count:, **traits:**, 배경:)을 태그로 세지 않는다", () => {

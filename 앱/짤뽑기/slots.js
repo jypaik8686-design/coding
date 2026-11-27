@@ -36,11 +36,31 @@ const STRONG = [
   ["traits", /^(collarbone|cleavage|navel|stomach|belly|nipples|armpits|thighs|thick thighs|wide hips|sweaty|shiny skin)$/],
   ["bg", /^(depth of field|bokeh|lens flare|chromatic aberration|motion blur|film grain|blurry|blurry background|blurry foreground)$| (background|scenery|cafe|shop|store|restaurant|room|classroom|stadium|track|castle|city|island|street|alley|station|library|park|garden|beach|forest)$/],
 ];
+// 손으로 고른 칸 (2026-11-27 사용자: 태그 미분류 너무 많다). 단부루 게시물 수 위 3000개 가운데 칸 정보 파일과 낱말 짐작이 못 고르던 것.
+// 그림 속 물건·소품·장면 효과·컷 꼴은 배경 칸, 사람 사이 관계·여럿은 인원수 칸. 서명·워터마크 같은 메타 태그는 그 밖에로 둔다.
+const HAND_RULES = [
+  ["count", /^(multiple (girls|boys|others)|solo focus|other focus|couple|siblings|sisters|brothers|twins|brother and sister|parent and child|mother and (child|daughter|son)|father and (child|daughter|son)|age difference|height difference|size difference|dual persona|crossover|harem|group|everyone)$/],
+  ["traits", / (girl|boy)$|^(furry|furry (female|male)|child|aged (down|up)|plump|toned|androgynous|genderswap( \(.*\))?|trap|otoko no ko|crossdressing( \(.*\))?|oni|angel|demon|android|robot|cyborg|personification|animification|monster|mini person|minigirl|facial mark|colored sclera|claws|sharp fingernails|fins|single horn|antlers|antennae|multiple tails|veins|saliva|saliva trail|drooling|breath|heavy breathing|tearing up|one eye covered|sideburns|white fur|symbol in eye|skindentation|thigh gap|joints|injury|bandaged (arm|leg|head)|white streaks|red streaks|streaked hair|blood on face|scar on face|tan|tanlines)$| nails$/],
+  ["outfit", /^(highleg|denim|headgear|hood up|hood down|single thighhigh|goggles on head|backpack|handbag|pouch|drawstring|spaghetti strap|single bare shoulder|white capelet|capelet|breast pocket|crotch seam|two-sided fabric|undershirt|wrist cuffs|white wrist cuffs|name tag|id card|parallel hairclips|blue gem|forehead jewel|enmaided|military|sheath|sheathed|polearm|leash|chain|ofuda|rigging|open fly|magical girl|folding fan|hand fan|umbrella|parasol|midriff peek|on head)$/],
+  ["pose", /^(mouth hold|bound|restrained|tied up|between legs|legs together|on ground|on floor|on side|dual wielding|talking|partially submerged|covered mouth|bathing|bath|singing|playing instrument|smoking|cooking|sleeping|writing|drawing|shopping|fighting|battle)$/],
+  ["bg", /^(comic|\dkoma|sketch|chibi|chibi only|white border|outside border|letterboxed|outline|white outline|spot color|anime coloring|limited palette|\w+ theme|pixel art|3d|realistic|oekaki|style parody|cover|cover page|doujin cover|silent comic|notice lines|emphasis lines|sound effects|musical note|eighth note|thought bubble|spoken [\w ]+|\?|!|!\?|\.\.\.|\+\+\+|arrow \(symbol\)|glint|electricity|crystal|feathers|bug|butterfly|fish|snake|dragon|creature|ghost|pokemon \(creature\)|christmas|halloween|new year|valentine|science fiction|contemporary|fantasy|pillow|book|open book|phone|cellphone|smartphone|stuffed toy|stuffed animal|teddy bear|doll|character doll|box|towel|candy|lollipop|ice cream|popsicle|chocolate|apple|fruit|plate|bowl|tray|teacup|spoon|fork|chopsticks|cigarette|alcohol|can|card|card \(medium\)|paper|pen|broom|balloon|gift|gift box|ball|instrument|guitar|piano|microphone|camera|clock|cable|blanket|basket|sign|door|fence|railing|stairs|tiles|rock|sand|branch|bush|potted plant|plant|bookshelf|motor vehicle|vehicle|rose|red rose|blue rose|skull|innertube|bottle|glass|wine glass|bed sheet|cushion|computer|laptop|keyboard|television|monitor|lamp|lantern|candle|vase|food|fruit|bread|cookie|drinking glass|bag|paper bag|shopping bag|mug|cup|pocky|cherry|strawberry|banana)$/],
+];
+// 마지막 짐작 (2026-11-27): 위 낱말에 안 걸린 것을 끝 낱말·꼴로 고른다. 낱말 짐작 뒤에 보므로 이미 칸이 있는 태그는 안 바뀐다.
+const FALLBACK = [
+  ["rest", /(watermark|username|signature|logo|artist name|character name|copyright( name| notice)?|web address|page number|company name|dated)$/], // 메타 태그는 그 밖에로 남긴다
+  ["bg", /\((object|creature|animal|food|plant|vehicle|texture)\)$/],
+  ["traits", /^(inkling|octoling)$/],
+  ["count", /^(family|husband and wife|people|crowd|multiple persona)$/],
+  ["outfit", /(capelet|camisole|buruma|hakama|overalls|armband|headdress|lapels|bloomers|sundress|cutoffs|gauntlets|socks?|shoes?|soles|coattails|straps?|gem|jewel|piercing|scrunchie|emblem|rifle|gun|cannon|sword|hammer|whip|bat|weapon|scythe|axe|blade|knife|spear|lance|shield|unbuttoned|unzipped|undressed|scabbard)$/],
+  ["traits", /( fur|streaks|whiskers|markings|stitches|bruise|moles|eyeliner|sclera|sideburns)$|^(fat|skinny|pregnant|old|old man|old woman|baby|giant|giantess|amputee|tomboy|idol|witch|vampire|ninja|fairy|mermaid|merfolk|nekomata|kitsune|zombie|alien|jiangshi|bride|police|policewoman|nun|race queen|manly|humanization|animalization|extra arms|ambiguous gender|clone|skeleton|cowlick|updo|snout|pawpads|beak|dirty|deformed)$|^(prosthe|mechanical arm|single mechanical arm|head fins|alternate eye color)/],
+  ["pose", /^(?!(ring|string|clothing|building|ceiling|evening|morning|lighting|wedding|king|wing|thing|stocking|pudding|earring|sibling|bowling|swing|sling)\b)[a-z]+ing($| (?!(rod|pan|crop|wheel|key|pot|machine|glass|can|tablet|feathers|sweatdrops|doors?|star|pattern|outfits?|eyes?|stick|board|bag|room|table|chair|lines|hair|clothes|card|ring|shoes|gloves|cap|suit|dress|pool|gear)$))|(rest|pat|girl sandwich|lap pillow)$|^(under covers|in container|side-by-side|sandwiched|against glass|on \w+|head on pillow|defeat|mind control|hypnosis|recording)$/],
+  ["bg", /\((object|creature|animal|food|plant|vehicle)\)$|(fireworks|lantern|leaf|leaves|horizon|doors?|doorway|fence|pole|pillar|statue|shelf|box|bottle|bucket|teapot|sack|barrel|frame|flag|symbol|mark|rod|pan|wheel|pot|machine|glass|can|tablet|crop|star|pattern|sweatdrops|feathers)$|^(horse|fox|wolf|frog|crow|crab|penguin|starfish|bird|rabbit|cat|dog|mushroom|vines|bamboo|waves|ripples|shell|orb|coin|key|money|gold|energy|egg|rice|meat|noodles|burger|donut|dango|onigiri|carrot|pumpkin|watermelon|peach|grapes|beer|wine|tatami|torii|futon|kotatsu|bench|stool|locker|chalkboard|aircraft|airplane|motorcycle|bicycle|tank|watercraft|military vehicle|power lines|utility pole|zzz|squiggle|puff of air|air bubble|teardrop|hitodama|explosive|thorns|stick|string|tape|scroll|notebook|pencil|paintbrush|syringe|test tube|whistle|cowbell|anchor|crack|transparent|hot|broken|birthday|anniversary|merry christmas|thank you|chinese zodiac|jack-o'-lantern|slice of life|oversized object|chess piece|trading card|tablet pc|nintendo switch|controller|game controller|handheld game console|clipboard|cardboard box|suitcase|poster|album cover|\W+)$/],
+];
 // 가중치(1.2::…::, {…}, […], (…))와 밑줄을 떼고 낱말만 본다
 // 칸 정보 파일에는 bar (place)처럼 괄호가 든 이름이 있다. 괄호를 남긴 꼴로도 찾는다
 const named = (t) => String(t).replace(/-?\d*\.?\d+::|::/g, " ").replace(/[{}\[\]]/g, " ").replace(/_/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
 const bare = (t) => String(t).replace(/-?\d*\.?\d+::|::/g, " ").replace(/[{}\[\]()]/g, " ").replace(/_/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
-// 고르는 순서: 1 내가 옮겨서 기억한 칸(MEMO) → 2 인원수 → 3 굳은 규칙(STRONG) → 4 칸 정보 파일(DATA, slots.json: 단부루 태그 묶음에서 만듦) → 5 아래 낱말 짐작.
+// 고르는 순서: 1 내가 옮겨서 기억한 칸(MEMO) → 2 인원수 → 3 굳은 규칙(STRONG) → 4 칸 정보 파일(DATA, slots.json: 단부루 태그 묶음에서 만듦) → 5 손으로 고른 칸(HAND_RULES) → 6 아래 낱말 짐작 → 7 마지막 짐작(FALLBACK).
 let DATA = {}, memoOf = () => ({});
 export function setSlotData(o) { DATA = o && typeof o === "object" ? o : {}; }
 export function setSlotMemo(o) { memoOf = typeof o === "function" ? o : () => o; } // 객체, 또는 객체를 돌려주는 함수(저장 데이터가 통째로 바뀌어도 따라가게). learnSlots가 거기에 적는다
@@ -55,8 +75,10 @@ export function guessSlot(tag) {
   const n = named(tag);
   if (n !== b && okSlot(DATA[n])) return DATA[n];
   if (okSlot(DATA[b])) return DATA[b];
+  for (const [k, re] of HAND_RULES) if (re.test(b) || re.test(named(tag))) return k;
   if (b.includes(":")) return "rest"; // artist:… 같은 이름표 태그는 짐작하지 않는다
   for (const [k, re] of GUESS) if (re.test(b)) return k;
+  for (const [k, re] of FALLBACK) if (re.test(b) || re.test(named(tag))) return k;
   return "rest";
 }
 // 칸 글을 고친 뒤 부른다: before에 없던 태그가 칸 k에 새로 들어왔고, 앱이 다른 칸으로 짐작하던 것이면 k로 기억한다.
