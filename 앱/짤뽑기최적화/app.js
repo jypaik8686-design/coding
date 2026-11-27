@@ -1508,7 +1508,7 @@ function refsText(full = true) {
 function personText() {
   const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
   const now = list.filter((e) => chipOn(e.p)).map((e) => e.p.name);
-  return `\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 사용자가 프리셋으로 저장할 수 있다. 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
+  return `\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상). 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
 }
 function fullPersona(sent, libFull = true) {
   const d = store.data;
@@ -1753,6 +1753,49 @@ function restoreBlocks(json) {
 
 // kind, 블록 글을 칸에 넣는다. 돌려주는 것은 사용자에게 알릴 한 줄 (null이면 아무것도 안 함)
 // from: 블록이 나온 곳(비서 답·받은 자료 항목)의 표시. 인물 칸에 남겨 두고, 다른 곳에서 온 새 그림·새 인물이 들어오면 옛 인물 칸을 뺀다 (2026-11-21, 사용자 요청).
+// ── 인물 모두 넣기 (2026-11-27 사용자: 장면에 인물을 여러 명 줄 때 ‘전부 넣기’로는 마지막 인물만 남음) ──
+// 답 하나의 person 블록과, traits(또는 count) 줄이 든 scene 블록을 한 명씩 모은다. 둘 이상이면 인물별 프롬프트(V4 이상)에 한 명씩 넣는다.
+function peopleOf(text) {
+  const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
+  const norm = (x) => x.toLowerCase().replace(/[\s()（）·]/g, "");
+  const out = [];
+  parseBlocks(text).forEach((b, j) => {
+    if (b.t !== "code") return;
+    if (b.lang === "person") {
+      const nc = personFromBlock(b.v);
+      if (nc) { out.push({ j, fixed: nc.fixed, outfit: nc.outfit, name: nc.name }); return; }
+      const name = String(b.v).split("\n").map((x) => x.trim()).find(Boolean) || "";
+      const hit = list.find((e) => norm(e.p.name) === norm(name)) || list.find((e) => norm(e.p.name).includes(norm(name)) || norm(name).includes(norm(e.p.name)));
+      if (hit) { const pp = personParts(hit.p); out.push({ j, fixed: pp.fixed, outfit: pp.outfit, name: hit.p.name, neg: tidy(hit.p.neg || "") }); }
+    } else if (b.lang === "scene") {
+      const keys = sceneKeys(b.v);
+      if (!keys.includes("traits")) return;
+      const g = parseSceneBlock(b.v);
+      out.push({ j, fixed: joinTags([g.count, g.traits]), outfit: g.outfit, pose: g.pose, bg: g.bg });
+    }
+  });
+  return out;
+}
+function applyPeople(people) {
+  const d = store.data;
+  if (!supportsChars(d.settings)) return "이 모델은 인물별 프롬프트가 안 됨 (V4 이상)";
+  let girls = 0, boys = 0, others = 0;
+  const chars = people.slice(0, MAX_CHARS).map((pp) => {
+    const { count, rest } = splitCount(pp.fixed);
+    const c = tg(count).split(", ").map((t) => t.toLowerCase());
+    const who = c.some((t) => /boy/.test(t)) ? "boy" : c.some((t) => /girl/.test(t)) ? "girl" : c.some((t) => /other/.test(t)) ? "other" : "girl";
+    if (who === "boy") boys++; else if (who === "other") others++; else girls++;
+    return { id: crypto.randomUUID(), text: joinTags([who, rest, pp.outfit]), neg: pp.neg || "", pos: null, from: "people" };
+  });
+  const n = (k, w) => (k ? `${k}${w}${k > 1 ? "s" : ""}` : "");
+  d.draft.slots.count = [n(girls, "girl"), n(boys, "boy"), n(others, "other")].filter(Boolean).join(", ");
+  d.draft.slots.traits = ""; d.draft.slots.outfit = "";
+  const first = people.find((pp) => tg(pp.pose) || tg(pp.bg));
+  if (first) { if (tg(first.pose)) d.draft.slots.pose = first.pose; if (tg(first.bg)) d.draft.slots.bg = first.bg; }
+  d.draft.chars = chars; d.draft.chipsOn = (d.draft.chipsOn || []).filter((k) => !k.startsWith("b:인물:") && !d.presets.some((p) => `own:${p.id}` === k && p.kind === "인물"));
+  syncScene(); d.draft.seedLock = false; ui.open.chars = true;
+  return `인물 ${chars.length}명을 인물별 프롬프트에 넣음 (${d.draft.slots.count})${people.length > MAX_CHARS ? ` · ${people.length - MAX_CHARS}명은 넘침` : ""}`;
+}
 // person 블록에서 새 인물을 읽는다: `name: 이름` 줄(없어도 됨)과 쉼표 태그. 프리셋 이름 한 줄이면 null.
 function personFromBlock(v) {
   const lines = String(v).split("\n").map((x) => x.trim()).filter(Boolean);
@@ -1903,8 +1946,10 @@ function msgHtml(m, i) {
     return `<div class="code"><pre>${esc(showBlock(b))}</pre>${prompty ? `<p class="endmark">✅ 여기까지</p>` : ""}<div class="acts2">${btn}${psave}<button type="button" class="ghost" data-copy="${id}">복사</button></div>${check}</div>`;
   }).join("");
   const left = usable.filter((j) => !done.includes(j)).length;
+  const ppl = peopleOf(m.text);
+  const pplBtn = ppl.length >= 2 ? `<button type="button" class="line" data-pplall="${i}">인물 모두 넣기 <small>(${ppl.length}명, 인물별로)</small></button>` : "";
   const all = usable.length >= 2
-    ? `<div class="acts2 putall">${left
+    ? `<div class="acts2 putall">${pplBtn}${left
       ? `<button type="button" data-blkall="${i}">전부 넣기 <small>(${left === usable.length ? `${usable.length}개` : `남은 ${left}개`})</small></button>`
       : `<button type="button" class="ghost done" data-blkall="${i}" data-again="1">✓ 전부 넣음 <small>(다시 넣기)</small></button>`}</div>` : "";
   const memoLine = Array.isArray(m.mm) && m.mm.length ? `<p class="hint memosaved">메모 남김 (다음부터 그림 대신 감): ${m.mm.map(([c, t]) => `#${esc(c)} ${esc(cut(t, 80))}`).join(" / ")}</p>` : "";
@@ -3158,6 +3203,14 @@ function wireAsk() {
   // 넣은 블록 표시: chat[i].done에 블록 번호를 남긴다. 되돌리면 넣기 전 표시로 돌린다.
   const fromOf = (i) => `m:${d.chat[i]?.at || i}`;
   const markDone = (i, js) => { const m = d.chat[i]; if (!m) return null; const was = Array.isArray(m.done) ? [...m.done] : []; m.done = [...new Set([...was, ...js])]; return () => { m.done = was; }; };
+  document.querySelectorAll("[data-pplall]").forEach((el) => el.addEventListener("click", () => {
+    const i = +el.dataset.pplall, m = d.chat[i]; if (!m) return;
+    const ppl = peopleOf(m.text); if (ppl.length < 2) return;
+    const before = snapBlocks(), msg = applyPeople(ppl);
+    const changed = snapBlocks() !== before, unmark = changed ? markDone(i, ppl.map((x) => x.j)) : null;
+    toast(msg, changed ? () => { unmark?.(); restoreBlocks(before); } : null);
+    store.persist(); render();
+  }));
   document.querySelectorAll("[data-pcsave]").forEach((el) => el.addEventListener("click", () => {
     const [ci, cj] = el.dataset.pcsave.split(":").map(Number);
     const b = parseBlocks(d.chat[ci]?.text || "")[cj], c = b && personFromBlock(b.v);
@@ -3193,7 +3246,9 @@ function wireAsk() {
       .sort((x, y) => ORDER.indexOf(x.b.lang) - ORDER.indexOf(y.b.lang) || x.j - y.j);
     if (!todo.length) return;
     const before = snapBlocks(), msgs = [], ok = [];
-    for (const { b, j } of todo) { const r = applyBlock(b.lang, b.v, fromOf(i)); if (r != null) { msgs.push(r); ok.push(j); } }
+    const ppl = peopleOf(m.text), pj = new Set(ppl.length >= 2 ? ppl.map((x) => x.j) : []);
+    if (pj.size) { msgs.push(applyPeople(ppl)); ok.push(...pj); }
+    for (const { b, j } of todo) { if (pj.has(j)) continue; const r = applyBlock(b.lang, b.v, fromOf(i)); if (r != null) { msgs.push(r); ok.push(j); } }
     if (!ok.length) return;
     const changed = snapBlocks() !== before;
     const unmark = changed ? markDone(i, ok) : null;
