@@ -369,3 +369,48 @@ test("대화 지우기: 답을 기다리는 동안에는 뽑기 화면에도 비
   assert.deepEqual(chat.map((m) => m.role), ["user", "model", "user", "model"]);
   assert.deepEqual(errs, []); await p.close();
 });
+
+// 2026-11-27 사용자 신고 "아직도 인물이 꼬여": 여러 명을 인물별 프롬프트에 넣은 뒤 인물을 한 명으로 바꾸면(인물 칩, person 블록, 캐릭터 줄이 든 scene 블록)
+// 옛 인물별 칸이 그대로 남아 새 인물과 옛 두 명이 같이 NovelAI로 갔다.
+const TWO = "```scene\ncount: 1girl\ntraits: pink hair\noutfit: maid\npose: standing\n```\n```scene\ncount: 1boy\ntraits: black hair\noutfit: suit\n```";
+const caps = (g) => g.parameters.v4_prompt.caption.char_captions.map((c) => c.char_caption);
+test("인물 꼬임: 두 명을 넣은 뒤 인물 칩으로 한 명을 고르면 옛 인물별 칸이 빠지고, 되돌리기로 돌아온다", async () => {
+  const { p, errs, gens, data, ask } = await open({ settings: { aiKey: "x", token: "pst-x", model: "nai-diffusion-4-5-full" } }, TWO);
+  await ask("둘"); await p.click(".qreply [data-blkall]"); await p.waitForTimeout(300);
+  assert.equal((await data()).draft.chars.length, 2);
+  await p.click('details[data-sec="fixed"] > summary'); // 인물 칩은 접힌 ‘고정’ 칸 안에 있다
+  await p.locator(".slot:has(#slot-traits) [data-pchip]").first().click(); await p.waitForTimeout(300);
+  assert.deepEqual((await data()).draft.chars, [], "옛 인물별 칸이 남음");
+  await p.click(".toast button"); await p.waitForTimeout(300); // 되돌리기
+  assert.equal((await data()).draft.chars.length, 2, "되돌리기로 인물별 칸이 돌아와야 함");
+  await p.locator(".slot:has(#slot-traits) [data-pchip]").first().click(); await p.waitForTimeout(300);
+  await p.click("#go"); await p.waitForTimeout(800);
+  assert.deepEqual(caps(gens.at(-1)), []); assert.doesNotMatch(gens.at(-1).input, /pink hair|maid/); // 고른 프리셋에 black hair bow가 있어 black hair로는 못 견준다
+  assert.deepEqual(errs, []); await p.close();
+});
+test("인물 꼬임: 두 명을 넣은 뒤 person 블록이나 캐릭터 줄이 든 scene 블록으로 바꾸면 옛 인물별 칸이 빠진다", async () => {
+  let n = 0;
+  const { p, errs, data, ask } = await open({ settings: { aiKey: "x", model: "nai-diffusion-4-5-full" } }, () => (++n === 1 ? TWO : n === 2 ? "```person\n1girl, silver hair, blue eyes\n```" : n === 3 ? TWO : "```scene\ncount: 1girl, solo\ntraits: red hair\npose: sitting\n```"));
+  await ask("둘"); await p.click(".qreply [data-blkall]"); await p.waitForTimeout(300);
+  await ask("한 명"); await p.click('.qreply [data-kind="person"]'); await p.waitForTimeout(300);
+  let d = (await data()).draft;
+  assert.deepEqual(d.chars, [], "person 블록 뒤 옛 인물별 칸이 남음"); assert.equal(d.slots.traits, "silver hair, blue eyes");
+  await ask("다시 둘"); await p.click(".qreply [data-blkall]"); await p.waitForTimeout(300);
+  assert.equal((await data()).draft.chars.length, 2);
+  await ask("혼자"); await p.click('.qreply [data-kind="scene"]'); await p.waitForTimeout(300);
+  d = (await data()).draft;
+  assert.deepEqual(d.chars, [], "scene 블록 뒤 옛 인물별 칸이 남음"); assert.equal(d.slots.count, "1girl, solo"); assert.equal(d.slots.traits, "red hair");
+  assert.deepEqual(errs, []); await p.close();
+});
+// 반대로 지켜야 할 것: 같은 답의 인원수 줄(scene)과 인물 칸(char)은 서로 지우지 않는다. 손으로 더한 인물 칸은 자세만 바꾸는 scene 블록에 안 지워진다.
+test("인물 꼬임 반대쪽: 같은 답의 count 줄과 char 블록은 같이 남고, 자세만 바꾸는 블록은 인물별 칸을 안 건드린다", async () => {
+  let n = 0;
+  const { p, errs, data, ask } = await open({ settings: { aiKey: "x", model: "nai-diffusion-4-5-full" } }, () => (++n === 1 ? "```scene\ncount: 2girls\npose: holding hands\n```\n```char\ngirl, pink hair\n```\n```char\ngirl, black hair\n```" : "```scene\npose: sitting\n```"));
+  await ask("둘"); await p.click(".qreply [data-blkall]"); await p.waitForTimeout(300);
+  let d = (await data()).draft;
+  assert.equal(d.chars.length, 2); assert.equal(d.slots.count, "2girls");
+  await ask("앉게"); await p.click('.qreply [data-kind="scene"]'); await p.waitForTimeout(300);
+  d = (await data()).draft;
+  assert.equal(d.chars.length, 2); assert.equal(d.slots.pose, "sitting");
+  assert.deepEqual(errs, []); await p.close();
+});
