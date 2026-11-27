@@ -1550,6 +1550,11 @@ function takeMemos(text) {
 // 제미니에 보낼 지난 대화. 그림은 다시 안 보내고 그때 남긴 메모 줄로 바꾼다. 오래된 답의 코드 블록은 줄인다(지금 칸은 ‘지금 상태’에 있다).
 const SEND_MAX = 12, SEND_FULL = 2; // 보내는 지난 대화 수, 코드 블록을 그대로 두는 최근 답 수
 function histText(m, last, full) {
+  // 앱이 돌려준 태그 검색 결과는 지난 대화로 다시 보낼 때 찾은 낱말만 남긴다 (2026-11-27 사용자: 검색 결과도 줄여 줘). 비서는 그때 답에 고른 태그를 이미 적었다.
+  if (m.role === "user" && !last && m.text.startsWith("[태그 검색 결과]")) {
+    const qs = [...m.text.matchAll(/^‘([^’]+)’:/gm)].map((x) => x[1]);
+    return `[태그 검색 결과 생략: ${qs.join(", ") || "찾은 낱말"}]`;
+  }
   if (m.role === "user") {
     if (last || !Array.isArray(m.att) || !m.att.length) return m.text;
     return `${m.text}\n${m.att.map((a) => `[그때 붙인 그림 #${a.c}${a.n ? ` ${a.n}` : ""}${a.seed != null ? ` 시드 ${a.seed}` : ""}: ${a.memo ? `메모: ${a.memo}` : "메모 없음"}]`).join("\n")}`;
