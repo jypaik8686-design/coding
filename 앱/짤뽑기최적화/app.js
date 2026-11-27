@@ -931,6 +931,7 @@ async function generate() {
 
   busy = new AbortController();
   phase = "";
+  genStartY = window.scrollY;
   render();
   // 뽑는 동안 화면이 꺼지지 않게 잡아 둔다. 못 잡아도(지원 안 함·절전 모드) 그냥 뽑는다.
   let lock = null, okDone = false;
@@ -976,7 +977,10 @@ async function generate() {
     render();
     // 끝난 것을 알린다: 짧은 진동, 뽑기 화면이면 그림(실패면 오류 줄)으로 올라가고 다른 탭이면 알림 한 줄.
     try { navigator.vibrate?.(okDone ? 60 : [40, 60, 40]); } catch { /* 진동 없는 기기 */ }
-    if (route()[0] === "gen" || !SCREENS[route()[0]]) showBelowToast(document.querySelector(okDone ? "figure.result" : "p.error"));
+    // 뽑는 사이 사용자가 스크롤했으면(다른 곳을 보는 중) 끌어올리지 않고 알림만 (2026-11-27, 사용자: 안 내렸는데 움직임)
+    const moved = Math.abs(window.scrollY - genStartY) > 60;
+    if ((route()[0] === "gen" || !SCREENS[route()[0]]) && !moved) showBelowToast(document.querySelector(okDone ? "figure.result" : "p.error"));
+    else if (moved && okDone) toast("그림이 나옴 (맨 위)");
     else toast(okDone ? "그림이 나옴. ‘뽑기’ 탭에서 보기" : `뽑기 실패: ${errMsg}`);
   }
 }
@@ -3014,16 +3018,21 @@ const SCREENS = {
 const TITLES = { gen: "짤뽑기 최적화판", ai: "비서", keep: "보관함", vault: "받은 자료", taste: "화풍·작가", set: "설정" };
 const route = () => (location.hash.replace(/^#\/?/, "") || "gen").split("/");
 let thumbUrls = [];
-let renderSeq = 0;
+let renderSeq = 0, lastScreen = "", genStartY = 0;
 
 function render() {
   const [n, arg] = route();
   if (n === "taste" && arg === "conn") { location.replace("#/set"); return; } // 옛 주소
   const name = SCREENS[n] ? n : "gen";
   const seq = ++renderSeq;
+  // 2026-11-27(사용자: 안 내렸는데 화면이 움직임): 같은 화면을 다시 그릴 때는 스크롤 자리를 지킨다. 화면 전체를 새로 쓰는 사이 높이가 잠깐 줄면 브라우저가 스크롤을 당겨서 튀었다.
+  // 일부러 옮기는 스크롤(뽑기 끝, 칸으로 가기, 비서 답)은 render 뒤나 wire 안에서 하므로 그대로 된다.
+  const keepY = name === lastScreen ? window.scrollY : null;
+  lastScreen = name;
   thumbUrls.forEach((u) => URL.revokeObjectURL(u));
   thumbUrls = [];
   document.getElementById("screen").innerHTML = (saveFail ? `<p class="error" role="alert">저장이 안 되고 있음. 이 기기 저장 공간이 참. 지금 고친 것은 새로 고치면 사라짐. 설정(오른쪽 위 톱니바퀴)에서 기록을 내보낸 뒤 오래된 대화나 기록을 지우기.</p>` : "") + SCREENS[name](arg);
+  if (keepY != null && Math.abs(window.scrollY - keepY) > 1) window.scrollTo(0, keepY);
   document.getElementById("title").textContent = TITLES[name];
   const kept = store.data.log.filter((r) => r.verdict === "keep").length;
   document.getElementById("count").textContent = name === "keep" && kept ? `${kept}장` : "";
@@ -3801,7 +3810,8 @@ addEventListener("hashchange", () => { errMsg = ""; askErr = ""; ui.bq = ""; ui.
 if (route()[0] === "ai") scrollAi = true;
 shownVals = Object.fromEntries(TRACK.map((k) => [k, valOf(k)])); // 바뀐 칸 표시의 처음 기준: 앱을 연 때의 값 (비서 탭에서 먼저 바꿔도 뽑기 탭에서 보이게)
 render();
-loadRefs().then(render); loadSrc().then(render); loadPimgs().then(render); loadVault().then(render);
+// 2026-11-27(사용자: 안 내렸는데 화면이 움직이고 걸림): 넷을 따로 불러 끝날 때마다 다시 그려서, 열고 몇 초 동안 화면이 네 번 새로 쓰였다. 다 불러온 뒤 한 번만 그린다.
+Promise.allSettled([loadRefs(), loadSrc(), loadPimgs(), loadVault()]).then(render);
 // 참고 그림은 IndexedDB에서 읽어 와야 해서 한 박자 늦게 그린다
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
