@@ -2107,10 +2107,13 @@ function presetInner() {
     <p class="hint">확정 = 내가 써 보고 정해 둔 것. 가안 = 내 취향에서 앱이 짠 것이고, 태그는 사전에서 게시물 수를 확인함. 고친 것은 이 폰에만 저장되고, ‘기본값으로’로 되돌림. 인물은 이번 그림 맨 앞에, 의상은 4순위에, 자세·구도는 5순위에 더해짐. 빼는 것은 ‘이번 빼는 것’ 칸에 들어감. 뽑기 칸 제목 옆 ‘＋ … 프리셋’으로 캐릭터·의상·포즈 칸을 바로 저장함.</p>`;
 }
 
-function tagsMinus(a, b) { const no = new Set(tg(b).toLowerCase().split(", ")); return tg(a).split(", ").filter((t) => t && !no.has(t.toLowerCase())).join(", "); }
+// 칩·프리셋이 태그를 견줄 때는 가중치({…}, […], 1.2::…::)와 대소문자를 뗀 이름으로 본다 (2026-11-27: {red hair}와 red hair를 다른 태그로 봐서 두 번 들어가고 칩이 꺼져 보였음).
+const ckey = (t) => String(t).toLowerCase().replace(/[{}\[\]]/g, "").replace(/^-?\d+(\.\d+)?::/, "").replace(/::$/, "").trim();
+function tagsMinus(a, b) { const no = new Set(tg(b).split(", ").map(ckey)); return tg(a).split(", ").filter((t) => t && !no.has(ckey(t))).join(", "); }
 function mergeTags(cur, add, front) {
   const a = tidy(cur).split(", ").filter(Boolean), b = tidy(add).split(", ").filter(Boolean);
-  const out = front ? [...b, ...a.filter((t) => !b.includes(t))] : [...a, ...b.filter((t) => !a.includes(t))];
+  const ka = new Set(a.map(ckey)), kb = new Set(b.map(ckey));
+  const out = front ? [...b, ...a.filter((t) => !kb.has(ckey(t)))] : [...a, ...b.filter((t) => !ka.has(ckey(t)))];
   return out.join(", ");
 }
 // 프리셋을 칸에 넣는다. mode: add | replace | neg(금지 태그를 빼는 것에 더함). 알릴 한 줄을 돌려준다.
@@ -2167,11 +2170,31 @@ function paddForm() {
 const CHIP_ONE = new Set(["인물", "의상", "자세·구도"]); // 하나만 켜지고, 누르면 그 칸을 바꿔 넣는다(덧붙이지 않음, 2026-11-27 사용자: 편의성). 그림체·작가·빼는 것은 섞어 쓰므로 더한다
 const chipTarget = (p) => (p.to === "style" ? store.data.taste.style : p.to === "neg" ? store.data.draft.neg : store.data.draft.slots[SLOT_KEYS.includes(p.slot) ? p.slot : "rest"]);
 const chipBody = (p) => (p.to === "scene" && p.slot === "traits" ? splitCount(personParts(p).fixed).rest : p.text); // 인물은 고정 부분만, 인원수 태그를 빼고 견준다(의상은 바뀌어도 같은 인물)
-function chipOn(p) {
-  const want = tg(chipBody(p)).toLowerCase().split(", ").filter(Boolean);
+// 켜짐 = 칩의 태그가 칸에 다 들어 있음. 단, 태그가 전부 다른 칩 안에 들어 있는 칩(Heavy ⊂ Human Focus)은 그 큰 칩 때문에 켜져 보이므로,
+// 사용자가 직접 켠 것(draft.chipsOn)만 켜진 것으로 본다 (2026-11-27: 넣지도 않은 칩이 켜져 보이고 눌러도 아무 일도 안 일어났음).
+const chipTags = (p) => tg(chipBody(p)).split(", ").filter(Boolean).map(ckey);
+function chipKeyOf(p) {
+  for (const kind of PKINDS) for (const e of presetEntries(kind)) if (e.p.name === p.name && e.p.text === p.text && e.p.to === p.to) return e.key;
+  return "";
+}
+function chipPresent(p) {
+  const want = chipTags(p);
   if (!want.length) return false;
-  const have = new Set(tg(chipTarget(p)).toLowerCase().split(", "));
+  const have = new Set(tg(chipTarget(p)).split(", ").map(ckey));
   return want.every((t) => have.has(t));
+}
+function chipOn(p) {
+  if (!chipPresent(p)) return false;
+  const k = chipKeyOf(p);
+  if ((store.data.draft.chipsOn || []).includes(k)) return true;
+  const mine = new Set(chipTags(p));
+  for (const kind of PKINDS) for (const e of presetEntries(kind)) {
+    const q = e.p;
+    if (e.key === k || e.hidden || q.to !== p.to || (p.to === "scene" && q.slot !== p.slot)) continue;
+    const big = chipTags(q);
+    if (big.length > mine.size && [...mine].every((t) => big.includes(t)) && chipPresent(q)) return false; // 더 큰 칩에 통째로 들어 있음
+  }
+  return true;
 }
 // 같은 칸에 켜 둔 다른 칩의 태그(겹치는 것)는 남긴다. 안 그러면 하나를 뺄 때 겹친 태그까지 빠져 다른 칩이 망가진다 (2026-11-27, 사용자: 키워드를 빼면 최근에 넣은 게 빠짐).
 function chipKeep(p, part = (x) => chipBody(x), only = null) {
@@ -2194,7 +2217,8 @@ function chipOff(p) {
     if (k === "traits") d.draft.slots.outfit = tagsMinus(d.draft.slots.outfit, minusKeep(personParts(p).outfit, chipKeep(p, (x) => x.text, "outfit"))); // 인물을 끄면 그 기본 의상도 뺀다
     syncScene();
   }
-  if (p.neg && p.to !== "neg") d.draft.neg = tagsMinus(d.draft.neg, p.neg);
+  if (p.neg && p.to !== "neg") d.draft.neg = tagsMinus(d.draft.neg, minusKeep(p.neg, chipKeep({ to: "neg", name: p.name, text: "" }, (x) => x.text)));
+  const k = chipKeyOf(p); if (d.draft.chipsOn) d.draft.chipsOn = d.draft.chipsOn.filter((x) => x !== k);
 }
 function chipRow(slotKey) {
   return (CHIP_KIND[slotKey] || []).map((kind) => {
@@ -2206,7 +2230,7 @@ function chipRow(slotKey) {
 function chipToggle(key) {
   const d = store.data, p = presetByKey(key); if (!p) return;
   const kind = key.startsWith("own:") ? p.kind : key.match(/^b:([^:]+):/)?.[1];
-  const snap = JSON.stringify({ slots: d.draft.slots, lock: d.draft.seedLock, style: d.taste.style, nd: d.draft.neg });
+  const snap = JSON.stringify({ slots: d.draft.slots, lock: d.draft.seedLock, style: d.taste.style, nd: d.draft.neg, on: d.draft.chipsOn || [] });
   let msg;
   if (chipOn(p)) { chipOff(p); msg = `‘${p.name}’을 뺌`; }
   else {
@@ -2214,10 +2238,11 @@ function chipToggle(key) {
     if (CHIP_ONE.has(kind)) for (const e of presetEntries(kind)) if (e.key !== key && !e.hidden && chipOn(e.p)) { chipOff(e.p); out.push(e.p.name); }
     usePreset(p, CHIP_ONE.has(kind) ? "replace" : "add");
     if (kind === "인물" && tidy(p.neg || "")) usePreset(p, "neg");
+    d.draft.chipsOn = [...(d.draft.chipsOn || []).filter((x) => x !== key), key].slice(-40);
     autoRef(key, p);
     msg = `‘${p.name}’을 ${CHIP_ONE.has(kind) ? "바꿔 " : ""}넣음${kind === "인물" && tidy(personParts(p).outfit) ? " (기본 의상도)" : ""}${kind === "인물" && tidy(p.neg || "") ? " (금지 태그도)" : ""}${out.length ? ` · ‘${out.join("’, ‘")}’은 뺌` : ""}`;
   }
-  toast(msg, () => { const o = JSON.parse(snap); d.draft.slots = o.slots; syncScene(); d.draft.seedLock = o.lock; d.taste.style = o.style; d.draft.neg = o.nd; store.save(); });
+  toast(msg, () => { const o = JSON.parse(snap); d.draft.slots = o.slots; syncScene(); d.draft.seedLock = o.lock; d.taste.style = o.style; d.draft.neg = o.nd; d.draft.chipsOn = o.on; store.save(); });
   store.save();
 }
 
