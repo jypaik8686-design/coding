@@ -154,3 +154,70 @@ test("모든 화면: 콘솔 오류가 없고 폰 폭(390)을 넘치지 않는다
   }
   assert.deepEqual(errs, []); await p.close();
 });
+
+// 시험용 PNG (한 가지 색, 가로세로 n). 앱은 너무 작은 그림을 서랍에 안 넣어서 64로 쓴다.
+import zlib from "node:zlib";
+function pngOf(n) {
+  const crc = (b) => { let c = ~0; for (const x of b) { c ^= x; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)); } return ~c >>> 0; };
+  const chunk = (t, d) => { const l = Buffer.alloc(4); l.writeUInt32BE(d.length); const td = Buffer.concat([Buffer.from(t), d]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([l, td, c]); };
+  const ih = Buffer.alloc(13); ih.writeUInt32BE(n, 0); ih.writeUInt32BE(n, 4); ih[8] = 8; ih[9] = 2;
+  const raw = Buffer.concat(Array.from({ length: n }, () => Buffer.concat([Buffer.from([0]), Buffer.alloc(n * 3, 0x60)])));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ih), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+
+// ── 종합 점검 (2026-11-27 사용자: 종합 점검 및 개선): 실제 폰에서 터질 만한 저장 데이터 ──
+async function openRaw(raw) {
+  const p = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errs = []; p.on("pageerror", (e) => errs.push(e.message)); p.on("console", (m) => { if (m.type() === "error") errs.push(m.text()); });
+  await p.addInitScript(([k, v]) => { if (!sessionStorage.getItem("seeded")) { if (v != null) localStorage.setItem(k, v); sessionStorage.setItem("seeded", "1"); } }, [KEY, raw]);
+  const t0 = Date.now(); await p.goto(`${base}#/gen`); await p.waitForSelector("#go", { timeout: 8000 }).catch(() => {}); const ms = Date.now() - t0;
+  return { p, errs, ms };
+}
+for (const [name, raw] of [
+  ["저장 데이터 없음", null],
+  ["망가진 저장 데이터(JSON 아님)", "{이건 JSON이 아님"],
+  ["옛 꼴(칸 없이 scene 글만, 새 칸 없음)", JSON.stringify({ settings: { token: "", model: "nai-diffusion-4-5-full" }, taste: { style: "painterly" }, draft: { scene: "1girl, solo, red dress, sitting, office" }, log: [{ id: "a", scene: "1girl", seed: 1, verdict: "keep", at: 1 }], presets: [{ id: "p1", name: "옛 프리셋", text: "1girl, silver hair, maid", to: "scene" }], chat: [{ role: "user", text: "옛 질문" }, { role: "model", text: "옛 답\n```scene\n1girl, smile\n```" }] })],
+  ["값 꼴이 틀림(숫자 자리에 글, 배열 자리에 null)", JSON.stringify({ settings: { steps: "많이", scale: null, size: "없는크기", customW: "x" }, draft: { slots: null, chars: null, neg: 3 }, chat: null, presets: "x", log: {} })],
+]) {
+  test(`저장 데이터: ${name} — 열리고 뽑기 버튼이 보이며 콘솔 오류가 없다`, async () => {
+    const { p, errs } = await openRaw(raw);
+    assert.equal(await p.locator("#go").count(), 1, "뽑기 버튼이 안 보임");
+    for (const r of ["ai", "keep", "taste", "set", "gen"]) { await p.evaluate((h) => { location.hash = h; }, `#/${r}`); await p.waitForTimeout(250); }
+    assert.deepEqual(errs, []); await p.close();
+  });
+}
+test("많이 쌓인 데이터(기록 400·대화 40·프리셋 60): 열리고, 칩 하나 누르는 데 폰 기준(CPU 4배 느리게) 0.4초 안", async () => {
+  const log = Array.from({ length: 400 }, (_, i) => ({ id: `l${i}`, scene: "1girl, solo, smile", style: "painterly", seed: i, verdict: i % 3 ? "drop" : "keep", at: 1e12 + i, w: 832, h: 1216, steps: 28, scale: 5, model: "nai-diffusion-5-full" }));
+  const chat = Array.from({ length: 40 }, (_, i) => ({ role: i % 2 ? "model" : "user", text: i % 2 ? "답\n```scene\npose: sitting\n```" : `질문 ${i}`, at: i }));
+  const presets = Array.from({ length: 60 }, (_, i) => ({ id: `p${i}`, name: `내 자세 ${i}`, text: `pose${i}, sitting`, to: "scene", kind: "자세·구도", slot: "pose" }));
+  const { p, errs } = await openRaw(JSON.stringify({ log, chat, presets }));
+  const cdp = await p.context().newCDPSession(p); await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+  const chip = p.locator(".slot:has(#slot-pose) [data-pchip]").first();
+  const t0 = Date.now(); await chip.click(); await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))); const ms = Date.now() - t0;
+  assert.ok(ms < 400, `칩 하나에 ${ms}ms`);
+  assert.deepEqual(errs, []); await p.close();
+});
+test("그림 저장(IndexedDB)이 실패하면 알리고 화면 위에 경고가 뜬다", async () => {
+  const p = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errs = []; p.on("pageerror", (e) => errs.push(e.message));
+  await p.addInitScript(([k]) => {
+    if (!sessionStorage.getItem("seeded")) { localStorage.setItem(k, JSON.stringify({ settings: { model: "nai-diffusion-4-5-full" } })); sessionStorage.setItem("seeded", "1"); }
+    const put = IDBObjectStore.prototype.put; // 서랍(ref)에 쓰는 것만 실패시킨다 (저장 공간이 찬 것처럼)
+    IDBObjectStore.prototype.put = function (...a) { const q = put.apply(this, a); if (this.name === "ref") queueMicrotask(() => { try { this.transaction.abort(); } catch {} }); return q; };
+  }, [KEY]);
+  await p.goto(`${base}#/gen`); await p.waitForTimeout(900);
+  await p.locator('button.tool[data-tool="ref"]').click(); await p.waitForTimeout(200);
+  const png = pngOf(64);
+  await p.setInputFiles("#refFile", { name: "a.png", mimeType: "image/png", buffer: png });
+  await p.waitForFunction(() => /저장이 실패했음/.test(document.getElementById("screen").innerText), null, { timeout: 5000 }).catch(() => {});
+  const scr = await p.locator("#screen").innerText();
+  assert.match(scr, /저장이 실패했음/, `화면: ${scr.slice(0, 200)} | 알림: ${await p.locator(".toast").innerText().catch(() => "없음")}`);
+  assert.deepEqual(errs, []); await p.close();
+});
+test("처음 기본값: 기본 그림체와 기본 빼는 것이 서로 지우는 태그가 없다", async () => {
+  const { p, errs } = await open({});
+  await p.click("#go"); await p.waitForTimeout(400);
+  const txt = await p.locator(".diag").innerText().catch(() => "");
+  assert.doesNotMatch(txt, /기본 빼는 것에 둘 다/);
+  assert.deepEqual(errs, []); await p.close();
+});
