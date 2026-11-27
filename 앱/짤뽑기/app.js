@@ -3,6 +3,7 @@
 
 import { PERSONA_PARTS, partState, buildPersona, MODEL_CHOICES } from "./assistant.js";
 import { PRESETS } from "./presets.js";
+import { SLOT_KEYS, SLOT_NAMES, DEFAULT_SLOTS, COUNT_RE, tg, joinTags, sceneOf, splitCount, autoSlots, parseSceneBlock, plainTags, setSlotData, setSlotMemo, learnSlots, splitPerson } from "./slots.js";
 // 받은 파일을 블록으로 펼치는 것은 해체기와 같은 코드를 쓴다(같은 주소 아래 있어서 바로 불러옴). 해체기 폴더를 옮기면 이 줄도 고친다.
 import { parseFile, vaultItems } from "../해체기/risu.js";
 
@@ -69,6 +70,7 @@ const SHAPE = () => ({
   persona: { sections: {}, extra: [], auto: { state: true, cand: true } },
   presetEdits: {},
   userDict: starterDict(),
+  slotMemo: {},
 });
 
 const PRESET_KINDS = ["인물", "의상", "그림체", "작가", "자세·구도", "빼는 것", "내 것"];
@@ -84,38 +86,27 @@ const starterDict = () => STARTER_DICT.map(([word, tags]) => ({ id: crypto.rando
 const DICT_MAX = 300;
 
 // ── 프롬프트 칸 ─────────────────────────────────────────────
-// NovelAI로 가는 글은 칸을 이 순서로 이어 붙인다: 1 인원수·성별 → 2 화풍·작가(취향 프롬프트) → 3 캐릭터 특징 → 4 의상·장신구 → 5 포즈·시선·구도 → 6 배경·조명·분위기·이펙트 → (그 밖에) → 7 품질 태그.
-// draft.slots에 담기는 칸은 아래 SLOT_KEYS. 2순위는 taste.style, 7순위는 settings.qualityText(비어 있으면 모델별 기본 글)에 있다.
-// draft.scene은 칸들을 이어 붙인 값으로 늘 맞춰 둔다(기록·보관함·통계가 읽는 쪽이라 그대로 쓰게). 이 도우미들은 store가 만들어질 때 load()가 부르므로 함수로 둔다.
-const SLOT_KEYS = ["count", "traits", "outfit", "pose", "bg", "rest"];
-const SLOT_NAMES = { count: "인원수·성별", traits: "캐릭터 특징", outfit: "의상·장신구", pose: "포즈·시선·구도", bg: "배경·조명·분위기·이펙트", rest: "그 밖에" };
-const DEFAULT_SLOTS = { count: "1girl, solo", traits: "blonde hair, long hair, east asian, mature female, elegant", outfit: "business suit, formal", pose: "looking at viewer, upper body", bg: "", rest: "" };
-const COUNT_RE = /^(\d+\+?(girl|boy|girls|boys|other|others)|solo|no humans)$/i;
-function tg(t) { return String(t || "").split(/[,\n]/).map((x) => x.trim()).filter(Boolean).join(", "); }
-function joinTags(parts) { // 칸 글들을 이어 붙이되 같은 태그는 먼저 나온 것만 남긴다
-  const seen = new Set(), out = [];
-  for (const part of parts) for (const t of tg(part).split(", ")) { if (!t) continue; const k = t.toLowerCase(); if (seen.has(k)) continue; seen.add(k); out.push(t); }
-  return out.join(", ");
-}
-function sceneOf(sl) { return joinTags(SLOT_KEYS.map((k) => sl?.[k])); }
-function splitCount(text) { // 인원수·성별 태그(1girl, solo 등)만 따로 뽑는다
-  const c = [], r = [];
-  for (const t of tg(text).split(", ")) { if (!t) continue; (COUNT_RE.test(t.replace(/[{}\[\]]/g, "")) ? c : r).push(t); }
-  return { count: c.join(", "), rest: r.join(", ") };
-}
-function normSlots(rawSlots, scene) { // 칸이 없던 옛 데이터는 scene 글에서 만든다. 못 나누는 글은 ‘그 밖에’로 간다
+// 칸 이름·순서·나누기는 slots.js에 있다 (시험: slots.test.mjs). draft.scene은 칸들을 이어 붙인 값으로 늘 맞춰 둔다(기록·보관함·통계가 읽는 쪽이라 그대로 쓰게).
+function normSlots(rawSlots, scene) { // 칸이 없던 옛 데이터는 scene 글에서 만든다. 못 고르는 태그는 ‘그 밖에’로 간다
   const out = Object.fromEntries(SLOT_KEYS.map((k) => [k, ""]));
   if (rawSlots && typeof rawSlots === "object") { for (const k of SLOT_KEYS) if (typeof rawSlots[k] === "string") out[k] = rawSlots[k].slice(0, 4000); return out; }
   const sc = tg(scene);
   if (!sc) return out;
   if (sc === tg(DEFAULT_SCENE)) return { ...DEFAULT_SLOTS };
-  const { count, rest } = splitCount(sc); out.count = count; out.rest = rest;
-  return out;
+  return autoSlots(sc); // 칸 이름이 없던 글은 태그마다 칸을 짐작한다
 }
 function normDict(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.filter((e) => e && e.id && typeof e.word === "string" && typeof e.tags === "string").slice(0, DICT_MAX).map((e) => ({ id: String(e.id), word: e.word.slice(0, 40), tags: e.tags.slice(0, 300) }));
 }
+// slotMemo {태그: 칸}: 내가 칸에 손으로 옮겨 넣은 태그. 다음부터 칸 나누기가 이것을 먼저 본다 (slots.js learnSlots, 2026-11-27).
+function normSlotMemo(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).filter(([t, k]) => t && t.length <= 100 && SLOT_KEYS.includes(k)).slice(-500));
+}
+// 칸 정보 파일(단부루 태그 묶음에서 만든 것, coding/tools/tag_slots.py). 옛 데이터를 칸으로 나누는 load()보다 먼저 읽는다. 못 받으면 낱말 짐작만 쓴다.
+try { const r = await fetch("slots.json"); if (r.ok) setSlotData((await r.json()).slots); else console.warn("slots.json 못 받음", r.status); }
+catch (e) { console.warn("slots.json 못 받음", e); }
 let saveFail = false; // 마지막 저장이 실패했는지 (화면 맨 위 경고)
 const store = {
   data: load(),
@@ -130,6 +121,7 @@ const store = {
   },
   save() { this.persist(); render(); },
 };
+setSlotMemo(() => store.data.slotMemo); // store.data가 통째로 바뀌어도(불러오기 되돌리기, 전부 지우기) 지금 것을 본다
 
 function normPresets(raw) {
   if (!Array.isArray(raw)) return [];
@@ -137,6 +129,7 @@ function normPresets(raw) {
     const o = { id: String(p.id), name: str(p.name, 60), text: p.text.slice(0, 4000), to: ["scene", "style", "neg"].includes(p.to) ? p.to : "scene", kind: PRESET_KINDS.includes(p.kind) ? p.kind : "내 것" };
     if (typeof p.neg === "string" && p.neg) o.neg = p.neg.slice(0, 4000);
     if (typeof p.note === "string" && p.note) o.note = p.note.slice(0, 300);
+    if (typeof p.outfit === "string" && o.kind === "인물") o.outfit = p.outfit.slice(0, 4000); // 인물의 기본 의상. 없으면(옛 항목) personParts가 text에서 나눈다
     if (p.at === "front" && o.to === "scene") o.at = "front";
     if (SLOT_KEYS.includes(p.slot) && o.to === "scene") o.slot = p.slot;
     return o;
@@ -149,7 +142,7 @@ function normPresetEdits(raw) {
     const k = `b:${kind}:${b.name}`, o = raw[k];
     if (!o || typeof o !== "object") continue;
     const e = {};
-    for (const f of ["name", "text", "neg", "note"]) if (typeof o[f] === "string" && o[f] !== (b[f] ?? "")) e[f] = o[f].slice(0, 4000);
+    for (const f of ["name", "text", "neg", "note", "outfit"]) if (typeof o[f] === "string" && o[f] !== (b[f] ?? "")) e[f] = o[f].slice(0, 4000);
     if (o.hidden === true) e.hidden = true;
     if (Object.keys(e).length) out[k] = e;
   }
@@ -230,6 +223,7 @@ function normAll(raw) {
       log: Array.isArray(raw.log) ? raw.log.map(safeRec).filter(Boolean) : [],
       chat: Array.isArray(raw.chat) ? raw.chat.filter((m) => m && (m.role === "user" || m.role === "model") && typeof m.text === "string") : [],
       persona: normPersona(raw.persona),
+      slotMemo: normSlotMemo(raw.slotMemo),
     };
   } catch { return base; }
 }
@@ -1098,7 +1092,7 @@ function importJson(text) {
   try { raw = JSON.parse(text); } catch { return toast("JSON이 아님. ‘기록 내보내기’로 받은 파일을 고르기"); }
   if (!raw || typeof raw !== "object" || !(Array.isArray(raw.log) || Array.isArray(raw.presets) || raw.taste)) return toast("짤뽑기에서 내보낸 기록이 아님");
   const inc = normAll(raw), d = store.data;
-  if (!confirm(`불러올 것: 기록 ${inc.log.length}건, 내 프리셋 ${inc.presets.length}개, 내 단어 ${inc.userDict.length}개.\n\n기록·프리셋·내 단어는 지금 것에 더함(같은 것은 건너뜀).\n화풍·작가, 기본 빼는 것, 비서 지시문은 파일에 들어 있으면 그 값으로 바꿈.\n토큰·키·지금 칸·대화는 그대로.\n그림은 JSON에 없어서 안 따라옴.`)) return;
+  if (!confirm(`불러올 것: 기록 ${inc.log.length}건, 내 프리셋 ${inc.presets.length}개, 내 단어 ${inc.userDict.length}개, 칸 기억 ${Object.keys(inc.slotMemo).length}개.\n\n기록·프리셋·내 단어·칸 기억은 지금 것에 더함(같은 것은 건너뜀).\n화풍·작가, 기본 빼는 것, 비서 지시문은 파일에 들어 있으면 그 값으로 바꿈.\n토큰·키·지금 칸·대화는 그대로.\n그림은 JSON에 없어서 안 따라옴.`)) return;
   const before = JSON.stringify(d);
   const ids = new Set(d.log.map((r) => r.id));
   d.log = [...d.log, ...inc.log.filter((r) => !ids.has(r.id))].sort((a, b) => (b.at || 0) - (a.at || 0));
@@ -1108,6 +1102,7 @@ function importJson(text) {
   for (const [k, v] of Object.entries(inc.presetEdits)) if (!d.presetEdits[k]) d.presetEdits[k] = v;
   const words = new Set(d.userDict.map((e) => e.word.trim()));
   d.userDict = [...d.userDict, ...inc.userDict.filter((e) => e.word.trim() && !words.has(e.word.trim()))].slice(0, DICT_MAX);
+  d.slotMemo = normSlotMemo({ ...inc.slotMemo, ...d.slotMemo }); // 칸 기억: 지금 폰에서 정한 것이 먼저
   // 파일에 든 칸만 바꾼다. 옛 파일(비서 지시문이 없거나 화풍 칸이 없는 것)이 지금 값을 처음 값으로 덮지 않게.
   if (typeof raw.taste?.style === "string") d.taste.style = inc.taste.style;
   if (typeof raw.taste?.negative === "string") {
@@ -1221,10 +1216,6 @@ function candidates(text) {
   return out;
 }
 
-function plainTags(t) {
-  return t.replace(/^\s*(count|traits|outfit|pose|bg)\s*:\s*/gim, "").replace(/-?\d*\.?\d+::|::/g, ",").replace(/[{}\[\]()]/g, "").split(/[,\n]/)
-    .map((x) => x.trim().toLowerCase()).filter((x) => x && !x.includes(":") && !x.includes("@"));
-}
 // scene 블록의 태그를 사전과 맞춰 본다. 일반 태그만 사전에 있어서 캐릭터·작가 이름은 '사전에 없음'으로 나올 수 있다.
 function checkTags(text) {
   if (!tags) return null;
@@ -1414,20 +1405,7 @@ function restoreBlocks(json) {
   store.save();
 }
 
-// scene 블록: 한 줄에 칸 하나(`count:` `traits:` `outfit:` `pose:` `bg:`로 시작). 줄 이름이 없는 글은 인원수 태그만 1순위로 빼고 나머지를 ‘그 밖에’ 칸에 넣는다.
-// 블록이 이번 그림 전체를 대신하므로 블록에 없는 칸은 비워진다.
-function parseSceneBlock(v) {
-  const out = Object.fromEntries(SLOT_KEYS.map((k) => [k, ""])), loose = [];
-  let labeled = false;
-  for (const line of String(v).split("\n")) {
-    const m = line.match(/^\s*(count|traits|outfit|pose|bg)\s*:\s*(.*)$/i);
-    if (m) { labeled = true; const k = m[1].toLowerCase(); out[k] = joinTags([out[k], m[2]]); }
-    else if (line.trim()) loose.push(line);
-  }
-  if (!labeled) { const { count, rest } = splitCount(loose.join("\n")); out.count = count; out.rest = rest; return out; }
-  out.rest = joinTags(loose);
-  return out;
-}
+// scene 블록 읽기(parseSceneBlock)는 slots.js에 있다.
 
 // kind, 블록 글을 칸에 넣는다. 돌려주는 것은 사용자에게 알릴 한 줄 (null이면 아무것도 안 함)
 // from: 블록이 나온 곳(비서 답·받은 자료 항목)의 표시. 인물 칸에 남겨 두고, 다른 곳에서 온 새 그림·새 인물이 들어오면 옛 인물 칸을 뺀다 (2026-11-21, 사용자 요청).
@@ -1681,7 +1659,12 @@ function advInner() {
 const PKINDS = PRESET_KINDS;
 const KIND_TO = { 인물: "scene", 의상: "scene", 그림체: "style", 작가: "style", "자세·구도": "scene", "빼는 것": "neg" }; // 종류 탭에서 새로 만들면 여기에 넣는 곳이 정해진다
 const TARGET = { scene: "이번 그림", style: "화풍·작가", neg: "이번 빼는 것" };
-const PFIELDS = ["name", "text", "neg", "note"];
+const PFIELDS = ["name", "text", "neg", "note", "outfit"];
+// 인물 프리셋 = 고정(인원수·얼굴·머리·몸) + 기본 의상. outfit 칸이 있으면 그대로, 없으면(내장·옛 항목) text에서 의상 태그를 갈라 낸다 (2026-11-27).
+function personParts(p) {
+  if (typeof p.outfit === "string") return { fixed: tagsMinus(tidy(p.text || ""), p.outfit), outfit: tidy(p.outfit) }; // 고친 글에 의상이 섞여 있어도 고정에는 안 겹치게
+  const o = splitPerson(p.text || ""); return { fixed: o.fixed, outfit: o.outfit };
+}
 const defaultSlot = (kind) => (kind === "인물" ? "traits" : kind === "의상" ? "outfit" : kind === "자세·구도" ? "pose" : "rest");
 const SLOT_PRESET = { traits: "인물", outfit: "의상", pose: "자세·구도" }; // 칸 → 그 칸을 저장할 프리셋 종류
 const bkey = (kind, p) => `b:${kind}:${p.name}`;
@@ -1775,14 +1758,16 @@ function presetCard(e, sets) {
 
 // 고치는 칸. 글자를 칠 때는 저장만 하고 다시 그리지 않는다(키보드가 내려가지 않게). ‘완료’를 누르면 카드로 돌아간다.
 function presetForm(e, kind) {
-  const { p, key } = e;
+  const { key } = e, person = kind === "인물" && e.p.to === "scene";
+  const p = person ? { ...e.p, text: personParts(e.p).fixed, outfit: personParts(e.p).outfit } : e.p; // 인물은 고정·기본 의상 두 칸으로 보여 준다
   const f = (name, label, hint, rows, ph) => `<label>${label}${hint ? ` <span class="hint">${hint}</span>` : ""}${rows
     ? `<textarea data-pf="${name}" rows="${rows}" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="${ph || ""}">${esc(p[name] ?? "")}</textarea>`
     : `<input type="text" data-pf="${name}" autocomplete="off" value="${esc(p[name] ?? "")}">`}</label>`;
   return `
     <div class="preset pform" data-pform="${esc(key)}">
       ${f("name", "이름", "", 0)}
-      ${f("text", "내용", "영어 태그, 쉼표로", 5, "1girl, silver hair, looking at viewer")}
+      ${person ? `${f("text", "인물 (고정)", "인원수·얼굴·머리·몸. 의상을 바꿔도 남음", 4, "1girl, silver hair, red eyes")}
+      ${f("outfit", "기본 의상", "인물을 누르면 의상 칸에 들어감. 의상 칩으로 바꿀 수 있음. 비우면 의상 칸을 안 건드림", 3, "black suit, necktie")}` : f("text", "내용", "영어 태그, 쉼표로", 5, "1girl, silver hair, looking at viewer")}
       ${p.to !== "neg" ? f("neg", "같이 뺄 것", "‘금지 태그도’를 누르면 빼는 것에 더함", 2) : ""}
       ${f("note", "메모", "", 0)}
       ${e.own && p.to === "scene" ? `<label>넣는 칸<select data-pf="slot">${SLOT_KEYS.map((k) => `<option value="${k}" ${p.slot === k ? "selected" : ""}>${SLOT_NAMES[k]}</option>`).join("")}</select></label>` : ""}
@@ -1830,9 +1815,13 @@ function usePreset(p, mode) {
     // 프리셋은 자기 칸(slot)에만 넣는다. ‘바꾸기’도 그 칸만 바꾸고 다른 칸은 그대로 둔다.
     const slot = SLOT_KEYS.includes(p.slot) ? p.slot : "rest", sl = d.draft.slots;
     const put = (k, txt) => { if (!tidy(txt)) return; sl[k] = mode === "replace" ? tidy(txt) : mergeTags(sl[k], txt, p.at === "front"); };
-    if (slot === "traits") { const { count, rest } = splitCount(p.text); put("count", count); put("traits", rest); } else put(slot, p.text);
+    let withOutfit = false;
+    if (slot === "traits") { // 인물: 고정은 1·3순위에, 기본 의상은 4순위에. 기본 의상이 비어 있으면 의상 칸은 그대로
+      const { fixed, outfit } = personParts(p), { count, rest } = splitCount(fixed);
+      put("count", count); put("traits", rest); if (tidy(outfit)) { put("outfit", outfit); withOutfit = true; }
+    } else put(slot, p.text);
     syncScene(); d.draft.seedLock = false;
-    return `‘${p.name}’을 ${SLOT_NAMES[slot]} 칸에 ${mode === "replace" ? "바꿔 넣음" : "더함"}`;
+    return `‘${p.name}’을 ${SLOT_NAMES[slot]}${withOutfit ? "·의상" : ""} 칸에 ${mode === "replace" ? "바꿔 넣음" : "더함"}`;
   }
   if (p.to === "style") { const old = tidy(d.taste.style); d.taste.style = mode === "add" ? mergeTags(old, p.text, false) : tidy(p.text); return `화풍·작가에 ‘${p.name}’을 ${mode === "add" ? "더함" : "넣음"}${mode === "add" ? "" : `. 이전 값: ${old.slice(0, 90)}${old.length > 90 ? "…" : ""}`}`; }
   const old = tidy(d.draft.neg);
@@ -1847,7 +1836,7 @@ const isArtist = (t) => /artist:|^\W*by\s/i.test(t);
 // ＋를 눌렀을 때 미리 채울 글: 그 칸에 지금 적힌 것. 화풍·작가 칸은 작가 태그와 나머지를 갈라 준다.
 function paddText(slotKey, kind) {
   const d = store.data, sl = d.draft.slots;
-  if (slotKey === "traits") return joinTags([sl.count, sl.traits]);
+  if (slotKey === "traits") return joinTags([sl.count, sl.traits]); // 기본 의상은 paddOutfit 칸에 따로
   if (slotKey === "neg") return tg(d.draft.neg);
   if (slotKey === "style") return tg(d.taste.style).split(", ").filter((t) => t && isArtist(t) === (kind === "작가")).join(", ");
   return tg(sl[slotKey]);
@@ -1858,13 +1847,14 @@ function paddForm() {
     <div class="preset pform padd" data-padd-form>
       <label>${a.kind} 프리셋 이름<input type="text" id="paddName" autocomplete="off" value="${esc(a.name)}" placeholder="${a.kind === "작가" ? "작가 이름이나 조합 이름" : "이름"}"></label>
       <label>내용 <span class="hint">영어 태그, 쉼표로. 지금 칸에 적힌 글을 넣어 둠</span><textarea id="paddText" rows="4" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="${a.kind === "작가" ? "artist:이름, artist:이름" : ""}">${esc(a.text)}</textarea></label>
+      ${a.kind === "인물" ? `<label>기본 의상 <span class="hint">인물을 누르면 의상 칸에 들어감. 의상 칩으로 바뀜</span><textarea id="paddOutfit" rows="2" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(a.outfit || "")}</textarea></label>` : ""}
       ${a.kind === "인물" ? `<label>같이 뺄 것 <span class="hint">선택. 이 인물을 켤 때 빼는 것에 같이 들어감</span><input type="text" id="paddNeg" autocapitalize="off" autocomplete="off" value="${esc(a.neg || "")}"></label>` : ""}
       <div class="acts2"><button type="button" id="paddSave">저장</button><button type="button" class="ghost" id="paddCancel">취소</button></div>
     </div>`;
 }
-const CHIP_ONE = new Set(["인물", "의상"]);
+const CHIP_ONE = new Set(["인물", "의상", "자세·구도"]); // 하나만 켜지고, 누르면 그 칸을 바꿔 넣는다(덧붙이지 않음, 2026-11-27 사용자: 그냥 더해져서 불편). 그림체·작가·빼는 것은 섞어 쓰므로 더한다
 const chipTarget = (p) => (p.to === "style" ? store.data.taste.style : p.to === "neg" ? store.data.draft.neg : store.data.draft.slots[SLOT_KEYS.includes(p.slot) ? p.slot : "rest"]);
-const chipBody = (p) => (p.to === "scene" && p.slot === "traits" ? splitCount(p.text).rest : p.text); // 인물은 인원수 태그를 빼고 견준다(그건 1순위 칸에 있다)
+const chipBody = (p) => (p.to === "scene" && p.slot === "traits" ? splitCount(personParts(p).fixed).rest : p.text); // 인물은 고정 부분만, 인원수 태그를 빼고 견준다(의상은 바뀌어도 같은 인물)
 function chipOn(p) {
   const want = tg(chipBody(p)).toLowerCase().split(", ").filter(Boolean);
   if (!want.length) return false;
@@ -1875,7 +1865,11 @@ function chipOff(p) {
   const d = store.data;
   if (p.to === "style") d.taste.style = tagsMinus(d.taste.style, p.text);
   else if (p.to === "neg") d.draft.neg = tagsMinus(d.draft.neg, p.text);
-  else { const k = SLOT_KEYS.includes(p.slot) ? p.slot : "rest"; d.draft.slots[k] = tagsMinus(d.draft.slots[k], chipBody(p)); syncScene(); }
+  else {
+    const k = SLOT_KEYS.includes(p.slot) ? p.slot : "rest"; d.draft.slots[k] = tagsMinus(d.draft.slots[k], chipBody(p));
+    if (k === "traits") d.draft.slots.outfit = tagsMinus(d.draft.slots.outfit, personParts(p).outfit); // 인물을 끄면 그 기본 의상도 뺀다(다른 의상으로 바꿨으면 남는 게 없다)
+    syncScene();
+  }
   if (p.neg && p.to !== "neg") d.draft.neg = tagsMinus(d.draft.neg, p.neg);
 }
 function chipRow(slotKey) {
@@ -1894,10 +1888,10 @@ function chipToggle(key) {
   else {
     const out = [];
     if (CHIP_ONE.has(kind)) for (const e of presetEntries(kind)) if (e.key !== key && !e.hidden && chipOn(e.p)) { chipOff(e.p); out.push(e.p.name); }
-    usePreset(p, "add");
+    usePreset(p, CHIP_ONE.has(kind) ? "replace" : "add");
     if (kind === "인물" && tidy(p.neg || "")) usePreset(p, "neg");
     autoRef(key, p);
-    msg = `‘${p.name}’을 넣음${kind === "인물" && tidy(p.neg || "") ? " (금지 태그도)" : ""}${out.length ? ` · ‘${out.join("’, ‘")}’은 뺌` : ""}`;
+    msg = `‘${p.name}’을 ${CHIP_ONE.has(kind) ? "바꿔 " : ""}넣음${kind === "인물" && tidy(personParts(p).outfit) ? " (기본 의상도)" : ""}${kind === "인물" && tidy(p.neg || "") ? " (금지 태그도)" : ""}${out.length ? ` · ‘${out.join("’, ‘")}’은 뺌` : ""}`;
   }
   toast(msg, () => { const o = JSON.parse(snap); d.draft.slots = o.slots; syncScene(); d.draft.seedLock = o.lock; d.taste.style = o.style; d.draft.neg = o.nd; store.save(); });
   store.save();
@@ -2049,6 +2043,18 @@ function wireSlots() {
   document.querySelectorAll("details.sec").forEach((dt) => dt.addEventListener("toggle", () => { if (dt.open) dt.querySelectorAll("[data-slot]").forEach(grow); }));
   document.querySelectorAll("[data-slot]").forEach((el) => {
     grow(el);
+    // 칸에 손으로 태그를 넣으면(다른 칸에서 옮겨 오거나 새로 적거나) 그 칸을 기억한다. 고치기 시작할 때 값과 끝났을 때 값을 견준다.
+    if (SLOT_KEYS.includes(el.dataset.slot)) {
+      el.addEventListener("focus", () => { el.dataset.before = el.value; });
+      el.addEventListener("change", () => {
+        const k = el.dataset.slot, memo = d.slotMemo, was = JSON.stringify(memo);
+        const n = learnSlots(el.dataset.before ?? "", el.value, k);
+        el.dataset.before = el.value;
+        if (!n) return;
+        store.persist();
+        toast(`태그 ${n}개를 ‘${SLOT_NAMES[k]}’ 칸으로 기억함`, () => { for (const t of Object.keys(memo)) delete memo[t]; Object.assign(memo, JSON.parse(was)); store.persist(); });
+      });
+    }
     el.addEventListener("input", () => {
       grow(el);
       const k = el.dataset.slot;
@@ -2081,20 +2087,21 @@ function wireSlots() {
   document.querySelectorAll("[data-pchip]").forEach((b) => b.addEventListener("click", () => chipToggle(b.dataset.pchip)));
   document.querySelectorAll("[data-padd-open]").forEach((b) => b.addEventListener("click", () => {
     const [slot, kind] = b.dataset.paddOpen.split(":");
-    ui.padd = ui.padd && ui.padd.kind === kind && ui.padd.slot === slot ? null : { slot, kind, name: "", text: paddText(slot, kind), neg: "" };
+    ui.padd = ui.padd && ui.padd.kind === kind && ui.padd.slot === slot ? null : { slot, kind, name: "", text: paddText(slot, kind), neg: "", ...(kind === "인물" ? { outfit: tg(d.draft.slots.outfit) } : {}) };
     render();
     $("paddName")?.focus();
   }));
   on("paddName", "input", (e) => { ui.padd.name = e.target.value; });
   on("paddText", "input", (e) => { ui.padd.text = e.target.value; });
   on("paddNeg", "input", (e) => { ui.padd.neg = e.target.value; });
+  on("paddOutfit", "input", (e) => { ui.padd.outfit = e.target.value; });
   on("paddCancel", "click", () => { ui.padd = null; render(); });
   on("paddSave", "click", () => {
     const a = ui.padd, name = a.name.trim().slice(0, 30), text = tidy(a.text);
     if (!name) return toast("이름을 적기");
     if (!text) return toast("내용이 비어 있음. 태그를 적기");
     const to = KIND_TO[a.kind] || "scene";
-    const pr = { id: crypto.randomUUID(), name, text, to, kind: a.kind, ...(to === "scene" ? { slot: a.slot } : {}), ...(a.kind === "인물" ? { at: "front" } : {}), ...(tidy(a.neg || "") ? { neg: tidy(a.neg) } : {}) };
+    const pr = { id: crypto.randomUUID(), name, text, to, kind: a.kind, ...(to === "scene" ? { slot: a.slot } : {}), ...(a.kind === "인물" ? { at: "front", outfit: tidy(a.outfit || "") } : {}), ...(tidy(a.neg || "") ? { neg: tidy(a.neg) } : {}) };
     d.presets.unshift(pr);
     ui.padd = null;
     toast(`‘${name}’을 ${a.kind} 프리셋으로 저장함`, () => { d.presets = d.presets.filter((x) => x !== pr); store.save(); });
@@ -2863,19 +2870,22 @@ function wire(name, arg, seq) {
       store.save();
     }));
     document.querySelectorAll("[data-pf]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
-      const key = el.closest("[data-pform]")?.dataset.pform, f = el.dataset.pf;
+      const form = el.closest("[data-pform]"), key = form?.dataset.pform, f = el.dataset.pf;
       if (!key) return;
+      // 인물 폼: 고정이나 기본 의상 중 하나를 고치면 둘 다 적는다(안 그러면 고정만 남고 의상이 text에서 사라짐)
+      const pair = (f === "text" || f === "outfit") && form.querySelector('[data-pf="outfit"]') ? { text: form.querySelector('[data-pf="text"]').value, outfit: form.querySelector('[data-pf="outfit"]').value } : null;
       if (key.startsWith("own:")) {
         const p = d.presets.find((x) => x.id === key.slice(4));
         if (!p) return;
         if (f === "to") { if (TARGET[el.value]) { p.to = el.value; if (p.to !== "scene") { delete p.at; delete p.slot; } else if (!p.slot) p.slot = "rest"; } }
         else if (f === "slot") { if (SLOT_KEYS.includes(el.value)) p.slot = el.value; }
+        else if (pair) Object.assign(p, pair);
         else p[f] = el.value;
       } else {
         const base = baseOf(key);
         if (!base) return;
         const e = (d.presetEdits[key] ??= {});
-        if (el.value === (base[f] ?? "")) delete e[f]; else e[f] = el.value;
+        for (const [ff, v] of Object.entries(pair || { [f]: el.value })) { if (v === (base[ff] ?? "")) delete e[ff]; else e[ff] = v; }
         if (!Object.keys(e).length) delete d.presetEdits[key];
         const rv = document.querySelector(`[data-prevert="${CSS.escape(key)}"]`);
         if (rv) rv.disabled = !PFIELDS.some((k) => typeof d.presetEdits[key]?.[k] === "string");
