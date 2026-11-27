@@ -611,3 +611,7 @@ button.line { color: var(--ink); background: transparent; border: 1px solid var(
 
 /* 2026-11-27 렉 줄이기: 칸 높이는 브라우저가 글에 맞춘다(크롬 123부터). 모르는 브라우저는 app.js가 잰다 */
 @supports (field-sizing: content) { .slot textarea { field-sizing: content; min-height: 46px; max-height: 60vh; } }
+
+/* 2026-11-27 기본 바이브 */
+.basebox { margin: 8px 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.rt .basev { position: absolute; left: 4px; bottom: 22px; font-style: normal; font-size: 11px; padding: 1px 5px; border-radius: 6px; background: var(--gold); color: #111; }

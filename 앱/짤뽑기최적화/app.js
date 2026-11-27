@@ -67,6 +67,7 @@ const SHAPE = () => ({
     token: "", model: "nai-diffusion-5-full", customModel: "", size: "세로", steps: 28, scale: 5, quality: true,
     aiKey: "", aiModel: MODEL_CHOICES[0], aiCustom: "", qualityText: "",
     sampler: "k_euler_ancestral", noise: "karras", cfgRescale: 0, variety: false, customW: 832, customH: 1216, refMode: "vibe",
+    baseOn: true, baseStr: 0.3, // 기본 바이브 쓰기·강도 (2026-11-27)
     bgOn: false, // 배경 깔기. 끄면 배경 칸 대신 simple background (2026-11-27)
     autoMemo: false, // 최적화판: 켜면 서랍에 새 그림을 넣을 때 비서가 한 번 보고 메모를 남긴다 (그 그림이 구글로 한 번 감). 2026-11-27 사용자: 처음엔 끔 (노출 그림이 구글 차단에 걸림)
     memoOff1: 0, // 옛 데이터의 autoMemo를 한 번만 껐다는 표시
@@ -380,6 +381,15 @@ const MAX_REFS = 4; // 한 번에 켜 쓰는 장수. 이 앱이 정한 한도. N
 const LIB_MAX = 60; // 서랍에 넣어 두는 장수 (2026-11-21: 자주 쓰는 바이브를 넣어 두고 골라 켠다)
 const refCode = (r) => r.id.slice(0, 4); // 비서가 서랍 그림을 가리키는 짧은 이름
 const refsOn = () => refs.filter((r) => r.on).length;
+// 기본 바이브 (2026-11-27, 사용자: 참고 그림이 있을 때와 없을 때 품질 차이가 너무 큼). 서랍 그림에 base를 표시해 두면,
+// 바이브 방식에서 켠 그림이 하나도 없을 때 그 그림(2장까지)이 settings.baseStr(처음 0.3) 강도로 깔린다. 그림체만 따라오고 구도는 프롬프트대로.
+// 정밀 참조는 한 장마다 5 Anlas가 더 들어서(문서) 기본으로 깔지 않는다. 인코딩은 그림의 정보량 그대로라 저장해 둔 인코딩을 다시 쓴다.
+const BASE_MAX = 2;
+function baseVibes(s = store.data.settings) {
+  if (refPlan(s) !== "vibe" || s.baseOn === false || refs.some((r) => r.on)) return [];
+  return refs.filter((r) => r.base && (r.full || r.encOnly)).slice(0, BASE_MAX);
+}
+const baseStr = (s = store.data.settings) => clamp(s.baseStr, 0.05, 1, 0.3);
 // 비서가 써도 되는 서랍 그림 (2026-11-21, 사용자가 고름). ai가 false인 그림은 비서에게 이름도 그림도 안 가고, refs 블록이 켜지도 끄지도 않는다. 옛 항목은 칸이 없어 써도 되는 것으로 읽는다.
 const aiRefs = () => refs.filter((r) => r.ai !== false);
 const supportsVibe = (s) => /^nai-diffusion-4/.test(modelId(s)); // V5는 400으로 거절됨 (art 확인 2026-11-17)
@@ -715,7 +725,7 @@ async function encodeRef(r, model, token, signal) {
   const k = `${model}|${r.info}`;
   if (r.enc?.[k]) return r.enc[k];
   if (r.encOnly) throw new Error(`바이브 ‘${r.name}’에는 원본 그림이 없어서 새로 인코딩을 못 함. 파일에 든 것: ${Object.keys(r.enc || {}).map((x) => { const [m, i] = x.split("|"); return `${MODELS[m]?.이름 || m} 정보량 ${i}`; }).join(", ") || "없음"}. 모델이나 정보량을 거기에 맞추기.`);
-  phase = `참고 그림 인코딩 중 (${refs.filter((x) => x.on).indexOf(r) + 1}/${refs.filter((x) => x.on).length})…`;
+  phase = r.on ? `참고 그림 인코딩 중 (${refs.filter((x) => x.on).indexOf(r) + 1}/${refs.filter((x) => x.on).length})…` : "기본 바이브 인코딩 중 (처음 한 번)…";
   render();
   const res = await fetch(VIBE_API, {
     method: "POST", signal,
@@ -824,7 +834,7 @@ function requestBody(prompt, negative, rec, ex = {}) {
     sm: false, sm_dyn: false, dynamic_thresholding: false, controlnet_strength: 1,
     legacy: false, add_original_image: false, cfg_rescale: rec.cr ?? 0, noise_schedule: rec.noise || "karras",
     legacy_v3_extend: false, uncond_scale: 1, negative_prompt: negative, prompt,
-    reference_image_multiple: ex.vibes || [], reference_information_extracted_multiple: ex.vibes ? used.map((r) => r.info) : [], reference_strength_multiple: ex.vibes ? used.map((r) => r.strength) : [],
+    reference_image_multiple: ex.vibes || [], reference_information_extracted_multiple: ex.vibes ? used.map((r) => r.info) : [], reference_strength_multiple: ex.vibes ? (ex.str || used.map((r) => r.strength)) : [],
     extra_noise_seed: rec.seed,
     v4_prompt: cap(prompt, false), v4_negative_prompt: cap(negative, true),
   };
@@ -902,7 +912,9 @@ async function generate() {
   const [w, h] = sizeOf(s);
   const seed = d.draft.seedLock && Number.isInteger(d.draft.seed) ? d.draft.seed : Math.floor(Math.random() * 4294967295);
   const plan = refPlan(s);                                   // "vibe" | "precise" | null
-  const used = plan ? refs.filter((r) => r.on) : [];         // 모델이 못 받으면 붙여 둔 그림이 있어도 안 보낸다
+  const base = baseVibes(s);
+  const used = plan ? (base.length ? base : refs.filter((r) => r.on)) : [];         // 모델이 못 받으면 붙여 둔 그림이 있어도 안 보낸다. 켠 것이 없으면 기본 바이브
+  const strs = base.length ? base.map(() => baseStr(s)) : null;
   const chars = supportsChars(s) ? d.draft.chars.filter((c) => tidy(c.text)).map((c) => ({ text: tidy(c.text), neg: tidy(c.neg || ""), pos: Number.isInteger(c.pos) ? c.pos : null })) : [];
   const useI2i = d.draft.i2i.on && src;
   const rec = {
@@ -911,7 +923,7 @@ async function generate() {
     sampler: SAMPLERS[s.sampler] ? s.sampler : "k_euler_ancestral", noise: NOISES.includes(s.noise) ? s.noise : "karras",
     cr: clamp(s.cfgRescale, 0, 1, 0), vb: !!s.variety, bg: !!s.bgOn,
   };
-  if (used.length) { rec.refs = used.map((r) => ({ s: r.strength, i: r.info, id: r.id, n: r.name })); rec.mode = plan; } // id: 다시 뽑기 때 서랍에서 같은 그림을 찾아 켠다
+  if (used.length) { rec.refs = used.map((r, i) => ({ s: strs ? strs[i] : r.strength, i: r.info, id: r.id, n: r.name, ...(strs ? { base: 1 } : {}) })); rec.mode = plan; } // id: 다시 뽑기 때 서랍에서 같은 그림을 찾아 켠다
   if (chars.length) rec.chars = chars;
   if (tidy(d.draft.neg)) rec.nd = tidy(d.draft.neg);
   if (useI2i) rec.i2i = { strength: clamp(d.draft.i2i.strength, 0, 1, 0.7), noise: clamp(d.draft.i2i.noise, 0, 1, 0) };
@@ -924,7 +936,7 @@ async function generate() {
   let lock = null, okDone = false;
   try { lock = await navigator.wakeLock?.request("screen"); } catch { lock = null; }
   try {
-    const ex = { used };
+    const ex = { used, str: strs };
     if (plan === "vibe") {
       ex.vibes = [];
       for (const r of used) ex.vibes.push(await encodeRef(r, rec.model, s.token.trim(), busy.signal)); // 한 장씩, 자동 재시도 없음
@@ -1457,7 +1469,7 @@ function stateText(sent = new Set()) { // sent: 이번 메시지에 그림으로
     `[장면] outfit: ${v(sl.outfit)} / pose: ${v(sl.pose)} / bg: ${v(sl.bg)}${s.bgOn ? "" : " (배경 깔기 꺼짐: 배경 대신 simple background가 감. 배경을 바꾸라고 하면 bg 줄을 쓰고 사용자에게 ‘배경 깔기’를 켜라고 한 줄)"}${tg(sl.rest) ? ` / 그 밖에: ${tg(sl.rest)}` : ""} / 이번 빼는 것: ${v(draft.neg)}`,
     chars ? `인물별 프롬프트:\n${chars}` : "",
     `설정: ${s.sampler}, ${s.steps}스텝, 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, ${s.noise}${s.variety ? ", Variety+" : ""}, ${w}x${h}, 시드 ${draft.seedLock && Number.isInteger(draft.seed) ? `${draft.seed} 고정` : "무작위"}`,
-    plan ? `켠 참고 그림: ${on.length ? on.map((r) => `#${refCode(r)} 강도 ${r.strength} 정보량 ${r.info}`).join(", ") : "없음"}` : "",
+    plan ? `켠 참고 그림: ${on.length ? on.map((r) => `#${refCode(r)} 강도 ${r.strength} 정보량 ${r.info}`).join(", ") : baseVibes(s).length ? `없음 (기본 바이브 ${baseVibes(s).map((r) => `#${refCode(r)}`).join(", ")}가 강도 ${baseStr(s)}로 깔림)` : "없음"}` : "",
     ...on.filter((r) => r.meta?.prompt).map((r) => `  #${refCode(r)} 프롬프트: ${cut(sceneOnly(r.meta.prompt), 160)}`),
     draft.i2i.on && src ? `이미지→이미지 켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "",
   ];
@@ -1984,6 +1996,7 @@ function refInner() {
         <label>정보량 <span class="hint">0~1${mode === "vibe" ? ", 바꾸면 다시 인코딩" : ""}</span><input type="number" inputmode="decimal" min="0" max="1" step="0.1" value="${r.info}" data-rinfo="${r.id}"></label>
         ${mode === "vibe" ? `<p class="hint">${r.enc?.[key(r)] ? `인코딩 있음 (다시 안 함${r.vibe ? ", 바이브 파일" : ""})` : r.encOnly ? "이 모델·정보량의 인코딩이 파일에 없음. 원본 그림이 없어 새로 못 함" : "다음 뽑기에서 인코딩 — 문서 기준 2 Anlas"}</p>` : ""}
         <label class="line"><input type="checkbox" data-rai="${r.id}" ${r.ai !== false ? "checked" : ""}> 비서가 써도 됨</label>
+        ${mode === "vibe" ? `<label class="line"><input type="checkbox" data-rbase="${r.id}" ${r.base ? "checked" : ""}> 기본 바이브 <span class="hint">아무것도 안 켰을 때 강도 ${baseStr(s)}로 깔림</span></label>` : ""}
         ${r.encOnly ? "" : `<label>메모 <span class="hint">비서에게 그림 대신 가는 글${memoStale(r) ? " · 옛 그림의 메모임" : r.memoBy === "user" ? " · 직접 고침" : ""}</span><textarea rows="2" data-rmemo="${r.id}" autocomplete="off" placeholder="${r.ai === false ? "비서가 못 쓰는 그림이라 메모 없음" : "아직 없음. ‘비서가 보기’를 누르면 한 번 보고 적음"}">${esc(r.memo || "")}</textarea></label>
         <div class="acts2">${r.ai === false ? "" : `<button type="button" class="ghost sm" data-rlook="${r.id}" ${memoJob ? "disabled" : ""}>${r.memo ? "비서가 다시 보기" : "비서가 보기"}</button>`}<button type="button" class="ghost sm" data-rswap="${r.id}">그림 바꾸기</button></div>`}
         ${r.meta?.prompt ? `<button type="button" class="line" data-rprompt="${r.id}">이 그림 프롬프트 넣기</button>` : ""}
@@ -1992,10 +2005,13 @@ function refInner() {
     </li>`;
   const on = refs.filter((r) => r.on), off = refs.filter((r) => !r.on);
   const tile = (r) => (ui.refEdit
-    ? `<li class="rt edit"><img src="${r.url}" alt=""><input type="text" data-rname="${r.id}" value="${esc(r.name)}" aria-label="이름" autocomplete="off"><label class="line mini"><input type="checkbox" data-rai="${r.id}" ${r.ai !== false ? "checked" : ""}> 비서</label><button type="button" class="ghost sm danger" data-rdel="${r.id}">지우기</button></li>`
-    : `<li class="rt ${r.on ? "on" : ""}"><button type="button" data-rpick="${r.id}" aria-pressed="${!!r.on}" aria-label="${esc(r.name)} ${r.on ? "끄기" : "켜기"}"><img src="${r.url}" alt="">${r.ai === false ? `<i class="noai">비서 ✕</i>` : needsMemo(r) ? `<i class="noai nomemo">메모 ✕</i>` : ""}<span>${esc(r.name)}</span></button></li>`);
+    ? `<li class="rt edit"><img src="${r.url}" alt=""><input type="text" data-rname="${r.id}" value="${esc(r.name)}" aria-label="이름" autocomplete="off"><label class="line mini"><input type="checkbox" data-rai="${r.id}" ${r.ai !== false ? "checked" : ""}> 비서</label><label class="line mini"><input type="checkbox" data-rbase="${r.id}" ${r.base ? "checked" : ""}> 기본</label><button type="button" class="ghost sm danger" data-rdel="${r.id}">지우기</button></li>`
+    : `<li class="rt ${r.on ? "on" : ""}"><button type="button" data-rpick="${r.id}" aria-pressed="${!!r.on}" aria-label="${esc(r.name)} ${r.on ? "끄기" : "켜기"}${r.base ? " (기본 바이브)" : ""}"><img src="${r.url}" alt="">${r.base ? `<i class="basev">기본</i>` : ""}${r.ai === false ? `<i class="noai">비서 ✕</i>` : needsMemo(r) ? `<i class="noai nomemo">메모 ✕</i>` : ""}<span>${esc(r.name)}</span></button></li>`);
   const need = refs.filter(needsMemo).length;
-  return `
+  const nBase = refs.filter((r) => r.base).length, baseNow = baseVibes(s);
+  const baseBox = mode === "vibe" ? `<div class="basebox"><label class="line"><input type="checkbox" id="baseOn" ${s.baseOn !== false ? "checked" : ""}> 기본 바이브 <span class="hint">${nBase ? `${nBase}장 골라 둠${nBase > BASE_MAX ? ` (앞 ${BASE_MAX}장만 씀)` : ""} · ${baseNow.length ? "지금 깔림" : on.length ? "켠 그림이 있어 쉼" : "꺼짐"}` : "그림 카드의 ‘기본 바이브’를 체크하면 켠 그림이 없을 때 깔림"}</span></label>
+      ${nBase ? `<label>기본 바이브 강도 <output id="baseStrOut">${baseStr(s)}</output><input type="range" id="baseStr" min="0.1" max="0.6" step="0.05" value="${baseStr(s)}"></label><p class="hint">낮을수록 그림체만, 높을수록 구도·색까지 따라옴. 처음 인코딩만 그림마다 2 Anlas(문서).</p>` : ""}</div>` : "";
+  return `${baseBox}
     <div class="seg seg2" role="group" aria-label="참고 방식">
       <button type="button" class="${mode === "vibe" ? "on" : ""}" data-rmode="vibe">바이브<small>화풍·색·분위기</small></button>
       <button type="button" class="${mode === "precise" ? "on" : ""}" data-rmode="precise" ${supportsPrecise(s) ? "" : "disabled"}>정밀 참조<small>${supportsPrecise(s) ? "캐릭터·옷 모양" : "V4.5에서만"}</small></button>
@@ -2787,7 +2803,7 @@ const SCREENS = {
     const notes = anlasNotes(s, draft);
     const [w, h] = sizeOf(s);
     const nChars = draft.chars.filter((c) => tidy(c.text)).length;
-    const nRefs = refPlan(s) ? refs.filter((r) => r.on).length : 0;
+    const nRefs = refPlan(s) ? refs.filter((r) => r.on).length : 0, nBaseNow = baseVibes(s).length;
     // 2026-11-21 재배치: 그림 자리가 맨 위, 뽑기 버튼은 아래에 떠 있음, 1~4순위는 접힘 (짤뽑기·짤뽑기공유 같이 고침)
     return `
       ${originJob ? `<p class="notice">${esc(originJob)}</p>` : !s.token.trim() && originRaw() ? `<p class="notice">원본 짤뽑기에서 쓰던 토큰·프리셋·서랍을 이 복사본으로 가져올 수 있음. 원본은 그대로 둠. <button type="button" class="ghost sm" id="originIn">원본에서 가져오기</button></p>` : ""}
@@ -2823,7 +2839,7 @@ const SCREENS = {
       ${notes.length ? `<p class="hint warn">Anlas가 들 수 있음 (문서 기준, 이 앱에서 차감은 재 보지 않음): ${esc(notes.join(" · "))}</p>` : ""}
       <div class="gobar">${busy
         ? `<button type="button" id="stop" class="ghost big${stopArmed() ? " armed" : ""}">${stopArmed() ? "한 번 더 누르면 취소" : `${esc(phase || "뽑는 중…")} <small>취소는 두 번 누르기</small>`}</button>`
-        : `<button type="button" id="go" class="big">뽑기${nChars || nRefs || (draft.i2i.on && src) ? ` <small>(${[nChars ? `인물 ${nChars}` : "", nRefs ? `참고 ${nRefs}` : "", draft.i2i.on && src ? "이미지→이미지" : ""].filter(Boolean).join(" · ")})</small>` : ""}</button>`}</div>
+        : `<button type="button" id="go" class="big">뽑기${nChars || nRefs || nBaseNow || (draft.i2i.on && src) ? ` <small>(${[nChars ? `인물 ${nChars}` : "", nRefs ? `참고 ${nRefs}` : nBaseNow ? `기본 바이브 ${nBaseNow}` : "", draft.i2i.on && src ? "이미지→이미지" : ""].filter(Boolean).join(" · ")})</small>` : ""}</button>`}</div>
       ${toolStrip([
         ["ai", "AI 도우미", asking ? "생각 중…" : "", aiInner],
         ["chars", "인물별 프롬프트", nChars ? `${nChars}명` : "", charsInner],
@@ -3389,6 +3405,10 @@ function wire(name, arg, seq) {
     document.querySelectorAll("[data-rmode]").forEach((b) => b.addEventListener("click", () => { d.settings.refMode = b.dataset.rmode; store.save(); }));
     on("addRef", "click", () => $("refFile").click());
     on("refFile", "change", (e) => { const f = [...e.target.files]; e.target.value = ""; addRefs(f); });
+    document.querySelectorAll("[data-rbase]").forEach((el) => el.addEventListener("change", () => { const r = byId(el, "rbase"); if (!r) return; r.base = el.checked; if (!r.base) delete r.base; saveRef(r); toast(el.checked ? `‘${r.name}’을 기본 바이브로 (켠 그림이 없을 때 깔림)` : `‘${r.name}’ 기본 바이브 뺌`); render(); }));
+    on("baseOn", "change", (e) => { d.settings.baseOn = e.target.checked; store.save(); });
+    on("baseStr", "input", (e) => { const o = $("baseStrOut"); if (o) o.textContent = e.target.value; });
+    on("baseStr", "change", (e) => { d.settings.baseStr = clamp(e.target.value, 0.05, 1, 0.3); store.save(); });
     document.querySelectorAll("[data-roff]").forEach((el) => el.addEventListener("click", () => { const r = byId(el, "roff"); if (!r) return; r.on = false; saveRef(r); render(); }));
     // 서랍 그림에 든 NovelAI 프롬프트를 칸에 넣는다 (2026-11-27 사용자). 고정 칸에 이미 있는 품질·그림체 태그는 빼고, 칸마다 짐작해 이번 그림을 통째로 바꾼다. 빼는 것·인물별도. 되돌리기 한 번에 돌아간다.
     document.querySelectorAll("[data-rprompt]").forEach((el) => el.addEventListener("click", () => {
