@@ -24,6 +24,8 @@ const SAMPLERS = {
   k_dpmpp_2s_ancestral: "DPM++ 2S Ancestral", k_dpmpp_sde: "DPM++ SDE", k_dpmpp_2m_sde: "DPM++ 2M SDE",
 };
 const NOISES = ["karras", "exponential", "polyexponential", "native"]; // 넷 다 200 확인 (2026-11-18)
+const DEFAULT_STEPS = 28;              // 처음 스텝이자 값이 이상할 때 돌아가는 값 (2026-11-27 하드코딩 정리: 여러 곳의 28을 모음)
+const MAX_PX = 1536, DEF_W = 832, DEF_H = 1216; // ‘직접’ 크기의 상한과 처음 가로·세로 (64 단위)
 const FREE_STEPS = 28;                 // Opus는 28스텝 이하·일반 크기 이하·한 장씩이면 Anlas 없음 (docs.novelai.net/en/image/basics)
 const FREE_PIXELS = 1024 * 1024;       // '일반 크기' 경계를 1024x1024로 잡은 것은 이 앱의 추정. 문서에는 숫자가 없다.
 const MAX_STEPS = 50;                  // 이 앱이 정한 상한. NovelAI의 상한은 확인하지 못했다.
@@ -855,12 +857,12 @@ function requestBody(prompt, negative, rec, ex = {}) {
 // 이 설정에서 Anlas가 드는 것을 문서 기준으로 알려 준다. 실제 차감은 이 앱에서 재 보지 않았다.
 function anlasNotes(s, d) {
   const [w, h] = sizeOf(s), n = [];
-  if (clamp(s.steps, 1, MAX_STEPS, 28) > FREE_STEPS) n.push(`스텝 ${FREE_STEPS} 초과`);
+  if (clamp(s.steps, 1, MAX_STEPS, DEFAULT_STEPS) > FREE_STEPS) n.push(`스텝 ${FREE_STEPS} 초과`);
   if (w * h > FREE_PIXELS) n.push("일반 크기보다 큼");
   if (refPlan(s) === "precise" && refs.some((r) => r.on)) n.push("정밀 참조는 한 장마다 5 Anlas 추가");
   return n;
 }
-const sizeOf = (s) => (s.size === "직접" ? [clamp(Math.round(s.customW / 64) * 64, 64, 1536, 832), clamp(Math.round(s.customH / 64) * 64, 64, 1536, 1216)] : SIZES[s.size] || SIZES.세로);
+const sizeOf = (s) => (s.size === "직접" ? [clamp(Math.round(s.customW / 64) * 64, 64, MAX_PX, DEF_W), clamp(Math.round(s.customH / 64) * 64, 64, MAX_PX, DEF_H)] : SIZES[s.size] || SIZES.세로);
 
 // 응답은 image_0.png 하나가 든 zip이다. 라이브러리 없이 첫 파일만 꺼낸다.
 async function pngFromResponse(buf) {
@@ -919,7 +921,7 @@ async function generate() {
   const useI2i = d.draft.i2i.on && src;
   const rec = {
     id: crypto.randomUUID(), scene: sceneOf(d.draft.slots), slots: { ...d.draft.slots }, style: tidy(d.taste.style), negative: joinTags([d.taste.negative, d.draft.neg]),
-    seed, model: modelId(s), w, h, steps: clamp(s.steps, 1, MAX_STEPS, 28), scale: clamp(s.scale, 0, 10, 5), at: Date.now(), verdict: null,
+    seed, model: modelId(s), w, h, steps: clamp(s.steps, 1, MAX_STEPS, DEFAULT_STEPS), scale: clamp(s.scale, 0, 10, 5), at: Date.now(), verdict: null,
     sampler: SAMPLERS[s.sampler] ? s.sampler : "k_euler_ancestral", noise: NOISES.includes(s.noise) ? s.noise : "karras",
     cr: clamp(s.cfgRescale, 0, 1, 0), vb: !!s.variety, bg: !!s.bgOn,
   };
@@ -1243,7 +1245,7 @@ async function fileToSlots(f) {
   if (got.chars.length && supportsChars(s)) { d.draft.chars = got.chars.slice(0, MAX_CHARS).map((c) => ({ id: crypto.randomUUID(), text: c.text, neg: c.neg || "", pos: null, from: "file" })); ui.open.chars = true; done.push(`인물 ${d.draft.chars.length}명`); }
   const g = got.set;
   if (Number.isInteger(Number(g.seed)) && g.seed !== "" && g.seed != null) { d.draft.seed = Number(g.seed); d.draft.seedLock = true; done.push(`시드 ${g.seed}`); }
-  if (g.steps != null) s.steps = clamp(g.steps, 1, MAX_STEPS, 28);
+  if (g.steps != null) s.steps = clamp(g.steps, 1, MAX_STEPS, DEFAULT_STEPS);
   if (g.scale != null) s.scale = clamp(g.scale, 0, 10, 5);
   if (SAMPLERS[g.sampler]) s.sampler = g.sampler;
   if (NOISES.includes(g.noise)) s.noise = g.noise;
@@ -1278,7 +1280,7 @@ async function importImages(files) {
       const rec = {
         id, scene: prompt, slots: normSlots(null, prompt), style: "", negative: meta?.uc || "", nd: "",
         seed: meta?.seed ?? null, model: meta?.model || "받은 그림", w, h,
-        steps: clamp(meta?.steps, 1, MAX_STEPS, 28), scale: clamp(meta?.scale, 0, 10, 5), at: Date.now(), verdict: "keep", ext: true, name: String(f.name || "").slice(0, 60),
+        steps: clamp(meta?.steps, 1, MAX_STEPS, DEFAULT_STEPS), scale: clamp(meta?.scale, 0, 10, 5), at: Date.now(), verdict: "keep", ext: true, name: String(f.name || "").slice(0, 60),
       };
       if (SAMPLERS[meta?.sampler]) rec.sampler = meta.sampler;
       if (NOISES.includes(meta?.noise)) rec.noise = meta.noise;
@@ -1717,15 +1719,15 @@ function applyParams(text) {
   const s = store.data.settings, d = store.data, done = [];
   const set = (k, v, label) => { s[k] = v; done.push(`${label} ${v}`); };
   if (SAMPLERS[j.sampler]) set("sampler", j.sampler, "샘플러");
-  if (j.steps != null) set("steps", clamp(j.steps, 1, MAX_STEPS, 28), "스텝");
+  if (j.steps != null) set("steps", clamp(j.steps, 1, MAX_STEPS, DEFAULT_STEPS), "스텝");
   if (j.scale != null) set("scale", clamp(j.scale, 0, 10, 5), "프롬프트 강도");
   if (j.cfg_rescale != null) set("cfgRescale", clamp(j.cfg_rescale, 0, 1, 0), "cfg_rescale");
   if (NOISES.includes(j.noise_schedule)) set("noise", j.noise_schedule, "노이즈 스케줄");
   if (typeof j.variety === "boolean") set("variety", j.variety, "Variety+");
   if (SIZES[j.size]) set("size", j.size, "크기");
   if (j.width != null || j.height != null) {
-    const r64 = (v, dv) => Math.round(clamp(v, 64, 1536, dv) / 64) * 64;
-    s.customW = r64(j.width ?? s.customW, 832); s.customH = r64(j.height ?? s.customH, 1216); s.size = "직접"; done.push(`크기 ${s.customW}×${s.customH}`);
+    const r64 = (v, dv) => Math.round(clamp(v, 64, MAX_PX, dv) / 64) * 64;
+    s.customW = r64(j.width ?? s.customW, DEF_W); s.customH = r64(j.height ?? s.customH, DEF_H); s.size = "직접"; done.push(`크기 ${s.customW}×${s.customH}`);
   }
   if (j.seed != null) {
     if (/^(random|무작위|none|null)$/i.test(String(j.seed))) { d.draft.seedLock = false; d.draft.seed = null; done.push("시드 무작위"); }
@@ -1733,7 +1735,12 @@ function applyParams(text) {
   }
   if (typeof j.quality === "boolean") set("quality", j.quality, "품질 태그");
   if (typeof j.bg === "boolean") { s.bgOn = j.bg; done.push(`배경 깔기 ${j.bg ? "켬" : "끔"}`); }
-  if (j.model != null) { const m = String(j.model).toLowerCase(); const id = /4\.?5|v4/.test(m) ? "nai-diffusion-4-5-full" : /5/.test(m) ? "nai-diffusion-5-full" : MODELS[j.model] ? j.model : ""; if (id) { s.model = id; done.push(`모델 ${MODELS[id].이름}`); } }
+  // 모델: API 이름 그대로이거나, 화면 이름(V5 Full·V4.5 Full)·줄임(v5·v4.5·4.5)이면 고른 수 있는 모델(MODELS)에서 찾는다. 2026-11-27 고침: 전에는 "v4"도 V4.5로 읽었다.
+  if (j.model != null) {
+    const m = String(j.model).toLowerCase().replace(/[\s_-]|full/g, "").replace(/^v/, "");
+    const id = MODELS[j.model] ? j.model : Object.keys(MODELS).find((k) => MODELS[k].이름.toLowerCase().replace(/[\s_-]|full/g, "").replace(/^v/, "") === m);
+    if (id) { s.model = id; done.push(`모델 ${MODELS[id].이름}`); } else done.push(`모델 ‘${j.model}’은 고를 수 없음 (${Object.values(MODELS).map((x) => x.이름).join("·")})`);
+  }
   return done;
 }
 
@@ -2919,7 +2926,7 @@ const SCREENS = {
       <div class="seg seg4" role="group" aria-label="크기">
         ${[...Object.keys(SIZES), "직접"].map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${k === "직접" ? (s.size === "직접" ? `${w}×${h}` : "입력") : SIZES[k].join("×")}</small></button>`).join("")}
       </div>
-      ${s.size === "직접" ? `<div class="two"><label>가로 <span class="hint">64 단위</span><input id="customW" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${w}"></label><label>세로<input id="customH" type="number" inputmode="numeric" step="64" min="64" max="1536" value="${h}"></label></div>` : ""}
+      ${s.size === "직접" ? `<div class="two"><label>가로 <span class="hint">64 단위</span><input id="customW" type="number" inputmode="numeric" step="64" min="64" max="${MAX_PX}" value="${w}"></label><label>세로<input id="customH" type="number" inputmode="numeric" step="64" min="64" max="${MAX_PX}" value="${h}"></label></div>` : ""}
       ${draft.seedLock && Number.isInteger(draft.seed) ? `<p class="seedchip">시드 ${draft.seed} 고정 <button type="button" class="ghost mini" id="seedOff">풀기</button></p>` : ""}
       ${notes.length ? `<p class="hint warn">Anlas가 들 수 있음 (문서 기준, 이 앱에서 차감은 재 보지 않음): ${esc(notes.join(" · "))}</p>` : ""}
       <div class="gobar">${busy
@@ -3475,8 +3482,8 @@ function wire(name, arg, seq) {
       if (ui.open[k]) document.querySelector(`[data-toolbody="${k}"]`)?.scrollIntoView({ block: "start" });
     }));
     document.querySelectorAll("[data-size]").forEach((b) => b.addEventListener("click", () => { d.settings.size = b.dataset.size; store.save(); }));
-    on("customW", "change", (e) => { d.settings.customW = clamp(Math.round(e.target.value / 64) * 64, 64, 1536, 832); store.save(); });
-    on("customH", "change", (e) => { d.settings.customH = clamp(Math.round(e.target.value / 64) * 64, 64, 1536, 1216); store.save(); });
+    on("customW", "change", (e) => { d.settings.customW = clamp(Math.round(e.target.value / 64) * 64, 64, MAX_PX, DEF_W); store.save(); });
+    on("customH", "change", (e) => { d.settings.customH = clamp(Math.round(e.target.value / 64) * 64, 64, MAX_PX, DEF_H); store.save(); });
     // 2026-11-27(사용자: 프롬프트는 한 번 검토하는 과정 포함): 프롬프트가 바뀐 뒤 처음 누른 뽑기는 점검을 한 번 돌린다.
     // 참고용(soft)이 아닌 문제가 있으면 목록을 띄우고 멈춘다. 같은 프롬프트로 한 번 더 누르면 그대로 뽑는다. settings.preCheck === false면 안 함.
     on("go", "click", async () => {
@@ -3625,7 +3632,7 @@ function wire(name, arg, seq) {
     // 생성 설정
     on("sampler", "change", (e) => { d.settings.sampler = e.target.value; store.save(); });
     on("noise", "change", (e) => { d.settings.noise = e.target.value; store.save(); });
-    on("steps", "change", (e) => { d.settings.steps = clamp(e.target.value, 1, MAX_STEPS, 28); store.save(); });
+    on("steps", "change", (e) => { d.settings.steps = clamp(e.target.value, 1, MAX_STEPS, DEFAULT_STEPS); store.save(); });
     on("scale", "change", (e) => { d.settings.scale = clamp(e.target.value, 0, 10, 5); store.save(); });
     on("cfgRescale", "change", (e) => { d.settings.cfgRescale = clamp(e.target.value, 0, 1, 0); store.save(); });
     on("variety", "change", (e) => { d.settings.variety = e.target.checked; store.save(); });
