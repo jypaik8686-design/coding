@@ -136,9 +136,17 @@ function normDict(raw) {
   return raw.filter((e) => e && e.id && typeof e.word === "string" && typeof e.tags === "string").slice(0, DICT_MAX).map((e) => ({ id: String(e.id), word: e.word.slice(0, 40), tags: e.tags.slice(0, 300) }));
 }
 let saveFail = false; // 마지막 저장이 실패했는지 (화면 맨 위 경고)
+// 2026-11-27(사용자: 아직도 턱턱 걸림): 글자 하나 칠 때마다 저장 데이터 전체(수백 KB)를 JSON으로 바꿔 쓰던 것을 0.3초에 한 번으로 모은다.
+// 화면을 떠나거나 앱을 내릴 때(pagehide·visibilitychange)는 바로 쓴다. 바로 써야 하는 곳은 store.flush().
+let persistTimer = 0;
 const store = {
   data: load(),
   persist() {
+    if (!persistTimer) persistTimer = setTimeout(() => this.flush(), 300);
+    return !saveFail;
+  },
+  flush() {
+    clearTimeout(persistTimer); persistTimer = 0;
     try { localStorage.setItem(KEY, JSON.stringify(this.data)); if (saveFail) { saveFail = false; render(); } return true; }
     catch (e) {
       console.warn("저장 실패", e);
@@ -149,6 +157,8 @@ const store = {
   },
   save() { this.persist(); render(); },
 };
+addEventListener("pagehide", () => { if (persistTimer) store.flush(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden && persistTimer) store.flush(); });
 
 function normPresets(raw) {
   if (!Array.isArray(raw)) return [];
@@ -1356,29 +1366,6 @@ async function shareImage(blob, rec) {
   toast(`내려받음: ${name}`);
 }
 
-// ── 취향 통계 ────────────────────────────────────────────────
-// 고른 그림과 버린 그림의 태그를 세어, 고른 쪽에 치우친 것과 버린 쪽에 치우친 것을 낸다.
-function tagStats() {
-  const m = new Map();
-  for (const r of store.data.log) {
-    if (r.verdict !== "keep" && r.verdict !== "drop") continue;
-    if (r.ext) continue; // 밖에서 받은 그림은 내 취향이 아니므로 세지 않는다
-    // style이 없는 옛 기록에서 ‘undefined’가 태그로 세지던 것과, 취향이 아닌 인원수 태그(1girl·solo 등)를 뺀다 (2026-11-21)
-    const tags = new Set(`${r.scene || ""},${r.style || ""}`.split(",").map((t) => t.trim().toLowerCase()).filter((t) => t && !COUNT_RE.test(t)));
-    for (const t of tags) {
-      const c = m.get(t) || { keep: 0, drop: 0 };
-      c[r.verdict]++;
-      m.set(t, c);
-    }
-  }
-  const mine = new Set(store.data.taste.style.split(/[,\n]/).map((t) => t.trim().toLowerCase()));
-  const rows = [...m].map(([tag, c]) => ({ tag, ...c }));
-  return {
-    liked: rows.filter((r) => r.keep >= 2 && r.keep > r.drop && !mine.has(r.tag)).sort((a, b) => (b.keep - b.drop) - (a.keep - a.drop)).slice(0, 12),
-    disliked: rows.filter((r) => r.drop >= 2 && r.drop > r.keep).sort((a, b) => (b.drop - b.keep) - (a.drop - a.keep)).slice(0, 12),
-    judged: store.data.log.filter((r) => r.verdict && !r.ext).length,
-  };
-}
 
 // ── 프롬프트 비서 (제미니) ───────────────────────────────────
 // 폰에서 구글 서버(generativelanguage.googleapis.com)로 직접 부른다. 키는 이 폰에만 있다.
@@ -3064,7 +3051,14 @@ const SCREENS = {
     const inBtn = `<input id="inFile" type="file" accept="image/*" multiple hidden><div class="acts2"><button type="button" class="ghost" id="inAdd">＋ 받은 그림 넣기</button></div><p class="hint">NovelAI PNG면 안에 든 프롬프트·시드를 읽어 ‘다시 뽑기’가 됨. 받은 그림은 취향 통계에 안 셈.</p>`;
     if (!kept.length) return `${inBtn}<p class="empty">아직 없음.<br>뽑은 그림에서 ‘♥ 보관’을 누르면 여기 모임.</p>`;
     // 날짜별로 묶는다: 오늘 · 어제 · 11월 19일. 날짜가 없는 옛 항목은 맨 끝 ‘날짜 모름’.
-    const dayKey = (at) => { if (!at) return "날짜 모름"; const d0 = new Date(), d = new Date(at); const diff = Math.round((new Date(d0.toDateString()) - new Date(d.toDateString())) / 864e5); return diff === 0 ? "오늘" : diff === 1 ? "어제" : d.toLocaleDateString("ko-KR", { month: "long", day: "numeric" }); };
+    // 2026-11-27 렉: 그림마다 toLocaleDateString을 부르면 보관함을 열 때 0.2초(폰 기준)가 걸렸다. 그날 0시 시각으로 묶고 날짜 글은 날마다 한 번만 만든다.
+    const today0 = new Date().setHours(0, 0, 0, 0), dayName = new Map(), fmt = new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric" });
+    const dayKey = (at) => {
+      if (!at) return "날짜 모름";
+      const d0 = new Date(at).setHours(0, 0, 0, 0);
+      if (!dayName.has(d0)) { const diff = Math.round((today0 - d0) / 864e5); dayName.set(d0, diff === 0 ? "오늘" : diff === 1 ? "어제" : fmt.format(d0)); }
+      return dayName.get(d0);
+    };
     const groups = [];
     for (const r of kept) { const g = dayKey(r.at); if (groups.at(-1)?.g === g) groups.at(-1).list.push(r); else groups.push({ g, list: [r] }); }
     const sel = ui.ksel;
@@ -3091,35 +3085,8 @@ const SCREENS = {
       <div id="vlist">${vaultList(list)}</div>`;
   },
 
-  taste() {
-    // 2026-11-21 정리: 내 취향(화풍·작가, 자주 나온 태그)만 펼쳐 두고, 늘 붙는 것·연결·받은 것 넣기·데이터는 접는 칸으로.
-    const { settings: s, taste, log } = store.data;
-    const st = tagStats();
-    const chip = (r, act) => `<button type="button" class="chip" ${act ? `data-add="${esc(r.tag)}"` : "disabled"}>${esc(r.tag)} <small>${r.keep}/${r.drop}</small></button>`;
-    const negN = tg(taste.negative) ? tg(taste.negative).split(", ").length : 0;
-    return `
-      <h2>화풍·작가</h2>
-      <p class="hint">모든 그림에 2순위로 붙음. 뽑기 탭 2순위 칸과 같은 값.</p>
-      <textarea id="style" rows="4" autocapitalize="off" autocomplete="off" spellcheck="false"
-        placeholder="artist:이름, soft lighting, muted colors">${esc(taste.style)}</textarea>
-
-      <h2>고른 그림에 자주 나온 태그</h2>
-      ${st.liked.length
-        ? `<p class="hint">누르면 화풍·작가에 더함. 숫자는 보관/버림.</p><div class="chips">${st.liked.map((r) => chip(r, true)).join("")}</div>`
-        : `<p class="hint">${st.judged < 4 ? `보관·버림을 ${st.judged}번 골랐음. 더 골라야 나옴.` : "아직 두 번 넘게 고른 새 태그가 없음."}</p>`}
-      ${st.disliked.length ? `<h2>버린 그림에 자주 나온 태그</h2><div class="chips">${st.disliked.map((r) => chip(r, false)).join("")}</div>` : ""}
-
-      <div class="tsecs">
-      ${sec("talways", "늘 붙는 것", `품질 태그 ${s.quality ? "붙임" : "안 붙임"} · 기본 빼는 것 ${negN ? negN + "개" : "없음"}`, `
-        <label for="negative">기본 빼는 것 <span class="hint">모든 그림에 붙음</span></label>
-        <textarea id="negative" rows="3" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(taste.negative)}</textarea>
-        <label class="line"><input type="checkbox" id="quality" ${s.quality ? "checked" : ""}> 품질 태그 붙이기</label>
-        <p class="hint">이번 그림에만 뺄 것은 뽑기 탭 ‘빼는 것 이번 그림’ 칸에.</p>`)}
-      </div>`;
-  },
-
   set() {
-    // 2026-11-22: 연결·가져오기·데이터를 ‘화풍·작가’ 탭에서 떼어 설정 화면으로. 제목 줄 오른쪽 톱니바퀴로 들어온다.
+    // 2026-11-22: 연결·가져오기·데이터를 옛 ‘화풍·작가’ 탭에서 떼어 설정 화면으로. 제목 줄 오른쪽 톱니바퀴로 들어온다.
     const { settings: s, log } = store.data;
     const hasTok = !!s.token.trim(), hasKey = !!s.aiKey.trim();
     const keptN = log.filter((r) => r.verdict === "keep").length;
@@ -3169,14 +3136,14 @@ const SCREENS = {
 };
 
 // ── 라우터 ──────────────────────────────────────────────────
-const TITLES = { gen: "짤뽑기 최적화판", ai: "비서", keep: "보관함", vault: "받은 자료", taste: "화풍·작가", set: "설정" };
+const TITLES = { gen: "짤뽑기 최적화판", ai: "비서", keep: "보관함", vault: "받은 자료", set: "설정" };
 const route = () => (location.hash.replace(/^#\/?/, "") || "gen").split("/");
 let thumbUrls = [];
 let renderSeq = 0, lastScreen = "", genStartY = 0, checkedKey = "";
 
 function render() {
   const [n, arg] = route();
-  if (n === "taste" && arg === "conn") { location.replace("#/set"); return; } // 옛 주소
+  if (n === "taste") { location.replace(arg === "conn" ? "#/set" : "#/gen"); return; } // 옛 주소. 화풍·작가 탭은 2026-11-27 사용자 지시로 지움(그림체·품질·기본 빼는 것은 뽑기 탭 ‘고정’에 있음)
   const name = SCREENS[n] ? n : "gen";
   const seq = ++renderSeq;
   // 2026-11-27(사용자: 안 내렸는데 화면이 움직임): 같은 화면을 다시 그릴 때는 스크롤 자리를 지킨다. 화면 전체를 새로 쓰는 사이 높이가 잠깐 줄면 브라우저가 스크롤을 당겨서 튀었다.
@@ -3981,20 +3948,13 @@ function wire(name, arg, seq) {
       try { await navigator.clipboard.writeText(v); b.textContent = "복사함"; } catch { b.textContent = "복사 못 함"; }
     }));
   }
-  if (name === "taste" || name === "set") {
-    on("style", "input", (e) => { d.taste.style = e.target.value; store.persist(); });
-    on("negative", "input", (e) => { d.taste.negative = e.target.value; store.persist(); });
-    on("quality", "change", (e) => { d.settings.quality = e.target.checked; store.persist(); });
+  if (name === "set") {
     on("token", "input", (e) => { d.settings.token = e.target.value.trim(); store.persist(); });
     on("model", "change", (e) => { d.settings.model = e.target.value; store.save(); });
     on("customModel", "input", (e) => { d.settings.customModel = e.target.value.trim(); store.persist(); });
     on("aiKey", "input", (e) => { d.settings.aiKey = e.target.value.trim(); store.persist(); });
     on("aiModel", "change", (e) => { d.settings.aiModel = e.target.value; store.save(); });
     on("aiCustom", "input", (e) => { d.settings.aiCustom = e.target.value.trim(); store.persist(); });
-    document.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", () => {
-      d.taste.style = [tidy(d.taste.style), b.dataset.add].filter(Boolean).join(", ");
-      store.save();
-    }));
     on("export", "click", () => {
       const out = { ...d, settings: { ...d.settings, token: "", aiKey: "" } };
       const a = document.createElement("a");
