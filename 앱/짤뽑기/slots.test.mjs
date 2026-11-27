@@ -55,6 +55,20 @@ test("흔한 태그가 제 칸으로 (2026-11-27 점검에서 빠진 것)", () =
   for (const [k, ts] of Object.entries(want)) for (const t of ts) assert.equal(guessSlot(t), k, t);
 });
 
+test("칸 정보 파일이 틀린 것은 굳은 규칙이 먼저, 그 밖에로 빠지던 몸·행위·효과 태그도 칸으로 (2026-11-27 신고 \"분류를 잘 못해\")", () => {
+  setSlotData({ "looking back": "traits", "off-shoulder dress": "traits", "strapless bra": "traits", "depth of field": "pose", pov: "bg", "holding bag": "outfit", collarbone: "outfit", cleavage: "outfit", "wet clothes": "bg", weapon: "bg", "moon print": "outfit", "maid cafe": "bg", "lace background": "bg" });
+  try {
+    const want = {
+      pose: ["looking back", "{looking back}", "pov", "holding bag", "sex", "kiss", "hug", "yuri", "hetero", "spread legs"],
+      outfit: ["off-shoulder dress", "strapless bra", "wet clothes", "weapon", "sword", "gun", "moon print"],
+      traits: ["collarbone", "cleavage", "navel", "stomach", "nipples", "sweaty"],
+      bg: ["depth of field", "maid cafe", "lace background", "motion lines", "speech bubble", "spoken heart", "steaming body", "cat", "coffee"],
+      rest: ["masterpiece", "very aesthetic", "artist:abc", "nsfw"],
+    };
+    for (const [k, ts] of Object.entries(want)) for (const t of ts) assert.equal(guessSlot(t), k, t);
+  } finally { setSlotData({}); }
+});
+
 test("plainTags는 칸 이름 꼴(- count:, **traits:**, 배경:)을 태그로 세지 않는다", () => {
   assert.deepEqual(plainTags("- count: 1girl\n**traits:** {blue eyes}\n배경: night sky"), ["1girl", "blue eyes", "night sky"]);
 });
@@ -71,14 +85,14 @@ test("칸 정보 파일(slots.json)이 낱말 짐작보다 먼저", () => {
 
 test("내가 옮긴 칸을 기억하고 다음부터 그 칸으로 (파일보다 먼저)", () => {
   const memo = {};
-  setSlotData({ collarbone: "outfit" }); setSlotMemo(memo);
+  setSlotData({ "body writing": "outfit" }); setSlotMemo(memo);
   try {
-    // 의상 칸에 있던 collarbone을 캐릭터 특징 칸으로 옮김. 원래 있던 태그(red eyes)는 배우지 않는다
-    const n = learnSlots("red eyes", "red eyes, collarbone, {{weird tag}}", "traits");
+    // 의상 칸에 있던 body writing을 캐릭터 특징 칸으로 옮김. 원래 있던 태그(red eyes)는 배우지 않는다
+    const n = learnSlots("red eyes", "red eyes, body writing, {{weird tag}}", "traits");
     assert.equal(n, 2);
-    assert.deepEqual(memo, { collarbone: "traits", "weird tag": "traits" });
-    assert.equal(guessSlot("collarbone"), "traits");
-    assert.equal(parseSceneBlock("1girl, collarbone, weird tag").traits, "collarbone, weird tag");
+    assert.deepEqual(memo, { "body writing": "traits", "weird tag": "traits" });
+    assert.equal(guessSlot("body writing"), "traits");
+    assert.equal(parseSceneBlock("1girl, body writing, weird tag").traits, "body writing, weird tag");
     assert.equal(learnSlots("", "smile", "traits"), 0); // 이미 그 칸으로 짐작하면 적지 않는다
     assert.equal(learnSlots("", "1girl", "traits"), 0); // 인원수 태그는 배우지 않는다
   } finally { setSlotData({}); setSlotMemo({}); }
