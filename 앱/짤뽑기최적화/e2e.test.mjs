@@ -245,3 +245,12 @@ test("태그 사전: 뽑기 화면에서 찾고 눌러 맞는 칸에 넣는다, 
   assert.match((await data()).draft.slots.traits, /grey hair/);
   assert.deepEqual(errs, []); await p.close();
 });
+test("그 밖에 칸 ‘칸마다 나누기’: 아는 태그는 맞는 칸으로, 모르는 태그만 남고 되돌리기로 돌아온다", async () => {
+  const { p, errs, data } = await open({ draft: { slots: { ...slots, rest: "red dress, sitting, night sky, zzqtag" } } });
+  await p.click("#restSplit"); await p.waitForTimeout(200);
+  let s = (await data()).draft.slots;
+  assert.match(s.outfit, /red dress/); assert.match(s.pose, /sitting/); assert.match(s.bg, /night sky/); assert.equal(s.rest, "zzqtag");
+  await p.getByRole("button", { name: "되돌리기" }).first().click(); await p.waitForTimeout(200);
+  s = (await data()).draft.slots; assert.equal(s.rest, "red dress, sitting, night sky, zzqtag"); assert.equal(s.outfit, "business suit");
+  assert.deepEqual(errs, []); await p.close();
+});
