@@ -276,6 +276,24 @@ test("새 장면(new) 블록: 앞 그림의 장면 칸·이번 빼는 것·인�
   assert.equal(d.neg, ""); assert.equal(d.chars.length, 0); assert.equal(d.slots.traits, "blonde hair, red eyes");
   assert.deepEqual(errs, []); await p.close();
 });
+test("인물 금지 태그: 켜 둔 인물의 neg가 ‘이번 빼는 것’이 비워져도(새 장면·빼는 것 블록) 뽑을 때 같이 간다", async () => {
+  const kiana = "{tanned skin}, {silver hair}, white hair, medium hair, wavy hair, messy hair, {blunt bangs}, {golden eyes}, half-closed eyes, red lips, beautiful face, aloof, cold expression, {gold tiara}, teal gemstone, gold hair rings, gold crescent earrings, gold choker, teal gem, gold armlet, gold bracelets";
+  let n = 0;
+  const { p, errs, gens, ask } = await open({ settings: { token: "pst-x", aiKey: "x" }, draft: { slots: { ...slots, traits: kiana, rest: "long hair" }, neg: "" } },
+    () => (++n === 1 ? "```scene\nnew\noutfit: swimsuit\n```" : "```negative\nblurry\n```"));
+  await p.click("#go"); await p.waitForTimeout(700);
+  await ask("새로"); await p.click('.qreply [data-kind="scene"]'); await p.waitForTimeout(200);
+  await p.click("#go"); await p.waitForTimeout(700);
+  await ask("흐림 빼"); await p.click('.qreply [data-kind="negative"]'); await p.waitForTimeout(200);
+  await p.click("#go"); await p.waitForTimeout(700);
+  assert.equal(gens.length, 3);
+  for (const g of gens) assert.match(g.parameters.negative_prompt, /elf ears/);
+  assert.match(gens[2].parameters.negative_prompt, /blurry/);
+  // 그림에 든 태그(long hair)와 겹치는 금지 태그는 보내지 않는다
+  assert.doesNotMatch(gens[0].parameters.negative_prompt, /(^|, )long hair(,|$)/);
+  assert.deepEqual(errs, []); await p.close();
+});
+
 test("보관함 한 장: 그림 프롬프트를 칸마다 보이고 칸 복사가 된다 (칸 없는 옛 기록은 짐작)", async () => {
   const rec = { id: "k1", scene: "1girl, solo, blonde hair, maid, apron, sitting, garden", seed: 7, verdict: "keep", at: 1, w: 832, h: 1216, steps: 28, scale: 5, model: "nai-diffusion-5-full" };
   const { p, errs } = await open({ log: [rec, { ...rec, id: "k2", slots: { count: "1girl", traits: "red hair", outfit: "suit", pose: "", bg: "", rest: "" } }] });
