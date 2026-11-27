@@ -1694,11 +1694,12 @@ function applyBlock(kind, v, from = "") {
       return `이번 그림 칸들을 바꿈${gone ? ` · 옛 인물 ${gone}명 뺌` : ""}`;
     }
     // 최적화판: 칸 이름이 붙은 줄만 바꾸고 안 적은 칸은 그대로 둔다. 인물별 프롬프트 칸도 건드리지 않는다.
-    // 이름 없는 줄의 태그는 짐작한 칸에 더한다(이름 붙은 칸은 블록 글로 바뀐다).
+    // 이름 없는 줄의 태그는 짐작한 칸으로 간다. 장면 칸(의상·자세·배경·그 밖에)은 바꿔 넣고(옛 글과 섞이면 office, night sky처럼 어긋남, 2026-11-27),
+    // 고정 칸(인원수·특징)은 짐작이 틀리면 캐릭터가 지워지므로 더하기만 한다.
     const got = parseSceneBlock(v);
     for (const k of SLOT_KEYS) {
       if (keys.includes(k)) d.draft.slots[k] = got[k];
-      else if (tg(got[k])) d.draft.slots[k] = joinTags([d.draft.slots[k], got[k]]);
+      else if (tg(got[k])) d.draft.slots[k] = k === "count" || k === "traits" ? joinTags([d.draft.slots[k], got[k]]) : got[k];
     }
     syncScene(); d.draft.seedLock = false;
     return `${keys.map((k) => SLOT_NAMES[k] || k).join("·")} 칸을 바꿈${keys.some((k) => k === "count" || k === "traits") ? " (캐릭터도 바뀜)" : ""}`;
@@ -2346,6 +2347,21 @@ function slotsPanel() {
     <div class="acts2 slotacts"><button type="button" class="ghost sm" id="saveScene" aria-label="칸 전부 프리셋으로 저장">프리셋으로 저장</button><button type="button" class="ghost sm" id="slotsClear" aria-label="장면 줄 비우기">장면 비우기</button><button type="button" class="ghost sm" id="slotPick" aria-label="파일에서 넣기 (JSON·글·NovelAI PNG)">파일에서 넣기</button><input id="slotFile" type="file" hidden></div>`;
 }
 // 2026-11-22: 프롬프트 칸 전부 접기. 접으면 완성된 프롬프트 두 줄만 보이고, 그 줄을 눌러도 펼쳐진다. 접힌 상태는 settings.foldPrompt에 남는다(옛 데이터에는 없어 펼친 것으로 읽음).
+// 뽑기 화면의 비서 한 줄 (2026-11-27, 사용자: 편의성). 비서 탭으로 가지 않고 여기서 묻고, 답의 블록도 여기서 넣는다.
+// 아래 ‘AI 도우미’ 칸이 열려 있으면 그 칸과 입력칸이 겹치므로 이 줄은 안 그린다. 그림 붙이기·사진은 AI 도우미 칸·비서 탭에서.
+function quickAsk() {
+  if (ui.open.ai) return "";
+  const { chat, settings: s } = store.data, last = chat.length - 1;
+  const reply = ui.qShow && last >= 0 && chat[last].role === "model" && !asking
+    ? `<div class="chat qreply">${msgHtml(chat[last], last)}<button type="button" class="ghost mini" id="qhide">답 닫기</button></div>` : "";
+  return `<div class="qask">
+      <input id="qask" type="text" enterkeyhint="send" autocomplete="off" placeholder="${s.aiKey.trim() ? "비서에게: 예) 앉게, 배경은 밤거리" : "비서를 쓰려면 설정에서 제미니 키"}" value="${esc(askDraft)}" aria-label="비서에게 부탁">
+      ${asking ? `<button type="button" class="ghost" id="stopAsk">취소</button>` : `<button type="button" id="qsend">보내기</button>`}
+    </div>
+    ${asking && ui.qShow ? `<p class="hint">비서가 생각 중…</p>` : ""}
+    ${askErr && ui.qShow ? `<p class="error" role="alert">${esc(askErr)}</p>` : ""}
+    ${reply}`;
+}
 function sceneSum() {
   trackSlots(); trackSlots.done = true;
   const sl = store.data.draft.slots;
@@ -2544,6 +2560,7 @@ const SCREENS = {
       ${histStrip()}
       ${errMsg ? `<p class="error" role="alert">${esc(errMsg)}</p>` : ""}
       ${sceneSum()}
+      ${quickAsk()}
       ${promptBlock()}
       <div class="seg seg4" role="group" aria-label="크기">
         ${[...Object.keys(SIZES), "직접"].map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${k === "직접" ? (s.size === "직접" ? `${w}×${h}` : "입력") : SIZES[k].join("×")}</small></button>`).join("")}
@@ -2806,6 +2823,11 @@ function wireAsk() {
   on("askUndoc", "click", () => { ui.attachDoc = null; render(); });
   on("askUnpick", "click", () => { clearAttach(); render(); });
   on("send", "click", () => { const t = askDraft.trim(); if (t) ask(t, { image: ui.withImg && !!now }); });
+  on("qask", "input", (e) => { askDraft = e.target.value; });
+  const qgo = () => { const t = askDraft.trim(); if (!t || asking) return; ui.qShow = true; ask(t); };
+  on("qsend", "click", qgo);
+  on("qask", "keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); qgo(); } });
+  on("qhide", "click", () => { ui.qShow = false; render(); });
   on("stopAsk", "click", () => asking?.abort());
   document.querySelectorAll("[data-look]").forEach((b) => b.addEventListener("click", () => {
     if (asking) return toast("앞 질문의 답을 기다리는 중");

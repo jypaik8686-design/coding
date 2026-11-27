@@ -583,3 +583,9 @@ button.line { color: var(--ink); background: transparent; border: 1px solid var(
 .slot.flash > textarea, .scenesum .flash { animation: slotflash 2.4s ease-out 1; }
 @keyframes slotflash { 0%, 40% { box-shadow: 0 0 0 2px var(--gold, #c9a45c); } 100% { box-shadow: 0 0 0 0 transparent; } }
 @media (prefers-reduced-motion: reduce) { .slot.flash > textarea, .scenesum .flash { animation: none; box-shadow: 0 0 0 2px var(--gold, #c9a45c); } }
+
+/* 2026-11-27 뽑기 화면 비서 한 줄 */
+.qask { display: flex; gap: 6px; margin: 8px 0 4px; }
+.qask input { flex: 1; min-width: 0; min-height: 44px; }
+.qask button { min-height: 44px; white-space: nowrap; }
+.qreply { margin: 6px 0 10px; }
