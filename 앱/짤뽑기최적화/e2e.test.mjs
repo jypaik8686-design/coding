@@ -414,3 +414,28 @@ test("인물 꼬임 반대쪽: 같은 답의 count 줄과 char 블록은 같이 
   assert.equal(d.chars.length, 2); assert.equal(d.slots.pose, "sitting");
   assert.deepEqual(errs, []); await p.close();
 });
+
+// 2026-11-27 사용자: 인물이 꼬이는 건 네거티브를 안 쓰는 문제 같다. 인물이 둘 이상이면 인물마다 ‘뺄 것’이 비어 있어 서로의 머리·눈이 섞였다.
+// 비어 있는 ‘뺄 것’은 다른 인물의 머리·눈·피부 태그로 채워 NovelAI로 보낸다. 사람이 적은 것은 안 건드린다.
+test("인물별 뺄 것: 둘 이상이면 빈 칸을 다른 인물의 머리·눈 태그로 채워 보내고, 손으로 적은 것은 그대로 둔다", async () => {
+  let n = 0;
+  const A = "```scene\ncount: 1girl\ntraits: {pink hair}, long hair, blue eyes, large breasts\noutfit: maid\n```\n```scene\ncount: 1boy\ntraits: black hair, short hair, red eyes\noutfit: suit\n```";
+  const B = "```scene\ncount: 2girls\n```\n```char\nneg: glasses\ngirl, silver hair, long hair\n```\n```char\ngirl, blonde hair, long hair, green eyes\n```";
+  const { p, errs, gens, data, ask } = await open({ settings: { aiKey: "x", token: "pst-x", model: "nai-diffusion-4-5-full" } }, () => (++n === 1 ? A : B));
+  await ask("둘"); await p.click(".qreply [data-blkall]"); await p.waitForTimeout(300);
+  let c = (await data()).draft.chars;
+  assert.equal(c[0].neg, "black hair, short hair, red eyes"); // 옷·몸 태그(suit, large breasts)는 안 넣는다
+  assert.equal(c[1].neg, "pink hair, long hair, blue eyes");  // 가중치 괄호는 뗀다
+  await p.click("#go"); await p.waitForTimeout(800);
+  assert.deepEqual(gens.at(-1).parameters.v4_negative_prompt.caption.char_captions.map((x) => x.char_caption), ["black hair, short hair, red eyes", "pink hair, long hair, blue eyes"]);
+  await ask("다른 둘"); await p.click(".qreply [data-blkall]"); await p.waitForTimeout(300);
+  c = (await data()).draft.chars;
+  assert.equal(c.length, 2);
+  assert.equal(c[0].neg, "glasses"); // 비서가 적은 것은 그대로
+  assert.equal(c[1].neg, "silver hair"); // 둘 다 가진 long hair는 안 뺀다
+  // 한 명을 빼면 혼자 남은 인물의 자동으로 채운 것은 지운다
+  await p.locator("[data-cdel]").first().click(); await p.waitForTimeout(300);
+  c = (await data()).draft.chars;
+  assert.equal(c.length, 1); assert.equal(c[0].neg, "");
+  assert.deepEqual(errs, []); await p.close();
+});

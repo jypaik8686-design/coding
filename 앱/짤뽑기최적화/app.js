@@ -1813,7 +1813,8 @@ function applyPeople(people, from = "people") {
   if (first) { if (tg(first.pose)) d.draft.slots.pose = first.pose; if (tg(first.bg)) d.draft.slots.bg = first.bg; }
   d.draft.chars = chars; d.draft.chipsOn = (d.draft.chipsOn || []).filter((k) => !k.startsWith("b:인물:") && !d.presets.some((p) => `own:${p.id}` === k && p.kind === "인물"));
   syncScene(); d.draft.seedLock = false; ui.open.chars = true;
-  return `인물 ${chars.length}명을 인물별 프롬프트에 넣음 (${d.draft.slots.count})${people.length > MAX_CHARS ? ` · ${people.length - MAX_CHARS}명은 넘침` : ""}`;
+  const filled = crossNeg();
+  return `인물 ${chars.length}명을 인물별 프롬프트에 넣음 (${d.draft.slots.count})${filled ? " · 서로의 머리·눈 태그를 인물별 뺄 것에 넣음" : ""}${people.length > MAX_CHARS ? ` · ${people.length - MAX_CHARS}명은 넘침` : ""}`;
 }
 // 인물을 한 명으로 바꿀 때(인물 칩, person 블록, 캐릭터 줄이 든 scene 블록) 비서가 넣어 둔 옛 인물별 칸을 뺀다 (2026-11-27 사용자 신고: 아직도 인물이 꼬여).
 // 안 빼면 새 인물(위 칸)과 옛 여러 명(인물별 칸)이 같이 NovelAI로 간다. 손으로 더한 칸(from 없음)과 keep으로 준 답의 칸은 남긴다. 돌려주는 것: 뺀 수.
@@ -1821,6 +1822,22 @@ function dropAiChars(keep = "") {
   const d = store.data, n = d.draft.chars.length;
   d.draft.chars = d.draft.chars.filter((c) => !c.from || (keep && c.from === keep));
   return n - d.draft.chars.length;
+}
+// 인물이 둘 이상이면 서로의 머리·눈이 섞인다(2026-11-27 사용자: 네거티브를 안 써서 꼬이는 것 같다). 인물마다 ‘뺄 것’이 비어 있으면
+// 다른 인물의 겉모습 태그(머리·눈·피부·귀·뿔·꼬리·날개) 가운데 자기에게 없는 것으로 채운다. 옷·몸·자세 태그는 안 넣는다(둘이 같은 옷일 수 있다).
+// 사람이나 비서가 적은 것은 안 건드린다(negAuto가 붙은 칸만 다시 계산). 한 명만 남으면 자동으로 채운 것은 지운다. 돌려주는 것: 채운 칸 수.
+const LOOK_RE = /\b(hair|eyes?|skin|ears?|horns?|tail|wings?|bangs|ponytail|twintails|braids?|ahoge|sidelocks|hair bun|bob cut|hime cut)\b/;
+function crossNeg() {
+  const cs = store.data.draft.chars, own = cs.map((c) => tg(c.text).split(", ").map(ckey).filter(Boolean));
+  let n = 0;
+  cs.forEach((c, i) => {
+    if (tidy(c.neg || "") && !c.negAuto) return;
+    const mine = new Set(own[i]), out = [];
+    if (cs.length >= 2) own.forEach((ts, j) => { if (j !== i) for (const t of ts) if (LOOK_RE.test(t) && !mine.has(t) && !out.includes(t)) out.push(t); });
+    c.neg = out.join(", ");
+    if (out.length) { c.negAuto = true; n++; } else delete c.negAuto;
+  });
+  return n;
 }
 const goneNote = (n) => (n ? ` · 옛 인물별 칸 ${n}명 뺌` : "");
 // person 블록에서 새 인물을 읽는다: `name: 이름` 줄(없어도 됨)과 쉼표 태그. 프리셋 이름 한 줄이면 null.
@@ -1911,6 +1928,7 @@ function applyBlock(kind, v, from = "") {
     if (same < 0 && d.draft.chars.length >= MAX_CHARS) return `인물은 ${MAX_CHARS}명까지`;
     if (from) c.from = from;
     if (same >= 0) d.draft.chars[same] = c; else d.draft.chars.push(c);
+    crossNeg();
     ui.open.chars = true;
     return `인물 칸을 ${same >= 0 ? "새로 씀" : "더함"}${gone ? ` · 옛 인물 ${gone}명 뺌` : ""}`;
   }
@@ -2083,7 +2101,7 @@ function charsInner() {
     <div class="char">
       <div class="charhead"><b>인물 ${i + 1}</b><button type="button" class="ghost sm" data-cdel="${c.id}">빼기</button></div>
       <textarea data-ctext="${c.id}" rows="3" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="girl, silver hair, tanned skin">${esc(c.text)}</textarea>
-      <input type="text" data-cneg="${c.id}" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="이 인물에서만 뺄 것 (선택)" value="${esc(c.neg || "")}">
+      <input type="text" data-cneg="${c.id}" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="이 인물에서만 뺄 것 (선택)" value="${esc(c.neg || "")}">${c.negAuto ? `<p class="hint">↑ 다른 인물의 머리·눈 태그를 앱이 넣음 (섞이지 않게). 고치면 그대로 둠</p>` : ""}
       <div class="posgrid" role="group" aria-label="인물 ${i + 1} 위치">
         ${Array.from({ length: 25 }, (_, n) => `<button type="button" class="${c.pos === n ? "on" : ""}" data-cpos="${c.id}:${n}" aria-label="${n % 5 + 1}열 ${Math.floor(n / 5) + 1}행"></button>`).join("")}
       </div>
@@ -3588,9 +3606,9 @@ function wire(name, arg, seq) {
     // 인물별 프롬프트
     const charOf = (el, k) => d.draft.chars.find((c) => c.id === el.dataset[k]);
     on("addChar", "click", () => { if (d.draft.chars.length < MAX_CHARS) { d.draft.chars.push({ id: crypto.randomUUID(), text: "", neg: "", pos: null }); ui.open.chars = true; store.save(); } });
-    document.querySelectorAll("[data-cdel]").forEach((el) => el.addEventListener("click", () => { d.draft.chars = d.draft.chars.filter((c) => c.id !== el.dataset.cdel); store.save(); }));
+    document.querySelectorAll("[data-cdel]").forEach((el) => el.addEventListener("click", () => { d.draft.chars = d.draft.chars.filter((c) => c.id !== el.dataset.cdel); crossNeg(); store.save(); }));
     document.querySelectorAll("[data-ctext]").forEach((el) => el.addEventListener("input", () => { const c = charOf(el, "ctext"); if (c) { c.text = el.value; store.persist(); } }));
-    document.querySelectorAll("[data-cneg]").forEach((el) => el.addEventListener("input", () => { const c = charOf(el, "cneg"); if (c) { c.neg = el.value; store.persist(); } }));
+    document.querySelectorAll("[data-cneg]").forEach((el) => el.addEventListener("input", () => { const c = charOf(el, "cneg"); if (c) { c.neg = el.value; delete c.negAuto; store.persist(); } }));
     document.querySelectorAll("[data-cpos]").forEach((el) => el.addEventListener("click", () => {
       const [id, v] = el.dataset.cpos.split(":"), c = d.draft.chars.find((x) => x.id === id);
       if (!c) return;
