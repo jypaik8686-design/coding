@@ -1457,7 +1457,7 @@ function sceneOnly(prompt) { // 그 그림의 프롬프트에서 지금 고정 �
   const fixed = new Set([...tg(qText(d.settings)).split(", "), ...tg(d.taste.style).split(", "), "masterpiece", "best quality", "very aesthetic", "absurdres", "no text", "location", "high complexity", "highly detailed"].map(tagKey));
   return tg(prompt).split(", ").filter((t) => t && !fixed.has(tagKey(t))).join(", ");
 }
-function stateText(sent = new Set()) { // sent: 이번 메시지에 그림으로 붙이는 이름표들
+function stateText(sent = new Set(), libFull = true) { // sent: 이번 메시지에 그림으로 붙이는 이름표들. libFull: 참고 그림 얘기일 때만 켠 그림의 프롬프트까지
   const { settings: s, taste, draft } = store.data;
   const [w, h] = sizeOf(s), sl = draft.slots, v = (t) => tg(t) || "(빔)";
   const plan = refPlan(s);
@@ -1471,7 +1471,7 @@ function stateText(sent = new Set()) { // sent: 이번 메시지에 그림으로
     chars ? `인물별 프롬프트:\n${chars}` : "",
     `설정: ${s.sampler}, ${s.steps}스텝, 강도 ${s.scale}, cfg_rescale ${s.cfgRescale}, ${s.noise}${s.variety ? ", Variety+" : ""}, ${w}x${h}, 시드 ${draft.seedLock && Number.isInteger(draft.seed) ? `${draft.seed} 고정` : "무작위"}`,
     plan ? `켠 참고 그림: ${on.length ? on.map((r) => `#${refCode(r)} 강도 ${r.strength} 정보량 ${r.info}`).join(", ") : baseVibes(s).length ? `없음 (기본 바이브 ${baseVibes(s).map((r) => `#${refCode(r)}`).join(", ")}가 강도 ${baseStr(s)}로 깔림)` : "없음"}` : "",
-    ...on.filter((r) => r.meta?.prompt).map((r) => `  #${refCode(r)} 프롬프트: ${cut(sceneOnly(r.meta.prompt), 160)}`),
+    ...(libFull ? on.filter((r) => r.meta?.prompt).map((r) => `  #${refCode(r)} 프롬프트: ${cut(sceneOnly(r.meta.prompt), 160)}`) : []), // 2026-11-28 토큰: 켠 그림 프롬프트는 참고 그림 얘기일 때만
     draft.i2i.on && src ? `이미지→이미지 켬 (strength ${draft.i2i.strength}, noise ${draft.i2i.noise})` : "",
   ];
   if (now) {
@@ -1504,12 +1504,19 @@ function refsText(full = true) {
 // 인물 바꾸기 쓰는 법과 인물 프리셋 이름. 지시문 조각을 고쳐 두어도 늘 붙는다 (2026-11-27, 사용자: 비서가 인물을 편하게 바꾸게).
 function personText() {
   const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
-  const now = list.filter((e) => chipOn(e.p)).map((e) => e.p.name);
-  return `\n\n## 요구사항 반영 (가장 중요)\n사용자가 이번 메시지에서 말한 것을 하나씩 나눠, 하나도 빠짐없이 블록 줄에 넣는다. 말한 물건·재질·색은 뭉개지 않고 그 태그로(커피 → coffee, coffee cup / 니트 → knit sweater / 비 → rain). 고정 칸(그림체·캐릭터)도 사용자가 바꾸라고 하면 바꾼다. 말하지 않은 칸은 건드리지 않는다. 넣을 수 없는 것(모델이 못 하는 것, 서로 부딪치는 것)은 블록 앞 한 줄로 무엇이 왜 안 됐는지 말한다.\n특징·의상을 다른 것으로 바꿀 때는 옛 것이 섞여 나오지 않게, 옛 태그 가운데 새것과 부딪치는 것(long hair → short hair면 long hair)을 같은 답의 negative 블록에 넣는다.\n\n## 그림 퀄리티\n서로 부딪치는 태그(standing·sitting, day·night, 다른 머리색 둘)를 한 그림에 같이 쓰지 않는다. 같은 뜻 태그를 겹쳐 쓰지 않는다. 장면 세 줄은 필요한 것만, 합쳐 30개 안쪽으로. 가중치는 핵심 한두 개에만.\n\n## 새 그림\n사용자가 앞 그림과 다른 새 그림(다른 장소·옷·상황)을 달라고 하면 scene 블록 첫 줄에 new를 쓰고 outfit·pose·bg 줄을 다 쓴다. 앱이 앞 장면 칸·다른 답의 인물별 칸을 비우고 넣는다(이번 빼는 것은 남고, 새 장면과 부딪치는 것만 빠진다). 캐릭터를 바꿀 때만 count·traits 줄을 쓴다. 앞 그림을 고치는 것이면 new 없이 바뀐 줄만.\n\n## 내기 전 검토\n블록을 내기 전에 한 번 훑는다: 태그가 맞는 칸 줄에 있나, 같은 태그가 두 줄에 겹치나, 빼는 것(기본·이번)에 있는 태그를 넣으려 하나, 단부루에 없는 말(자연어·한국어)이 섞였나, 인원수가 인물 수와 맞나. 걸리면 고친 블록만 내고 무엇을 고쳤는지 한 줄. 확실하지 않은 태그는 search 블록으로 찾는다.\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상), 마지막 줄에 \`neg: 태그\`로 그 인물에게 나오면 안 되는 것을 3~8개 꼭 쓴다(반대되는 머리 길이·머리색·눈색·체형, 그 인물에게 없는 안경·장신구·귀·뿔 등. 기본 Undesired에 있는 것은 빼고). neg 줄 없는 person 블록을 내지 않는다. 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
+  return `\n\n## 요구사항 반영 (가장 중요)\n사용자가 이번 메시지에서 말한 것을 하나씩 나눠, 하나도 빠짐없이 블록 줄에 넣는다. 말한 물건·재질·색은 뭉개지 않고 그 태그로(커피 → coffee, coffee cup / 니트 → knit sweater / 비 → rain). 고정 칸(그림체·캐릭터)도 사용자가 바꾸라고 하면 바꾼다. 말하지 않은 칸은 건드리지 않는다. 넣을 수 없는 것(모델이 못 하는 것, 서로 부딪치는 것)은 블록 앞 한 줄로 무엇이 왜 안 됐는지 말한다.\n특징·의상을 다른 것으로 바꿀 때는 옛 것이 섞여 나오지 않게, 옛 태그 가운데 새것과 부딪치는 것(long hair → short hair면 long hair)을 같은 답의 negative 블록에 넣는다.\n\n## 그림 퀄리티\n서로 부딪치는 태그(standing·sitting, day·night, 다른 머리색 둘)를 한 그림에 같이 쓰지 않는다. 같은 뜻 태그를 겹쳐 쓰지 않는다. 장면 세 줄은 필요한 것만, 합쳐 30개 안쪽으로. 가중치는 핵심 한두 개에만.\n\n## 새 그림\n사용자가 앞 그림과 다른 새 그림(다른 장소·옷·상황)을 달라고 하면 scene 블록 첫 줄에 new를 쓰고 outfit·pose·bg 줄을 다 쓴다. 앱이 앞 장면 칸·다른 답의 인물별 칸을 비우고 넣는다(이번 빼는 것은 남고, 새 장면과 부딪치는 것만 빠진다). 캐릭터를 바꿀 때만 count·traits 줄을 쓴다. 앞 그림을 고치는 것이면 new 없이 바뀐 줄만.\n\n## 내기 전 검토\n블록을 내기 전에 한 번 훑는다: 태그가 맞는 칸 줄에 있나, 같은 태그가 두 줄에 겹치나, 빼는 것(기본·이번)에 있는 태그를 넣으려 하나, 단부루에 없는 말(자연어·한국어)이 섞였나, 인원수가 인물 수와 맞나. 걸리면 고친 블록만 내고 무엇을 고쳤는지 한 줄. 확실하지 않은 태그는 search 블록으로 찾는다.\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상), 마지막 줄에 \`neg: 태그\`로 그 인물에게 나오면 안 되는 것을 3~8개 꼭 쓴다(반대되는 머리 길이·머리색·눈색·체형, 그 인물에게 없는 안경·장신구·귀·뿔 등. 기본 Undesired에 있는 것은 빼고). neg 줄 없는 person 블록을 내지 않는다. 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}`;
+}
+// 지금 켠 인물은 자주 바뀌므로 지시문 맨 뒤(지금 상태 쪽)에 둔다. 앞부분을 그대로 두어야 제미니가 캐시로 싸게 친다 (2026-11-28, 집필방과 같은 방식).
+function personNow() {
+  const now = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || "") && chipOn(e.p)).map((e) => e.p.name);
+  return `\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
 }
 function fullPersona(sent, libFull = true) {
   const d = store.data;
-  return buildPersona(d.persona) + refsText(libFull) + personText() + (d.persona.auto.state ? stateText(sent) : "");
+  // 순서: 안 바뀌는 것(조각·내 조각·앱 기능 설명) → 가끔 바뀌는 것(서랍 목록) → 질문마다 바뀌는 것(지금 인물·지금 상태).
+  // 제미니는 앞부분이 지난 요청과 똑같으면 그만큼을 캐시로 싸게 친다(모델마다 최소 길이가 있음, 2026-11-28 문서: Gemini 3.x·4 계열 4,096토큰).
+  const st = d.persona.auto.state ? stateText(sent, libFull) : "";
+  return buildPersona(d.persona) + personText() + refsText(libFull) + (st ? st + personNow() : personNow());
 }
 // 보낸 요청을 부분마다 잰다 (2026-11-27). 글은 글자 수와 어림 토큰(한국어·태그 섞인 글을 재 보니 1.9자에 1토큰쯤), 그림은 장수 × 해상도별 토큰.
 function sizeParts(sys, contents, pics, conf) {
