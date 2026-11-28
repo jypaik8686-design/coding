@@ -1505,19 +1505,34 @@ function refsText(full = true) {
 // 인물 바꾸기 쓰는 법과 인물 프리셋 이름. 지시문 조각을 고쳐 두어도 늘 붙는다 (2026-11-27, 사용자: 비서가 인물을 편하게 바꾸게).
 function personText() {
   const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
-  return `\n\n## 요구사항 반영 (가장 중요)\n사용자가 이번 메시지에서 말한 것을 하나씩 나눠, 하나도 빠짐없이 블록 줄에 넣는다. 말한 물건·재질·색은 뭉개지 않고 그 태그로(커피 → coffee, coffee cup / 니트 → knit sweater / 비 → rain). 고정 칸(그림체·캐릭터)도 사용자가 바꾸라고 하면 바꾼다. 말하지 않은 칸은 건드리지 않는다. 넣을 수 없는 것(모델이 못 하는 것, 서로 부딪치는 것)은 블록 앞 한 줄로 무엇이 왜 안 됐는지 말한다.\n특징·의상을 다른 것으로 바꿀 때는 옛 것이 섞여 나오지 않게, 옛 태그 가운데 새것과 부딪치는 것(long hair → short hair면 long hair)을 같은 답의 negative 블록에 넣는다.\n\n## 그림 퀄리티\n서로 부딪치는 태그(standing·sitting, day·night, 다른 머리색 둘)를 한 그림에 같이 쓰지 않는다. 같은 뜻 태그를 겹쳐 쓰지 않는다. 장면 세 줄은 필요한 것만, 합쳐 30개 안쪽으로. 가중치는 핵심 한두 개에만.\n\n## 새 그림\n사용자가 앞 그림과 다른 새 그림(다른 장소·옷·상황)을 달라고 하면 scene 블록 첫 줄에 new를 쓰고 outfit·pose·bg 줄을 다 쓴다. 앱이 앞 장면 칸·다른 답의 인물별 칸을 비우고 넣는다(이번 빼는 것은 남고, 새 장면과 부딪치는 것만 빠진다). 캐릭터를 바꿀 때만 count·traits 줄을 쓴다. 앞 그림을 고치는 것이면 new 없이 바뀐 줄만.\n\n## 내기 전 검토\n블록을 내기 전에 한 번 훑는다: 태그가 맞는 칸 줄에 있나, 같은 태그가 두 줄에 겹치나, 빼는 것(기본·이번)에 있는 태그를 넣으려 하나, 단부루에 없는 말(자연어·한국어)이 섞였나, 인원수가 인물 수와 맞나. 걸리면 고친 블록만 내고 무엇을 고쳤는지 한 줄. 확실하지 않은 태그는 search 블록으로 찾는다.\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상), 마지막 줄에 \`neg: 태그\`로 그 인물에게 나오면 안 되는 것을 3~8개 꼭 쓴다(반대되는 머리 길이·머리색·눈색·체형, 그 인물에게 없는 안경·장신구·귀·뿔 등. 기본 Undesired에 있는 것은 빼고). neg 줄 없는 person 블록을 내지 않는다. 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}`;
+  return `\n\n## 앱 상태\n사용자 말 앞의 [앱 상태]는 그 말을 보낸 때의 칸·설정·서랍이다. 맨 마지막 사용자 말의 것이 지금이다. 지난 것은 그때 값이니 섞지 않는다.\n\n## 요구사항 반영 (가장 중요)\n사용자가 이번 메시지에서 말한 것을 하나씩 나눠, 하나도 빠짐없이 블록 줄에 넣는다. 말한 물건·재질·색은 뭉개지 않고 그 태그로(커피 → coffee, coffee cup / 니트 → knit sweater / 비 → rain). 고정 칸(그림체·캐릭터)도 사용자가 바꾸라고 하면 바꾼다. 말하지 않은 칸은 건드리지 않는다. 넣을 수 없는 것(모델이 못 하는 것, 서로 부딪치는 것)은 블록 앞 한 줄로 무엇이 왜 안 됐는지 말한다.\n특징·의상을 다른 것으로 바꿀 때는 옛 것이 섞여 나오지 않게, 옛 태그 가운데 새것과 부딪치는 것(long hair → short hair면 long hair)을 같은 답의 negative 블록에 넣는다.\n\n## 그림 퀄리티\n서로 부딪치는 태그(standing·sitting, day·night, 다른 머리색 둘)를 한 그림에 같이 쓰지 않는다. 같은 뜻 태그를 겹쳐 쓰지 않는다. 장면 세 줄은 필요한 것만, 합쳐 30개 안쪽으로. 가중치는 핵심 한두 개에만.\n\n## 새 그림\n사용자가 앞 그림과 다른 새 그림(다른 장소·옷·상황)을 달라고 하면 scene 블록 첫 줄에 new를 쓰고 outfit·pose·bg 줄을 다 쓴다. 앱이 앞 장면 칸·다른 답의 인물별 칸을 비우고 넣는다(이번 빼는 것은 남고, 새 장면과 부딪치는 것만 빠진다). 캐릭터를 바꿀 때만 count·traits 줄을 쓴다. 앞 그림을 고치는 것이면 new 없이 바뀐 줄만.\n\n## 내기 전 검토\n블록을 내기 전에 한 번 훑는다: 태그가 맞는 칸 줄에 있나, 같은 태그가 두 줄에 겹치나, 빼는 것(기본·이번)에 있는 태그를 넣으려 하나, 단부루에 없는 말(자연어·한국어)이 섞였나, 인원수가 인물 수와 맞나. 걸리면 고친 블록만 내고 무엇을 고쳤는지 한 줄. 확실하지 않은 태그는 search 블록으로 찾는다.\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상), 마지막 줄에 \`neg: 태그\`로 그 인물에게 나오면 안 되는 것을 3~8개 꼭 쓴다(반대되는 머리 길이·머리색·눈색·체형, 그 인물에게 없는 안경·장신구·귀·뿔 등. 기본 Undesired에 있는 것은 빼고). neg 줄 없는 person 블록을 내지 않는다. 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}`;
 }
 // 지금 켠 인물은 자주 바뀌므로 지시문 맨 뒤(지금 상태 쪽)에 둔다. 앞부분을 그대로 두어야 제미니가 캐시로 싸게 친다 (2026-11-28, 집필방과 같은 방식).
 function personNow() {
   const now = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || "") && chipOn(e.p)).map((e) => e.p.name);
   return `\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
 }
-function fullPersona(sent, libFull = true) {
-  const d = store.data;
-  // 순서: 안 바뀌는 것(조각·내 조각·앱 기능 설명) → 가끔 바뀌는 것(서랍 목록) → 질문마다 바뀌는 것(지금 인물·지금 상태).
-  // 제미니는 앞부분이 지난 요청과 똑같으면 그만큼을 캐시로 싸게 친다(모델마다 최소 길이가 있음, 2026-11-28 문서: Gemini 3.x·4 계열 4,096토큰).
-  const st = d.persona.auto.state ? stateText(sent, libFull) : "";
-  return buildPersona(d.persona) + personText() + refsText(libFull) + (st ? st + personNow() : personNow());
+// 2026-11-28 사용자(②: 아르곤에서도 캐시가 걸리게): 집필방처럼 덧붙이기만 한다.
+// Gemini 4는 새 요청이 지난 요청을 통째로 담고 그 뒤에 덧붙인 꼴일 때 캐시한다(구글 문서 context caching). 그래서
+//  - 지시문(systemInstruction)은 안 바뀌는 것만: 조각·내 조각·앱 기능 설명.
+//  - 질문마다 바뀌는 것(서랍 목록·지금 상태·지금 인물)은 그 질문의 사용자 말 앞에 붙이고, 보낸 글 그대로 m.sx에 얼려 둔다. 다음 요청에도 같은 글이 간다.
+//  - 지난 답은 줄이지 않고 그대로 보낸다. 보내는 대화는 한 묶음(최대 24개)을 지키다 넘치면 최근 8개로 한 번에 줄인다(그때 한 번만 캐시가 깨짐).
+function staticPersona() { return buildPersona(store.data.persona) + personText(); }
+function turnHead(sent, libFull) {
+  const st = store.data.persona.auto.state ? stateText(sent, libFull) : "";
+  return (refsText(libFull) + st + personNow()).trim();
+}
+function fullPersona(sent = new Set(), libFull = false) { return staticPersona() + "\n\n" + turnHead(sent, libFull); } // 미리보기용
+const strHash = (t) => { let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return h; };
+const SEND_BATCH = 24, SEND_KEEP = 8;
+// 보낼 지난 대화의 시작점. 한 번 정하면 대화가 SEND_BATCH를 넘을 때까지 그대로 둔다(앞이 안 바뀌어야 캐시가 걸림).
+function sendFrom(chat) {
+  const s = store.data.settings;
+  let i = s.chatAnchor != null ? chat.findIndex((m) => m.at != null && m.at === s.chatAnchor) : -1;
+  if (i < 0 || chat.length - i > SEND_BATCH) { i = Math.max(0, chat.length - SEND_KEEP); }
+  while (i < chat.length && chat[i].role !== "user") i++;
+  s.chatAnchor = chat[i]?.at ?? null;
+  return i;
 }
 // 보낸 요청을 부분마다 잰다 (2026-11-27). 글은 글자 수와 어림 토큰(한국어·태그 섞인 글을 재 보니 1.9자에 1토큰쯤), 그림은 장수 × 해상도별 토큰.
 function sizeParts(sys, contents, pics, conf) {
@@ -1534,8 +1549,11 @@ function sizeParts(sys, contents, pics, conf) {
   if (past.length) out.push([`지난 대화 ${past.length}개`, pastN, est(pastN)]);
   const lastText = last.parts.filter((x) => x.text != null && !/^\[그림 #/.test(x.text)).map((x) => x.text).join("\n");
   const cand = lastText.indexOf("\n\n[사전 후보]"), doc = lastText.indexOf("[붙인 파일:");
+  // 이번 말 앞의 앱 상태(서랍 목록·지금 상태·지금 인물)는 제목마다 나눠 센다
+  const um = lastText.indexOf("[사용자]\n"), qStart = um >= 0 ? um + 6 : 0;
+  if (um > 0) for (const sec of lastText.slice(0, um).split(/\n(?=## )/)) { const t = sec.trim(); if (t) out.push([t.startsWith("## ") ? t.split("\n")[0].slice(3, 27) : t.split("\n")[0].replace(/[\[\]]/g, "").slice(0, 24), t.length, est(t.length)]); }
   const qEnd = Math.min(...[cand, doc, lastText.length].filter((x) => x >= 0));
-  out.push(["이번 질문", qEnd, est(qEnd)]);
+  out.push(["이번 질문", qEnd - qStart, est(qEnd - qStart)]);
   if (cand >= 0) { const n = (doc > cand ? doc : lastText.length) - cand; out.push(["사전 후보", n, est(n)]); }
   if (doc >= 0) { const n = lastText.length - doc; out.push(["붙인 파일", n, est(n)]); }
   const nPic = pics.filter((x) => x.inline_data).length;
@@ -1553,7 +1571,6 @@ function takeMemos(text) {
   return { text: out, memos };
 }
 // 제미니에 보낼 지난 대화. 그림은 다시 안 보내고 그때 남긴 메모 줄로 바꾼다. 오래된 답의 코드 블록은 줄인다(지금 칸은 ‘지금 상태’에 있다).
-const SEND_MAX = 12, SEND_FULL = 2; // 보내는 지난 대화 수, 코드 블록을 그대로 두는 최근 답 수
 function histText(m, last, full) {
   // 앱이 돌려준 태그 검색 결과는 지난 대화로 다시 보낼 때 찾은 낱말만 남긴다 (2026-11-27 사용자: 검색 결과도 줄여 줘). 비서는 그때 답에 고른 태그를 이미 적었다.
   if (m.role === "user" && !last && m.text.startsWith("[태그 검색 결과]")) {
@@ -1610,8 +1627,7 @@ async function ask(text, opts = {}) {
   render();
   try {
     await loadTags();
-    let hist = d.chat.slice(-SEND_MAX);
-    while (hist.length && hist[0].role !== "user") hist.shift(); // 제미니는 사용자 말로 시작해야 한다
+    const hist = d.chat.slice(sendFrom(d.chat)); // 사용자 말로 시작한다(제미니 규칙)
     const cand = d.persona.auto.cand ? candidates(text) : [];
     const pics = [];
     for (const a of shown) {
@@ -1620,20 +1636,24 @@ async function ask(text, opts = {}) {
         pics.push({ text: first.includes(a) ? `[그림 #${a.code} ${a.label} — 처음 보는 그림. 답 끝 memo 블록에 한 줄]` : `[그림 #${a.code} ${a.label} — 다시 보여 주는 축소본. memo는 쓰지 않음]` }, { inline_data: { mime_type: "image/jpeg", data } });
       } catch (e) { if (a.kind !== "ref") throw e; /* 못 읽는 서랍 그림은 건너뜀 */ }
     }
-    const modelIdx = hist.map((m, i) => (m.role === "model" ? i : -1)).filter((i) => i >= 0);
-    const fullFrom = modelIdx.length > SEND_FULL ? modelIdx[modelIdx.length - SEND_FULL] : 0;
+    const libFull = !!(ui.withRefs || opts.look?.length || REF_WORDS.test(text));
+    // 이번 말 앞에 붙일 앱 상태. 바로 앞에 보낸 것과 같으면 한 줄로 줄인다(대화에 쌓이므로).
+    const head = turnHead(new Set(shown.map((a) => a.code)), libFull), hh = strHash(head);
+    const prevHead = [...hist].reverse().find((m) => m !== mine && m.role === "user" && m.hh != null);
+    const headTxt = prevHead && prevHead.hh === hh ? "[앱 상태: 바로 앞 말을 보낼 때와 같음]" : `[앱 상태 — 이 말을 보낼 때]\n${head}`;
+    mine.hh = hh;
+    mine.sx = `${headTxt}\n\n[사용자]\n${text}${cand.length ? `\n\n[사전 후보]\n${cand.join("\n")}` : ""}`;
     const contents = hist.map((m, i) => {
       const last = i === hist.length - 1;
-      const body = histText(m, last, i >= fullFrom);
-      const parts = last ? [...pics, { text: cand.length ? `${body}\n\n[사전 후보]\n${cand.join("\n")}` : body }] : [{ text: body }];
+      const body = m.role === "user" && typeof m.sx === "string" && !m.text.startsWith("[태그 검색 결과]") ? m.sx : m.role === "model" ? m.text : histText(m, last, true);
+      const parts = last ? [...pics, { text: body }] : [{ text: body }];
       if (last && doc) parts.push({ text: `[붙인 파일: ${doc.name}${doc.cut ? ` (앞 ${DOC_MAX}자만)` : ""}]\n${doc.text}` });
       return { role: m.role, parts };
     });
     // 다시 보여 주는 그림뿐이면 해상도 설정을 낮춰 토큰을 줄인다(MEDIUM은 한 장 약 530~560, LOW는 260~280. 2026-11-22 countTokens로 잼). 처음 보는 그림이 섞이면 기본(약 1,080~1,120)으로 둔다.
     const conf = { temperature: 0.8 };
     if (!first.length && again.length) conf.mediaResolution = again.length >= 3 ? "MEDIA_RESOLUTION_LOW" : "MEDIA_RESOLUTION_MEDIUM";
-    const libFull = !!(ui.withRefs || opts.look?.length || REF_WORDS.test(text));
-    const sys = fullPersona(new Set(shown.map((a) => a.code)), libFull);
+    const sys = staticPersona();
     const post = (generationConfig) => {
       return fetch(`${GEMINI}${encodeURIComponent(model)}:generateContent`, {
         method: "POST", signal: asking.signal,

@@ -420,3 +420,17 @@ test("캐시 보기: 답 아래에 캐시 몇 토큰·몇 %인지, 안 걸렸으
   assert.match(t, /최근 2번: 보낸 10,000 중 캐시 4,000 \(40%\)/, t);
   assert.deepEqual(errs, []); await p.close();
 });
+
+test("비서 요청은 덧붙이기만: 지시문은 그대로, 다음 요청은 지난 요청을 통째로 담고 뒤에만 더함 (Gemini 4 캐시)", async () => {
+  let n = 0;
+  const { p, errs, asks, ask } = await open({ settings: { aiKey: "x" } }, () => `답${++n}\n\`\`\`scene\npose: sitting\n\`\`\``);
+  await ask("하나"); await p.click('.qreply [data-kind="scene"]'); await p.waitForTimeout(200); // 칸이 바뀌어도
+  await ask("둘");
+  const [a, b] = asks;
+  assert.equal(a.systemInstruction.parts[0].text, b.systemInstruction.parts[0].text);
+  assert.doesNotMatch(a.systemInstruction.parts[0].text, /## 지금 상태/); // 바뀌는 것은 지시문에 없음
+  const txt = (c) => c.map((x) => x.role + ":" + x.parts.filter((q) => q.text != null).map((q) => q.text).join("|"));
+  assert.deepEqual(txt(b.contents).slice(0, a.contents.length), txt(a.contents));
+  assert.match(b.contents.at(-1).parts.at(-1).text, /\[앱 상태 — 이 말을 보낼 때\][^]*## 지금 상태[^]*pose: sitting[^]*\[사용자\]\n둘/);
+  assert.deepEqual(errs, []); await p.close();
+});
