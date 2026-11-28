@@ -2779,7 +2779,7 @@ function quickAsk() {
       ${asking ? `<button type="button" class="ghost" id="stopAsk">취소</button>` : `<button type="button" id="qsend">보내기</button>`}
     </div>`;
 }
-// 비서 답은 그림 바로 아래에, 마지막 답 하나만 (2026-11-27 사용자: 최근 메시지만, 이미지 바로 아래로). 입력칸은 장면 요약 밑 그대로.
+// 그림 바로 아래: 입력칸 → 비서 답(마지막 하나) → 보관·버림 같은 버튼 (2026-11-28 사용자: 채팅창을 그림 바로 아래, 그다음 프롬프트, 그다음 버튼).
 // 답 속 프롬프트 블록은 접을 수 있다 (2026-11-28 사용자). 접으면 글은 숨고 넣기 버튼만 남는다. 접힌 상태는 settings.foldReply에 남는다.
 function qReply() {
   // AI 도우미 칸이 열려 있어도 답은 여기(그림 바로 아래)에만 그린다 (2026-11-28 사용자: 비서가 다시 맨 아래로 내려감).
@@ -3005,7 +3005,7 @@ const SCREENS = {
           <img src="${now.url}" alt="방금 뽑은 그림" width="${now.rec.w}" height="${now.rec.h}">
           <figcaption class="hint">시드 ${now.rec.seed} · ${now.rec.w}×${now.rec.h} · ${esc(now.rec.model)} · ${esc(SAMPLERS[now.rec.sampler] || "")} ${now.rec.steps}스텝${now.rec.refs?.length ? ` · 참고 ${now.rec.refs.length}장` : ""}${now.rec.chars?.length ? ` · 인물 ${now.rec.chars.length}` : ""}${now.rec.i2i ? " · 이미지→이미지" : ""}</figcaption>
         </figure>
-        ${qReply()}
+        ${quickAsk()}${qReply()}
         <div class="acts">
           ${now.rec.verdict === "keep"
             ? `<button type="button" id="unkeep" class="ghost kept">♥ 보관됨 · 빼기</button>`
@@ -3018,11 +3018,10 @@ const SCREENS = {
           <button type="button" id="toI2i" class="ghost">변형하기</button>
           <button type="button" id="toRef" class="ghost">참고 그림</button>
         </div>
-` : `<div class="stage${busy ? " busy" : ""}" style="aspect-ratio:${w}/${h}"><p>${busy ? esc(phase || "뽑는 중…") : "뽑은 그림이 여기 뜸"}</p><small>아래 칸을 채우고 ‘뽑기’</small></div>${qReply()}`}
+` : `<div class="stage${busy ? " busy" : ""}" style="aspect-ratio:${w}/${h}"><p>${busy ? esc(phase || "뽑는 중…") : "뽑은 그림이 여기 뜸"}</p><small>아래 칸을 채우고 ‘뽑기’</small></div>${quickAsk()}${qReply()}`}
       ${histStrip()}
       ${errMsg ? `<p class="error" role="alert">${esc(errMsg)}</p>` : ""}
       ${sceneSum()}
-      ${quickAsk()}
       ${promptBlock()}
       <div class="seg seg4" role="group" aria-label="크기">
         ${[...Object.keys(SIZES), "직접"].map((k) => `<button type="button" class="${s.size === k ? "on" : ""}" data-size="${k}">${k}<small>${k === "직접" ? (s.size === "직접" ? `${w}×${h}` : "입력") : SIZES[k].join("×")}</small></button>`).join("")}

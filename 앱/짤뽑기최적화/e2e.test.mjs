@@ -353,16 +353,16 @@ test("뽑기 화면 비서: 답은 그림 바로 아래에 마지막 답 하나�
   const chat = [{ role: "user", text: "옛 질문", at: 1 }, { role: "model", text: "옛 답", at: 2 }];
   const { p, errs, ask } = await open({ settings: { aiKey: "x" }, chat }, "새 답\n```scene\npose: sitting\n```");
   await ask("앉게");
-  const next = await p.evaluate(() => document.querySelector(".stage, figure.result")?.nextElementSibling?.className || "");
-  assert.match(next, /qreply/);
+  // 그림 바로 아래: 입력칸 → 답(프롬프트) → 그 밖의 버튼 (2026-11-28 사용자: 채팅창을 그림 바로 아래, 그다음 프롬프트, 그다음 버튼)
+  const order = await p.evaluate(() => { const a = document.querySelector(".stage, figure.result"); const n1 = a?.nextElementSibling, n2 = n1?.nextElementSibling; return [n1?.className || "", n2?.className || ""]; });
+  assert.match(order[0], /qask/); assert.match(order[1], /qreply/);
   assert.equal(await p.locator(".qreply .msg").count(), 1);
   assert.match(await p.locator(".qreply").innerText(), /새 답/);
   await p.locator('.tool[data-tool="ai"]').click(); await p.waitForTimeout(200);
   // AI 도우미 칸을 열어도 답은 그림 바로 아래 그대로, 아래 칸에는 메시지를 다시 그리지 않는다 (2026-11-28 사용자: 비서가 다시 맨 아래로 내려감)
   assert.equal(await p.locator('[data-toolbody="ai"] .msg').count(), 0);
   assert.match(await p.locator(".qreply").innerText(), /새 답/);
-  const next2 = await p.evaluate(() => document.querySelector(".stage, figure.result")?.nextElementSibling?.className || "");
-  assert.match(next2, /qreply/);
+  assert.equal(await p.locator(".qreply").count(), 1); // AI 도우미를 열어도 답은 위에
   assert.deepEqual(errs, []); await p.close();
 });
 
