@@ -2775,7 +2775,7 @@ function quickAsk() {
   if (ui.open.ai) return "";
   const { settings: s } = store.data;
   return `<div class="qask">
-      <input id="qask" type="text" enterkeyhint="send" autocomplete="off" placeholder="${s.aiKey.trim() ? "비서에게: 예) 앉게, 배경은 밤거리" : "비서를 쓰려면 설정에서 제미니 키"}" value="${esc(askDraft)}" aria-label="비서에게 부탁">
+      <input id="qask" type="text" enterkeyhint="send" autocomplete="off" placeholder="${s.aiKey.trim() ? "비서에게: 예) 앉게, 배경은 밤거리" : "⚙ 설정에서 제미니 키를 넣어 주세요"}" value="${esc(askDraft)}" aria-label="비서에게 부탁">
       ${asking ? `<button type="button" class="ghost" id="stopAsk">취소</button>` : `<button type="button" id="qsend">보내기</button>`}
     </div>`;
 }
