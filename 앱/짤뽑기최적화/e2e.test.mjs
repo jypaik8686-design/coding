@@ -390,3 +390,17 @@ test("이번 빼는 것 유지: 비서의 빼는 것 블록은 더하기만 하�
   assert.equal((await data()).draft.neg, "earrings, long hair, blurry"); // 장면에 넣은 hat만 빠짐
   assert.deepEqual(errs, []); await p.close();
 });
+
+test("비서 모델: 처음 값은 아르곤, 옛 처음 값(flash-latest)은 한 번만 아르곤으로, 그 뒤 고른 것은 그대로", async () => {
+  const pick = async (p) => { await p.evaluate(() => { location.hash = "#/set"; }); await p.waitForTimeout(300); return p.locator("#aiModel").inputValue(); };
+  const a = await open({});
+  assert.equal(await pick(a.p), "gemini-4-argon"); await a.p.close();
+  const b = await open({ settings: { aiModel: "gemini-flash-latest" } });
+  assert.equal(await pick(b.p), "gemini-4-argon");
+  await b.p.selectOption("#aiModel", "gemini-flash-latest"); await b.p.waitForTimeout(200); // 사용자가 다시 고름
+  await b.p.reload(); await b.p.waitForTimeout(800);
+  assert.equal(await pick(b.p), "gemini-flash-latest"); // 다시 고른 것은 안 바꿈
+  const c = await open({ settings: { aiModel: "gemini-3.1-pro-preview" } });
+  assert.equal(await pick(c.p), "gemini-3.1-pro-preview"); await c.p.close();
+  assert.deepEqual([...a.errs, ...b.errs, ...c.errs], []); await b.p.close();
+});

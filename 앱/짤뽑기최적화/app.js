@@ -68,7 +68,7 @@ const OLD_NEG = "lowres, bad anatomy, bad hands, extra digits, jpeg artifacts, s
 const SHAPE = () => ({
   settings: {
     token: "", model: "nai-diffusion-5-full", customModel: "", size: "세로", steps: 28, scale: 5, quality: true,
-    aiKey: "", aiModel: MODEL_CHOICES[0], aiCustom: "", qualityText: "",
+    aiKey: "", aiModel: "gemini-4-argon", aiCustom: "", qualityText: "", argon1: 1, // 2026-11-28 사용자: 비서 처음 값을 아르곤으로
     sampler: "k_euler_ancestral", noise: "karras", cfgRescale: 0, variety: false, customW: 832, customH: 1216, refMode: "vibe",
     baseOn: true, baseStr: 0.3, // 기본 바이브 쓰기·강도 (2026-11-27)
     bgOn: false, // 배경 깔기. 끄면 배경 칸 대신 simple background (2026-11-27)
@@ -229,7 +229,8 @@ function normAll(raw) {
     draft.scene = sceneOf(draft.slots);
     const settings = { ...base.settings, ...(raw.settings || {}) };
     if (typeof settings.qualityText !== "string") settings.qualityText = "";
-    if (!settings.memoOff1) { settings.autoMemo = false; settings.memoOff1 = 1; } // 2026-11-27: 자동 메모를 한 번 끔. 그 뒤 사용자가 켜면 그대로
+    if (!settings.memoOff1) { settings.autoMemo = false; settings.memoOff1 = 1; }
+    if (!raw.settings?.argon1) { if (settings.aiModel === "gemini-flash-latest") settings.aiModel = "gemini-4-argon"; settings.argon1 = 1; } // 2026-11-28: 옛 처음 값(flash-latest)만 한 번 아르곤으로. 그 뒤 사용자가 고르면 그대로 // 2026-11-27: 자동 메모를 한 번 끔. 그 뒤 사용자가 켜면 그대로
     const taste = { ...base.taste, ...(raw.taste || {}) };
     if (taste.negative === OLD_NEG) taste.negative = DEFAULT_NEG;
     // 취향 처음 값이 생기기 전에 저장된 데이터: 비어 있으면 한 번만 채운다. 그 뒤에 사용자가 비우면 다시 채우지 않는다.
