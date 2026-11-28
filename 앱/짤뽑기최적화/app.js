@@ -1580,6 +1580,7 @@ async function geminiFail(res) {
 
 // opts.image: true면 방금 뽑은 그림을 이 질문에 붙여 구글로 보낸다 (사용자가 체크했을 때만)
 async function ask(text, opts = {}) {
+  ui.qShow = true; // 어디서 물었든(한 줄·AI 도우미·칩) 답은 뽑기 화면 그림 아래에 보인다
   const d = store.data, s = d.settings;
   askErr = "";
   const model = (s.aiModel === "custom" ? s.aiCustom : s.aiModel).trim().replace(/^models\//, "");
@@ -2073,8 +2074,8 @@ const quickChips = () => `<div class="chips">
 function aiInner() {
   const { settings: s, chat } = store.data;
   const last = chat.length ? chat.length - 1 : -1;
-  // 마지막 메시지 하나만 여기서 보인다 (2026-11-27 사용자: 최근 메시지만). 전체 대화는 ‘비서’ 탭.
-  const shown = last >= 0 ? [last] : [];
+  // 답은 그림 바로 아래(qReply)에만 보인다. 이 칸은 입력칸·칩·그림 붙이기만 (2026-11-28). 전체 대화는 ‘비서’ 탭.
+  const shown = [];
   const body = `
     ${s.aiKey.trim() ? "" : `<p class="notice">제미니 키가 아직 없음. <a href="#/set">설정(오른쪽 위 톱니바퀴)</a>에서 넣어야 대답함.</p>`}
     ${quickChips()}
@@ -2761,7 +2762,8 @@ function quickAsk() {
 // 비서 답은 그림 바로 아래에, 마지막 답 하나만 (2026-11-27 사용자: 최근 메시지만, 이미지 바로 아래로). 입력칸은 장면 요약 밑 그대로.
 // 답 속 프롬프트 블록은 접을 수 있다 (2026-11-28 사용자). 접으면 글은 숨고 넣기 버튼만 남는다. 접힌 상태는 settings.foldReply에 남는다.
 function qReply() {
-  if (ui.open.ai || !ui.qShow) return "";
+  // AI 도우미 칸이 열려 있어도 답은 여기(그림 바로 아래)에만 그린다 (2026-11-28 사용자: 비서가 다시 맨 아래로 내려감).
+  if (!ui.qShow) return "";
   const { chat, settings: st } = store.data, last = chat.length - 1;
   if (asking) return `<p class="hint qreply qwait">비서가 생각 중…</p>`;
   if (askErr) return `<p class="error qreply" role="alert">${esc(askErr)}</p>`;
