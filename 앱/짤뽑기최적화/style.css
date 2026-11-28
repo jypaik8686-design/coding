@@ -628,3 +628,5 @@ button.line { color: var(--ink); background: transparent; border: 1px solid var(
 .code.folded { padding: 6px 8px; }
 .code.folded .acts2 { margin-top: 0; }
 .qbar { justify-content: flex-end; }
+.tok .cachehit { color: var(--ok, #6fbf73); font-weight: 600; }
+.tok .cachemiss { color: var(--dim); }

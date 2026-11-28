@@ -2013,8 +2013,14 @@ function msgHtml(m, i, fold = false) {
       : `<button type="button" class="ghost done" data-blkall="${i}" data-again="1">✓ 전부 넣음 <small>(다시 넣기)</small></button>`}</div>` : "";
   const memoLine = Array.isArray(m.mm) && m.mm.length ? `<p class="hint memosaved">메모 남김 (다음부터 그림 대신 감): ${m.mm.map(([c, t]) => `#${esc(c)} ${esc(cut(t, 80))}`).join(" / ")}</p>` : "";
   const L = (n) => Number(n || 0).toLocaleString("ko-KR");
-  const brk = Array.isArray(m.brk) && m.brk.length ? `<details class="tokbrk"><summary>어디서 들었나</summary><ul>${[...m.brk].sort((a, b) => b[2] - a[2]).map(([k, c, t]) => `<li><span>${esc(k)}</span><span>약 ${L(t)}${c ? ` <small>${L(c)}자</small>` : ""}</span></li>`).join("")}</ul><p class="hint">글은 1.9자에 1토큰으로 어림. 실제 보낸 것은 위 숫자. 서랍 목록은 참고 그림 얘기를 할 때만 전부 감.</p></details>` : "";
-  const tok = Array.isArray(m.tok) && m.tok[0] ? `<p class="hint tok">이 질문에 든 토큰: 보낸 것 ${L(m.tok[0])}${m.tok[2] ? ` (그중 캐시 ${L(m.tok[2])})` : ""} · 받은 것 ${L(m.tok[1])}${m.tok[3] ? ` · 생각 ${L(m.tok[3])}` : ""}</p>${brk}` : "";
+  const brk = Array.isArray(m.brk) && m.brk.length ? `<details class="tokbrk"><summary>어디서 들었나</summary><ul>${[...m.brk].sort((a, b) => b[2] - a[2]).map(([k, c, t]) => `<li><span>${esc(k)}</span><span>약 ${L(t)}${c ? ` <small>${L(c)}자</small>` : ""}</span></li>`).join("")}</ul><p class="hint">글은 1.9자에 1토큰으로 어림. 실제 보낸 것은 위 숫자. 서랍 목록은 참고 그림 얘기를 할 때만 전부 감. 캐시: 지시문 앞부분(조각·내 조각·앱 설명)이 지난 질문과 똑같고 4,096토큰(문서 기준, 3.x·4 계열)을 넘으면 구글이 알아서 싸게 침. 첫 질문, 조각을 고친 직후, 오래 쉰 뒤에는 안 걸릴 수 있음.</p></details>` : "";
+  // 캐시 보기 (2026-11-28 사용자: 캐시 확인 가능하게). 제미니가 돌려준 cachedContentTokenCount 그대로. 0이면 안 걸렸다고 쓴다.
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+  const cacheTxt = (t) => (t[2] ? `<b class="cachehit">캐시 ${L(t[2])} (${pct(t[2], t[0])}%)</b>` : `<span class="cachemiss">캐시 안 걸림</span>`);
+  const recent = store.data.chat.filter((x) => x.role === "model" && Array.isArray(x.tok) && x.tok[0]).slice(-10);
+  const rs = recent.reduce((a, x) => [a[0] + x.tok[0], a[1] + (x.tok[2] || 0)], [0, 0]);
+  const sum = recent.length >= 2 ? `<br>최근 ${recent.length}번: 보낸 ${L(rs[0])} 중 캐시 ${L(rs[1])} (${pct(rs[1], rs[0])}%)` : "";
+  const tok = Array.isArray(m.tok) && m.tok[0] ? `<p class="hint tok">이 질문에 든 토큰: 보낸 것 ${L(m.tok[0])} · ${cacheTxt(m.tok)} · 받은 것 ${L(m.tok[1])}${m.tok[3] ? ` · 생각 ${L(m.tok[3])}` : ""}${sum}</p>${brk}` : "";
   return `<div class="msg ai">${all}${parts || esc(m.text)}${memoLine}${tok}</div>`;
 }
 

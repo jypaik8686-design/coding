@@ -404,3 +404,16 @@ test("비서 모델: 처음 값은 아르곤, 옛 처음 값(flash-latest)은 �
   assert.equal(await pick(c.p), "gemini-3.1-pro-preview"); await c.p.close();
   assert.deepEqual([...a.errs, ...b.errs, ...c.errs], []); await b.p.close();
 });
+
+test("캐시 보기: 답 아래에 캐시 몇 토큰·몇 %인지, 안 걸렸으면 안 걸렸다고 보이고 최근 합계도 보인다", async () => {
+  const { p, errs, ask } = await open({ settings: { aiKey: "x" } });
+  let n = 0;
+  await p.route(/generativelanguage/, (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ candidates: [{ content: { parts: [{ text: `답${++n}` }] } }], usageMetadata: { promptTokenCount: 5000, candidatesTokenCount: 20, cachedContentTokenCount: n === 1 ? 0 : 4000 } }) }));
+  await ask("하나");
+  assert.match(await p.locator(".qreply .tok").innerText(), /캐시 안 걸림/);
+  await ask("둘");
+  const t = await p.locator(".qreply .tok").innerText();
+  assert.match(t, /캐시 4,000 \(80%\)/, t);
+  assert.match(t, /최근 2번: 보낸 10,000 중 캐시 4,000 \(40%\)/, t);
+  assert.deepEqual(errs, []); await p.close();
+});
