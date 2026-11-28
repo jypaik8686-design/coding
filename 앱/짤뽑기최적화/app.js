@@ -1505,7 +1505,7 @@ function refsText(full = true) {
 function personText() {
   const list = presetEntries("인물").filter((e) => !e.hidden && tidy(e.p.text || ""));
   const now = list.filter((e) => chipOn(e.p)).map((e) => e.p.name);
-  return `\n\n## 요구사항 반영 (가장 중요)\n사용자가 이번 메시지에서 말한 것을 하나씩 나눠, 하나도 빠짐없이 블록 줄에 넣는다. 말한 물건·재질·색은 뭉개지 않고 그 태그로(커피 → coffee, coffee cup / 니트 → knit sweater / 비 → rain). 고정 칸(그림체·캐릭터)도 사용자가 바꾸라고 하면 바꾼다. 말하지 않은 칸은 건드리지 않는다. 넣을 수 없는 것(모델이 못 하는 것, 서로 부딪치는 것)은 블록 앞 한 줄로 무엇이 왜 안 됐는지 말한다.\n특징·의상을 다른 것으로 바꿀 때는 옛 것이 섞여 나오지 않게, 옛 태그 가운데 새것과 부딪치는 것(long hair → short hair면 long hair)을 같은 답의 negative 블록에 넣는다.\n\n## 그림 퀄리티\n서로 부딪치는 태그(standing·sitting, day·night, 다른 머리색 둘)를 한 그림에 같이 쓰지 않는다. 같은 뜻 태그를 겹쳐 쓰지 않는다. 장면 세 줄은 필요한 것만, 합쳐 30개 안쪽으로. 가중치는 핵심 한두 개에만.\n\n## 새 그림\n사용자가 앞 그림과 다른 새 그림(다른 장소·옷·상황)을 달라고 하면 scene 블록 첫 줄에 new를 쓰고 outfit·pose·bg 줄을 다 쓴다. 앱이 앞 장면 칸·이번 빼는 것·다른 답의 인물별 칸을 비우고 넣는다. 캐릭터를 바꿀 때만 count·traits 줄을 쓴다. 앞 그림을 고치는 것이면 new 없이 바뀐 줄만.\n\n## 내기 전 검토\n블록을 내기 전에 한 번 훑는다: 태그가 맞는 칸 줄에 있나, 같은 태그가 두 줄에 겹치나, 빼는 것(기본·이번)에 있는 태그를 넣으려 하나, 단부루에 없는 말(자연어·한국어)이 섞였나, 인원수가 인물 수와 맞나. 걸리면 고친 블록만 내고 무엇을 고쳤는지 한 줄. 확실하지 않은 태그는 search 블록으로 찾는다.\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상), 마지막 줄에 \`neg: 태그\`로 그 인물에게 나오면 안 되는 것을 3~8개 꼭 쓴다(반대되는 머리 길이·머리색·눈색·체형, 그 인물에게 없는 안경·장신구·귀·뿔 등. 기본 Undesired에 있는 것은 빼고). neg 줄 없는 person 블록을 내지 않는다. 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
+  return `\n\n## 요구사항 반영 (가장 중요)\n사용자가 이번 메시지에서 말한 것을 하나씩 나눠, 하나도 빠짐없이 블록 줄에 넣는다. 말한 물건·재질·색은 뭉개지 않고 그 태그로(커피 → coffee, coffee cup / 니트 → knit sweater / 비 → rain). 고정 칸(그림체·캐릭터)도 사용자가 바꾸라고 하면 바꾼다. 말하지 않은 칸은 건드리지 않는다. 넣을 수 없는 것(모델이 못 하는 것, 서로 부딪치는 것)은 블록 앞 한 줄로 무엇이 왜 안 됐는지 말한다.\n특징·의상을 다른 것으로 바꿀 때는 옛 것이 섞여 나오지 않게, 옛 태그 가운데 새것과 부딪치는 것(long hair → short hair면 long hair)을 같은 답의 negative 블록에 넣는다.\n\n## 그림 퀄리티\n서로 부딪치는 태그(standing·sitting, day·night, 다른 머리색 둘)를 한 그림에 같이 쓰지 않는다. 같은 뜻 태그를 겹쳐 쓰지 않는다. 장면 세 줄은 필요한 것만, 합쳐 30개 안쪽으로. 가중치는 핵심 한두 개에만.\n\n## 새 그림\n사용자가 앞 그림과 다른 새 그림(다른 장소·옷·상황)을 달라고 하면 scene 블록 첫 줄에 new를 쓰고 outfit·pose·bg 줄을 다 쓴다. 앱이 앞 장면 칸·다른 답의 인물별 칸을 비우고 넣는다(이번 빼는 것은 남고, 새 장면과 부딪치는 것만 빠진다). 캐릭터를 바꿀 때만 count·traits 줄을 쓴다. 앞 그림을 고치는 것이면 new 없이 바뀐 줄만.\n\n## 내기 전 검토\n블록을 내기 전에 한 번 훑는다: 태그가 맞는 칸 줄에 있나, 같은 태그가 두 줄에 겹치나, 빼는 것(기본·이번)에 있는 태그를 넣으려 하나, 단부루에 없는 말(자연어·한국어)이 섞였나, 인원수가 인물 수와 맞나. 걸리면 고친 블록만 내고 무엇을 고쳤는지 한 줄. 확실하지 않은 태그는 search 블록으로 찾는다.\n\n## 설정 바꾸기\n생성 설정·시드를 바꾸라고 하면 params 블록(JSON)을 낸다. 키: sampler, steps(1~50), scale(0~10), cfg_rescale(0~1), noise_schedule, variety(true/false), size(세로·가로·정사각), width·height(64 단위, 64~1536), seed(숫자면 고정, "random"이면 무작위), quality(품질 태그 true/false), bg(배경 깔기 true/false), model("v4.5" 또는 "v5"). 지금 값은 ‘지금 상태’에 있다. 바꿀 키만 쓴다.\n그림을 짤 때(scene·person 블록을 낼 때) 그 그림에 맞는 설정이 지금과 다르면 같은 답에 params 블록도 낸다. 기준: 전신·서 있는 한 명은 세로, 풍경·여러 명 나란히·가로로 넓은 구도는 가로, 얼굴·상반신 클로즈업은 세로나 정사각. 태그를 엄격히 따라야 하면 scale 6~7, 자연스럽게 풀어 두려면 4~5. 구도를 여러 가지로 보고 싶다고 하면 variety true. 배경을 그리는 장면이면 bg true, 인물만이면 bg false. 시드는 사용자가 말할 때만 바꾼다. steps 28 넘김·큰 크기는 Anlas가 들 수 있어(Opus 기준 문서) 바꿀 때 한 줄로 알린다.\n\n## 태그 찾기\n태그가 단부루에 있는지 모르겠거나 비슷한 태그를 찾을 때는 블록을 내기 전에 search 블록에 찾을 낱말을 한 줄씩(영어 태그 또는 한국어, 6줄까지) 낸다. 앱이 단부루 사전에서 찾아 다음 메시지로 결과를 준다(별칭이면 바른 이름, 게시물 수). 결과를 받은 뒤 블록을 낸다. 확실한 태그는 찾지 않는다.\n\n## 인물 바꾸기\n인물을 바꾸라고 하면 person 블록을 낸다. 프리셋 인물이면 이름 한 줄(아래 목록에서 그대로), 없는 인물이면 첫 줄에 \`name: 인물 이름\`(사용자가 부른 이름), 다음 줄에 그 인물 태그를 쉼표로(인원수·얼굴·머리·몸·기본 의상), 마지막 줄에 \`neg: 태그\`로 그 인물에게 나오면 안 되는 것을 3~8개 꼭 쓴다(반대되는 머리 길이·머리색·눈색·체형, 그 인물에게 없는 안경·장신구·귀·뿔 등. 기본 Undesired에 있는 것은 빼고). neg 줄 없는 person 블록을 내지 않는다. 사용자가 프리셋으로 저장할 수 있다. 여러 명이면 person 블록을 한 명에 하나씩 내고, 자세·배경은 scene 블록 하나에 쓴다(앱이 인물별 프롬프트로 한 명씩 넣는다). 앱이 고정 칸과 의상 칸을 바꿔 넣는다. 의상만 다르게 하려면 같은 답에 scene 블록 outfit 줄을 더한다.\n인물 프리셋: ${list.map((e) => e.p.name).join(" | ") || "없음"}\n지금 인물: ${now.join(", ") || "프리셋 아님"}`;
 }
 function fullPersona(sent, libFull = true) {
   const d = store.data;
@@ -1853,6 +1853,11 @@ function applyPerson(v) {
   syncScene(); d.draft.seedLock = false;
   return `인물을 태그로 바꿈${tg(outfit) ? " (의상도)" : ""}${nc?.neg ? " (금지 태그도)" : ""}`;
 }
+// 장면 블록을 넣은 뒤: 이번 빼는 것 가운데 지금 그림 칸에 든 태그는 뺀다(넣을 것과 뺄 것에 둘 다 있으면 서로 지움).
+function negFree() {
+  const d = store.data, pos = new Set(tg(sceneOf(d.draft.slots)).split(", ").map(ckey));
+  d.draft.neg = tg(d.draft.neg).split(", ").filter((t) => t && !pos.has(ckey(t))).join(", ");
+}
 function applyBlock(kind, v, from = "") {
   const d = store.data;
   if (kind === "person") return applyPerson(v);
@@ -1864,11 +1869,11 @@ function applyBlock(kind, v, from = "") {
     if (isNew) {
       v = String(v).replace(/^\s*(new|새\s*그림)\s*$/gim, "").trim();
       for (const k of ["outfit", "pose", "bg", "rest"]) d.draft.slots[k] = "";
-      d.draft.neg = "";
+      // 이번 빼는 것은 남긴다 (2026-11-28 사용자: 조금만 바꾸면 이번 빼는 것이 유지가 안 됨). 새 장면과 부딪치는 태그만 아래 negFree()가 뺀다.
     }
     const keys = sceneKeys(v);
     if (!keys.length) { // 칸 이름이 없는 글(밖에서 받은 프롬프트 한 덩어리): 전처럼 이번 그림 전체를 바꾼다
-      d.draft.slots = parseSceneBlock(v); syncScene(); d.draft.seedLock = false;
+      d.draft.slots = parseSceneBlock(v); syncScene(); d.draft.seedLock = false; negFree();
       const gone = dropOld();
       return `이번 그림 칸들을 바꿈${gone ? ` · 옛 인물 ${gone}명 뺌` : ""}`;
     }
@@ -1880,7 +1885,7 @@ function applyBlock(kind, v, from = "") {
       if (keys.includes(k)) d.draft.slots[k] = got[k];
       else if (tg(got[k])) d.draft.slots[k] = k === "count" || k === "traits" ? joinTags([d.draft.slots[k], got[k]]) : got[k];
     }
-    syncScene(); d.draft.seedLock = false;
+    syncScene(); d.draft.seedLock = false; negFree();
     const goneN = isNew ? dropOld() : 0;
     return `${isNew ? "새 장면: 장면 칸을 비우고 " : ""}${keys.map((k) => SLOT_NAMES[k] || k).join("·")} 칸을 바꿈${keys.some((k) => k === "count" || k === "traits") ? " (캐릭터도 바뀜)" : ""}${goneN ? ` · 옛 인물 ${goneN}명 뺌` : ""}`;
   }
@@ -1892,8 +1897,9 @@ function applyBlock(kind, v, from = "") {
   if (kind === "negative") { // 기본 Undesired에 이미 있는 태그는 빼고 넣는다
     const base = new Set(tg(d.taste.negative).split(", ").map(tagKey));
     const all = joinTags([v]).split(", ").filter(Boolean), keep = all.filter((t) => !base.has(tagKey(t)));
-    d.draft.neg = keep.join(", ");
-    return `이번 빼는 것 칸을 바꿈${all.length > keep.length ? ` (기본에 있는 ${all.length - keep.length}개는 뺌)` : ""}`;
+    // 갈아 끼우지 않고 더한다 (2026-11-28 사용자: 이번 빼는 것이 유지가 안 됨). 빼려면 사용자가 칸에서 지운다.
+    d.draft.neg = mergeTags(d.draft.neg, keep.join(", "), false);
+    return `이번 빼는 것에 더함${all.length > keep.length ? ` (기본에 있는 ${all.length - keep.length}개는 뺌)` : ""}`;
   }
   if (kind === "char") {
     if (!supportsChars(d.settings)) return "이 모델은 인물별 프롬프트가 안 됨 (V4 이상)";
@@ -1955,7 +1961,7 @@ function searchCard(text) {
     <div class="chips">${chips.map((t) => `<button type="button" class="chip" data-tagadd="${esc(t)}">${esc(t)}</button>`).join("")}</div>
     <pre class="srchraw">${esc(text.replace(/^\[태그 검색 결과\][^\n]*\n/, "").replace(/\n이 결과로[\s\S]*$/, ""))}</pre></details></div>`;
 }
-function msgHtml(m, i) {
+function msgHtml(m, i, fold = false) {
   if (m.role === "user" && m.text.startsWith("[태그 검색 결과]")) return searchCard(m.text);
   if (m.role === "user") {
     const att = Array.isArray(m.att) ? m.att.map((a) => `<small class="att">그림 #${esc(a.c)}${a.n ? ` ${esc(a.n)}` : a.k === "now" ? " 방금 그림" : a.k === "file" ? " 고른 사진" : ""} ${a.re ? "축소본" : "처음 한 번"} 첨부</small>`).join("") : "";
@@ -1987,6 +1993,7 @@ function msgHtml(m, i) {
       else if (!c) check = `<p class="hint">태그 사전을 못 불러와 검사를 못 함.</p>`;
     }
     const prompty = ["scene", "style", "negative", "char"].includes(b.lang) || !b.lang;
+    if (fold) return `<div class="code folded"><div class="acts2">${btn}${psave}<button type="button" class="ghost" data-copy="${id}">복사</button></div></div>`;
     return `<div class="code"><pre>${esc(showBlock(b))}</pre>${prompty ? `<p class="endmark">✅ 여기까지</p>` : ""}<div class="acts2">${btn}${psave}<button type="button" class="ghost" data-copy="${id}">복사</button></div>${check}</div>`;
   }).join("");
   const left = usable.filter((j) => !done.includes(j)).length;
@@ -2738,13 +2745,14 @@ function quickAsk() {
     </div>`;
 }
 // 비서 답은 그림 바로 아래에, 마지막 답 하나만 (2026-11-27 사용자: 최근 메시지만, 이미지 바로 아래로). 입력칸은 장면 요약 밑 그대로.
+// 답 속 프롬프트 블록은 접을 수 있다 (2026-11-28 사용자). 접으면 글은 숨고 넣기 버튼만 남는다. 접힌 상태는 settings.foldReply에 남는다.
 function qReply() {
   if (ui.open.ai || !ui.qShow) return "";
-  const { chat } = store.data, last = chat.length - 1;
+  const { chat, settings: st } = store.data, last = chat.length - 1;
   if (asking) return `<p class="hint qreply qwait">비서가 생각 중…</p>`;
   if (askErr) return `<p class="error qreply" role="alert">${esc(askErr)}</p>`;
   return last >= 0 && chat[last].role === "model"
-    ? `<div class="chat qreply">${msgHtml(chat[last], last)}<button type="button" class="ghost mini" id="qhide">답 닫기</button></div>` : "";
+    ? `<div class="chat qreply${st.foldReply ? " qfold" : ""}">${msgHtml(chat[last], last, !!st.foldReply)}<div class="acts2 qbar"><button type="button" class="ghost mini" data-qfold="${st.foldReply ? 0 : 1}" aria-expanded="${!st.foldReply}">${st.foldReply ? "프롬프트 펼치기" : "프롬프트 접기"}</button><button type="button" class="ghost mini" id="qhide">답 닫기</button></div></div>` : "";
 }
 function sceneSum() {
   trackSlots(); trackSlots.done = true;
@@ -2760,8 +2768,8 @@ function promptBlock() {
   const d = store.data, fold = !!d.settings.foldPrompt;
   if (!fold) return `<div class="phead"><h2>프롬프트</h2><button type="button" class="ghost mini" data-pfold="1" aria-expanded="true">전부 접기</button></div>${slotsPanel()}`;
   const full = composePrompt(d.draft.slots, d.taste.style, d.settings), neg = tg(d.draft.neg);
-  return `<div class="phead"><h2>프롬프트 <small>${full.length}자${neg ? ` · 이번 빼는 것 ${neg.split(", ").length}개` : ""}</small></h2><button type="button" class="ghost mini" data-pfold="0" aria-expanded="false">펼치기</button></div>
-    <button type="button" class="pfold" data-pfold="0" aria-label="프롬프트 펼치기"><span>${esc(withComma(full)) || "(비어 있음)"}</span></button>`;
+  // 2026-11-28 사용자(프롬프트 접기 가능하게): 접으면 제목 한 줄만 남긴다. 전에는 완성 프롬프트 두 줄이 남았다.
+  return `<div class="phead"><h2>프롬프트 <small>${full.length}자${neg ? ` · 이번 빼는 것 ${neg.split(", ").length}개` : ""}</small></h2><button type="button" class="ghost mini" data-pfold="0" aria-expanded="false">펼치기</button></div>`;
 }
 // ‘그 밖에’ 칸의 태그를 하나씩 맞는 칸에 옮긴다 (2026-11-27 사용자: 칸 나누기 전 칸에 있는 것을 분류). 칸을 모르는 태그만 남긴다.
 function splitRest() {
@@ -3241,6 +3249,7 @@ function wireAsk() {
   on("qsend", "click", qgo);
   on("qask", "keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); qgo(); } });
   on("qhide", "click", () => { ui.qShow = false; render(); });
+  document.querySelectorAll("[data-qfold]").forEach((b) => b.addEventListener("click", () => { store.data.settings.foldReply = b.dataset.qfold === "1"; store.save(); }));
   on("stopAsk", "click", () => asking?.abort());
   document.querySelectorAll("[data-look]").forEach((b) => b.addEventListener("click", () => {
     if (asking) return toast("앞 질문의 답을 기다리는 중");

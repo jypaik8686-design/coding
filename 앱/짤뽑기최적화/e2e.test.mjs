@@ -266,7 +266,7 @@ test("설정의 ‘그림 zip 내보내기’가 오류 없이 돈다 (고른 �
   assert.match(await p.locator(".toast").innerText(), /그림|보관/);
   await p.close();
 });
-test("새 장면(new) 블록: 앞 그림의 장면 칸·이번 빼는 것·인물별 칸이 남지 않고, 캐릭터는 그대로", async () => {
+test("새 장면(new) 블록: 앞 그림의 장면 칸·인물별 칸이 남지 않고, 캐릭터와 이번 빼는 것은 그대로", async () => {
   const { p, errs, data, ask } = await open({ settings: { aiKey: "x", model: "nai-diffusion-4-5-full" }, draft: { slots: { ...slots, rest: "rain, umbrella" }, neg: "earrings", chars: [{ id: "c1", text: "girl, old char", neg: "", pos: null }] } },
     "아예 다른 그림.\n```scene\nnew\noutfit: swimsuit\npose: running\n```");
   await ask("해변에서 뛰는 그림으로 새로");
@@ -274,7 +274,7 @@ test("새 장면(new) 블록: 앞 그림의 장면 칸·이번 빼는 것·인�
   await p.click('.qreply [data-kind="scene"]'); await p.waitForTimeout(200);
   const d = (await data()).draft;
   assert.equal(d.slots.outfit, "swimsuit"); assert.equal(d.slots.pose, "running"); assert.equal(d.slots.bg, ""); assert.equal(d.slots.rest, "");
-  assert.equal(d.neg, ""); assert.equal(d.chars.length, 0); assert.equal(d.slots.traits, "blonde hair, red eyes");
+  assert.equal(d.neg, "earrings"); assert.equal(d.chars.length, 0); assert.equal(d.slots.traits, "blonde hair, red eyes");
   assert.deepEqual(errs, []); await p.close();
 });
 test("인물 금지 태그: 켜 둔 인물의 neg가 ‘이번 빼는 것’이 비워져도(새 장면·빼는 것 블록) 뽑을 때 같이 간다", async () => {
@@ -360,5 +360,33 @@ test("뽑기 화면 비서: 답은 그림 바로 아래에 마지막 답 하나�
   await p.locator('.tool[data-tool="ai"]').click(); await p.waitForTimeout(200);
   const msgs = await p.locator('[data-toolbody="ai"] .msg').allInnerTexts();
   assert.equal(msgs.length, 1, msgs.join("|")); assert.match(msgs[0], /새 답/);
+  assert.deepEqual(errs, []); await p.close();
+});
+
+test("프롬프트 접기: 프롬프트 칸은 제목 한 줄만 남고, 그림 아래 비서 답의 블록도 접었다 펼 수 있고 다시 열어도 그대로", async () => {
+  const { p, errs, ask, data } = await open({ settings: { aiKey: "x" } }, "바꿈\n```scene\npose: sitting, crossed legs\n```");
+  await p.click('[data-pfold="1"]'); await p.waitForTimeout(200);
+  assert.equal(await p.locator(".pfold").count(), 0); assert.equal(await p.locator("#slot-pose").count(), 0);
+  assert.equal(await p.locator('.phead [data-pfold="0"]').count(), 1);
+  await ask("앉게");
+  assert.equal(await p.locator(".qreply pre").isVisible(), true);
+  await p.click(".qreply [data-qfold]"); await p.waitForTimeout(200);
+  assert.equal(await p.locator(".qreply pre").count(), 0);
+  assert.equal(await p.locator('.qreply [data-kind="scene"]').count(), 1); // 넣기 버튼은 접어도 남음
+  assert.equal((await data()).settings.foldReply, true);
+  await p.reload(); await p.waitForTimeout(900);
+  assert.equal(await p.locator(".pfold").count(), 0); assert.equal(await p.locator('.phead [data-pfold="0"]').count(), 1);
+  await p.click(".qreply [data-qfold]").catch(() => {}); // 다시 열면 답은 닫혀 있을 수 있음
+  assert.deepEqual(errs, []); await p.close();
+});
+
+test("이번 빼는 것 유지: 비서의 빼는 것 블록은 더하기만 하고, 장면에 새로 넣은 태그와 부딪치는 것만 빠진다", async () => {
+  let n = 0;
+  const { p, errs, data, ask } = await open({ settings: { aiKey: "x" }, draft: { slots, neg: "earrings, long hair, hat" } },
+    () => (++n === 1 ? "```negative\nblurry\n```" : "```scene\noutfit: hat, sundress\n```"));
+  await ask("흐림 빼"); await p.click('.qreply [data-kind="negative"]'); await p.waitForTimeout(200);
+  assert.equal((await data()).draft.neg, "earrings, long hair, hat, blurry");
+  await ask("모자"); await p.click('.qreply [data-kind="scene"]'); await p.waitForTimeout(200);
+  assert.equal((await data()).draft.neg, "earrings, long hair, blurry"); // 장면에 넣은 hat만 빠짐
   assert.deepEqual(errs, []); await p.close();
 });
