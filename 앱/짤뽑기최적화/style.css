@@ -38,7 +38,7 @@ body::before {
   height: calc(var(--bar) + env(safe-area-inset-top));
   padding: env(safe-area-inset-top) 16px 0;
   display: flex; align-items: center; gap: 8px;
-  background: color-mix(in srgb, var(--bg) 97%, transparent);
+  background: var(--bg); /* 2026-11-28 97%였을 때 뒤 글이 비쳐 보임 */
   border-bottom: 1px solid color-mix(in srgb, var(--gold) 35%, transparent);
 }
 .bar h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: .04em; color: var(--gold); }
@@ -56,7 +56,7 @@ main {
   position: fixed; inset: auto 0 0 0; z-index: 10;
   display: grid; grid-template-columns: repeat(4, 1fr);
   padding-bottom: env(safe-area-inset-bottom);
-  background: color-mix(in srgb, var(--bg) 97%, transparent);
+  background: var(--bg); /* 2026-11-28 97%였을 때 뒤 글이 비쳐 보임 */
   border-top: 1px solid var(--line);
 }
 .tabs a {
@@ -371,9 +371,9 @@ button.ghost.danger { color: var(--danger); background: var(--card); }
 .result { margin: 10px 0 0; }
 .result img { max-height: 70dvh; object-fit: contain; border: 1px solid color-mix(in srgb, var(--gold) 30%, transparent); }
 .gobar {
-  position: sticky; z-index: 5; bottom: calc(var(--tabs) + env(safe-area-inset-bottom) + 10px);
-  margin-top: 14px; padding-top: 8px;
-  background: linear-gradient(to top, var(--bg) 60%, transparent);
+  position: sticky; z-index: 5; bottom: calc(var(--tabs) + env(safe-area-inset-bottom)); /* 2026-11-28 버튼과 탭 사이 10px 틈으로 뒤 글이 비쳐서, 틈을 바탕으로 채움 */
+  margin-top: 14px; padding: 18px 0 10px;
+  background: linear-gradient(to top, var(--bg) 75%, transparent);
 }
 .gobar button { width: 100%; }
 .gobar #go { box-shadow: 0 6px 20px rgba(168, 32, 58, .35); }
